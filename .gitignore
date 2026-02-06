@@ -5,3 +5,5 @@
 !.gitignore
 !setup.py
 !agnostic_agent/
+!streamlit_app.py
+!.streamlit/
