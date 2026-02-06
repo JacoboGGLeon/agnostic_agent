@@ -34,6 +34,12 @@ class BaseAgentInput(BaseModel):
     
     # Datos extra arbitrarios (flags, override de config, etc.)
     extra_data: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Alias
+    user_prompt: Optional[str] = None
+    user_text: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    kb_names: List[str] = Field(default_factory=list)
 
 
 # Alias principal para uso en firmas
@@ -41,17 +47,70 @@ AgentInput = BaseAgentInput
 
 
 # ─────────────────────────────────────────────
-# OUTPUT
+# RUNS (Trazas de herramientas)
+# ─────────────────────────────────────────────
+
+class ToolRun(BaseModel):
+    """
+    Representa la ejecución de una herramienta.
+    Normalizado para las vistas.
+    """
+    id: str
+    name: str
+    args: Dict[str, Any]
+    output: Any
+
+
+class AgentSummary(BaseModel):
+    """
+    Resumen estructurado del pipeline:
+
+      ANALYZER → PLANNER → EXECUTOR → CATCHER → VALIDATOR → MEMORY → SUMMARIZER
+    """
+    analyzer: str = ""
+    planner: str = ""
+    executor: str = ""
+    catcher: str = ""
+    validator: str = ""   # nuevo nodo explícito
+    memory: str = ""      # resumen de escritura/uso de memoria
+    summarizer: str = ""
+    final_answer: str = ""
+
+
+# ─────────────────────────────────────────────
+# VISTAS POR ROL
 # ─────────────────────────────────────────────
 
 class AgentView(BaseModel):
     """
-    Representa una 'vista' de la respuesta del agente.
-    Puede ser 'raw' (dev), 'deep' (técnico) o 'user' (final).
+    Vista del agente para un "rol" (dev / deep / user).
+
+    - final_answer: texto final para ese rol.
+    - summary: breakdown interno del pipeline.
+    - tool_runs: ejecuciones de tools (ya normalizadas).
+    - raw_state: estado crudo del grafo (según rol, puede ir vacío).
     """
-    content: str
+    final_answer: str = ""
+    summary: Optional[AgentSummary] = None
+    tool_runs: List[ToolRun] = Field(default_factory=list)
+    raw_state: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Compatibilidad con código previo que usaba content/metadata
+    content: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    def __init__(self, **data):
+        # Fallback simple: si viene 'content', lo movemos a final_answer si está vacío
+        if "content" in data and "final_answer" not in data:
+            data["final_answer"] = data["content"]
+        super().__init__(**data)
+        if not self.content and self.final_answer:
+            self.content = self.final_answer
+
+
+# ─────────────────────────────────────────────
+# OUTPUT UNIFICADO
+# ─────────────────────────────────────────────
 
 class AgentOutput(BaseModel):
     """
