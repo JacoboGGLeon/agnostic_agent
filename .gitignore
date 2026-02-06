@@ -5,5 +5,10 @@
 !.gitignore
 !setup.py
 !agnostic_agent/
+
+# Re-ignore pycache inside the whitelisted directory
+agnostic_agent/__pycache__/
+__pycache__/
+*.py[cod]
 !streamlit_app.py
 !.streamlit/
