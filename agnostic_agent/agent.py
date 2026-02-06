@@ -13,7 +13,7 @@ from langchain_core.messages import (
 )
 
 from .capabilities import PlannerConfig, build_planner_llm
-from .logic import load_logic, State
+from .logic import load_logic, AgentState as State
 from .communication import (
     AgentInput,
     AgentOutput,
