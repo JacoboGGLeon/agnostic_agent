@@ -8,7 +8,7 @@ output_file = "[TEMPLATE][v0_18][AGNOSTIC_AGENT][Stack__QWEN].ipynb"
 # CELL CONTENT DEFINITIONS
 # ---------------------------------------------------------
 
-# 1. INSTALL CELL (V5 - Idempotent)
+# 1. INSTALL CELL (V7 - Force Update)
 new_install_source = [
     "# ============================================================\n",
     "# @title INSTALL – Agnostic Agent (GitHub) + Infra Qwen3\n",
@@ -26,14 +26,19 @@ new_install_source = [
     "        print(f\"📦 Installing {package_name}...\")\n",
     "        subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", \"-q\", package_name])\n",
     "\n",
-    "# 1. SUPER CLEANUP (Only if not already installed correctly)\n",
-    "if not os.path.exists(\"repo_agnostic\"):\n",
+    "# 1. SUPER CLEANUP & UPDATE\n",
+    "if os.path.exists(\"repo_agnostic\"):\n",
+    "    print(\"🔄 Repo exists. Pulling latest changes...\")\n",
+    "    os.system(\"cd repo_agnostic && git pull\")\n",
+    "else:\n",
     "    print(\"🧹 Cleaning up shadowing folders...\")\n",
     "    os.system(\"rm -rf agnostic_agent repo_agnostic\")\n",
     "    print(\"📥 Cloning repo...\")\n",
     "    os.system(\"git clone https://github.com/JacoboGGLeon/agnostic_agent.git repo_agnostic\")\n",
-    "    print(\"🛠 Installing agnostic_agent package...\")\n",
-    "    os.system(\"pip install -q -e repo_agnostic\")\n",
+    "\n",
+    "# Always reinstall editable to be sure (fast/idempotent usually)\n",
+    "print(\"🛠 Updating package install...\")\n",
+    "os.system(\"pip install -q -e repo_agnostic\")\n",
     "\n",
     "# 2. FIX PATH\n",
     "pkg_path = os.path.abspath(\"repo_agnostic\")\n",
@@ -112,22 +117,20 @@ for cell in nb.get("cells", []):
     
     # INSTALL CELL
     if "@title INSTALL" in source_text:
-        print("Build: Injection of Cleanup + Install logic...")
+        print("Build: Injection of Cleanup + Update + Install logic...")
         cell["source"] = new_install_source
         new_cells.append(cell)
         continue
 
     # REMOVE SHADOWING CELLS (mkdir or writefile agnostic_agent/)
     if "%%writefile agnostic_agent/" in source_text or "!mkdir -p agnostic_agent" in source_text:
-        print(f"Build: Removing shadowing cell ({len(source_text)} chars)")
+        # print(f"Build: Removing shadowing cell ({len(source_text)} chars)")
         continue
 
     # STREAMLIT APP -> COPY FROM GIT
-    # Check for title OR %%writefile
     if "#@title streamlit_app.py" in source_text or "%%writefile streamlit_app.py" in source_text:
         print("Build: Replacing streamlit_app.py writefile with Git Copy logic...")
         cell["source"] = new_app_source
-        # Remove output if any, to be clean
         cell["outputs"] = []
         new_cells.append(cell)
         continue
