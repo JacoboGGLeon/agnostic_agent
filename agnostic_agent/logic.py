@@ -25,7 +25,7 @@ from langchain_core.messages import (
     SystemMessage,
     AnyMessage,
 )
-from langchain_core.Runnable import Runnable
+from langchain_core.runnables import Runnable
 
 from .schemas import (
     AgentState,
