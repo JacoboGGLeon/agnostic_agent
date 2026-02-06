@@ -2,13 +2,13 @@ from __future__ import annotations
 
 """
 Lógica principal (grafo LangGraph) del Agnostic Deep Agent.
-Refactorizado para Arquitectura de Árbol de Tareas (Task Tree).
+Refactorizado para Arquitectura de Árbol de Tareas (Task Tree) y Reporte Detallado (v17 style).
 
 Sub-grafos:
 - ANALYZER  → LLM (JSON) → Propositions.
 - PLANNER   → LLM (JSON) → Task Tree (DAG).
 - EXECUTOR  → Recorre el DAG, resuelve dependencias y ejecuta tools.
-- SUMMARIZER→ Genera respuesta final basada en el estado del árbol.
+- SUMMARIZER→ Genera respuesta final basada en el estado del árbol y construye reportes (dev/deep).
 - VALIDATOR → Revisa cobertura.
 """
 
@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 import json
 import uuid
 import re
+import os
 
 from typing_extensions import TypedDict
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ from .prompts import (
     build_validator_system_message
 )
 from .capabilities import PlannerConfig, build_planner_system_message
+from .communication import ToolRun # Import ToolRun for strict typing in state
 
 
 # ─────────────────────────────────────────────
@@ -100,6 +102,296 @@ def _get_tool_description(tool: Any) -> str:
     args = getattr(tool, "args", {})
     return f"- {name}: {desc}. Args: {args}"
 
+def _load_prepositions_content() -> str:
+    """Carga el contenido de prepositions.txt si existe para inyectarlo en el Analyzer."""
+    # Asumimos que prepositions.txt está en la raíz del repo/proyecto, o cerca.
+    # Ajustar ruta según necesidad.
+    possible_paths = [
+        "prepositions.txt", 
+        "../prepositions.txt",
+        os.path.join(os.path.dirname(__file__), "..", "prepositions.txt")
+    ]
+    
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+    return ""
+
+
+# ─────────────────────────────────────────────
+# Reporting Helpers (v17 style)
+# ─────────────────────────────────────────────
+
+def _fmt_args(args: Any) -> str:
+    try:
+        return json.dumps(args, ensure_ascii=False)
+    except Exception:
+        return str(args)
+
+def _fmt_output(name: str, val: Any) -> str:
+    if name in ("embed_texts", "embed_context_tables"):
+         if isinstance(val, list):
+             return f"<List of {len(val)} embeddings>"
+         if isinstance(val, dict):
+             # embed_context_tables retorna dict con metadata
+             return f"<Embedding Summary: {val.get('embedding_dim', '?')} dims>"
+    
+    # Para JSONs complejos
+    if isinstance(val, (dict, list)):
+        try:
+            return json.dumps(val, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(val)
+    return str(val)
+
+def summarize_tool_runs(runs: List[Dict[str, Any]]) -> str:
+    """
+    Resumen user-friendly basado SOLO en las salidas de herramientas.
+    """
+    if not runs:
+        return (
+            "No se invocó ninguna herramienta. "
+            "No puedo responder con garantías a la pregunta sólo con razonamiento interno."
+        )
+
+    partes = [
+        "📌 **Resumen basado en herramientas (sin alucinaciones)**",
+    ]
+
+    for r in runs:
+        arg_str = _fmt_args(r.get("args"))
+        out_str = _fmt_output(r["name"], r.get("output"))
+
+        # Tools visualmente ricas o complejas se muestran preformateadas
+        if r["name"] in (
+            "embed_texts",
+            "rerank_qwen3",
+            "embed_context_tables",
+            "semantic_search_in_csv",
+            "judge_row_with_context",
+        ):
+            partes.append(
+                f"- `{r['name']}({arg_str})`:\\n\\n```json\\n{out_str}\\n```"
+            )
+        else:
+            partes.append(
+                f"- `{r['name']}({arg_str})` → **{out_str}**"
+            )
+
+    return "\\n".join(partes)
+
+def build_user_answer(runs: List[Dict[str, Any]]) -> str:
+    """
+    Construye la respuesta 1:1 en lenguaje natural para el modo USER,
+    usando EXCLUSIVAMENTE lo que viene en `runs`.
+    """
+    if not runs:
+        return ""
+
+    sentences: List[str] = []
+
+    # 1) Reranker
+    rr = next((r for r in runs if r.get("name") == "rerank_qwen3"), None)
+    if rr is not None:
+        out = rr.get("output")
+        args = rr.get("args", {}) or {}
+        docs = args.get("documents") or []
+
+        if isinstance(out, list) and out:
+            best = out[0]
+            idx = best.get("index", 0)
+            doc = best.get("document")
+            score = best.get("score")
+
+            # Recuperar doc original si hace falta
+            if doc is None and isinstance(docs, list) and isinstance(idx, int) and 0 <= idx < len(docs):
+                doc = docs[idx]
+
+            idx_h = idx + 1 if isinstance(idx, int) else idx
+
+            if doc is not None:
+                if isinstance(score, (int, float)):
+                    sentences.append(
+                        f"El documento más relevante es el #{idx_h}: \"{doc}\" "
+                        f"(score ≈ {score:.3f})."
+                    )
+                else:
+                    sentences.append(
+                        f"El documento más relevante es el #{idx_h}: \"{doc}\"."
+                    )
+
+    # 2) to_upper
+    for r in runs:
+        if r.get("name") == "to_upper":
+            txt = r.get("args", {}).get("text")
+            out = r.get("output")
+            if txt is not None and out is not None:
+                sentences.append(f"He convertido \"{txt}\" a mayúsculas: **{out}**.")
+
+    # 3) is_palindrome
+    for r in runs:
+        if r.get("name") == "is_palindrome":
+            txt = r.get("args", {}).get("text")
+            val = r.get("output")
+            if txt:
+                if bool(val):
+                    sentences.append(f"\"{txt}\" es un palíndromo.")
+                else:
+                    sentences.append(f"\"{txt}\" no es un palíndromo.")
+
+    # 4) word_count
+    for r in runs:
+        if r.get("name") == "word_count":
+            txt = r.get("args", {}).get("text")
+            n = r.get("output")
+            if txt is not None and n is not None:
+                sentences.append(f"El texto \"{txt}\" tiene {n} palabras.")
+
+    # 5) judge_row_with_context
+    for r in runs:
+        if r.get("name") == "judge_row_with_context":
+            args = r.get("args", {}) or {}
+            out = r.get("output") or {}
+
+            contract_id = (
+                out.get("contract_id")
+                or out.get("row_id")
+                or out.get("id")
+                or args.get("contract_id")
+            )
+            judgement = out.get("judgement")
+            reasons = out.get("reasons")
+
+            if isinstance(reasons, list):
+                reasons_str = "; ".join(map(str, reasons[:3]))
+            else:
+                reasons_str = str(reasons) if reasons is not None else ""
+
+            if contract_id is not None and judgement is not None:
+                sent = (
+                    f"He evaluado la fila/contrato '{contract_id}' aplicando las tablas de parametrías "
+                    f"y diccionarios de contexto. El juicio es: **{judgement}**."
+                )
+                if reasons_str:
+                    sent += f" Motivos principales: {reasons_str}."
+                sentences.append(sent)
+            elif judgement is not None:
+                sent = (
+                    f"He evaluado la fila de atributos con las tablas de contexto; "
+                    f"el juicio global es: **{judgement}**."
+                )
+                if reasons_str:
+                    sent += f" Motivos principales: {reasons_str}."
+                sentences.append(sent)
+
+    # 6) semantic_search
+    # (Se puede añadir lógica similar si se desea)
+
+    if not sentences:
+        # Fallback: dejamos vacío para que decida el llamador
+        return ""
+
+    return " ".join(sentences)
+
+# ---------------------------------------------------------
+# SUMMARIZER NODE (Module Level)
+# ---------------------------------------------------------
+
+def summarizer_node(state: AgentState) -> Dict[str, Any]:
+    plan = state.get("planner_plan")
+    intent = state.get("analyzer_intent")
+    
+    # Recopilar runs explícitos de tareas de tools
+    tool_runs_list = []
+    if plan and plan.tasks:
+        for task in plan.tasks:
+            if task.tool_name and task.status == TaskStatus.COMPLETED:
+                tool_runs_list.append({
+                    "name": task.tool_name,
+                    "args": task.tool_args,
+                    "output": task.result,
+                    "id": task.id
+                })
+    
+    # 1. ANALYZER TXT
+    analyzer_txt = (
+        f"Input Payload: {{'user_prompt': '{state.get('user_prompt')}'}}\\n"
+        f"Lógica proposicional: {intent.logic_form}\\n"
+        f"Proposiciones ({len(intent.propositions)}):\\n"
+    )
+    for p in intent.propositions:
+        analyzer_txt += f"- [{p.id}] {p.text}\\n"
+
+    # 2. PLANNER TXT
+    planner_txt = (
+        f"Rationale: {plan.rationale}\\n"
+        "Plan Tareas:\\n"
+    )
+    if plan and plan.tasks:
+        for t in plan.tasks:
+            planner_txt += f"- [{t.id}] {t.instruction} (Tool: {t.tool_name or 'Logic'})\\n"
+
+    # 3. EXECUTOR TXT
+    executor_txt = ""
+    if tool_runs_list:
+        executor_txt = f"Se ejecutaron {len(tool_runs_list)} llamadas a herramientas:\\n"
+        for r in tool_runs_list:
+            executor_txt += f"- {r['name']} args={_fmt_args(r['args'])}\\n"
+    else:
+        executor_txt = "No se ejecutó ninguna herramienta (solo lógica interna o passthrough).\\n"
+
+    # 4. SUMMARIZER (Tool-based)
+    summarizer_txt = summarize_tool_runs(tool_runs_list)
+
+    # 5. USER ANSWER (Canonical)
+    user_answer = build_user_answer(tool_runs_list)
+    if not user_answer:
+        # Fallback al resumen de tools si no hay respuesta 1:1 amigable
+        user_answer = summarizer_txt
+
+    # Construir Markdown Reports
+    
+    # DEV OUT
+    dev_out = "\\n\\n".join([
+        "## Resumen del pipeline (DEV)",
+        "### ANALYZER",
+        analyzer_txt,
+        "### PLANNER",
+        planner_txt,
+        "### EXECUTOR",
+        executor_txt,
+        "### SUMMARIZER (basado en herramientas)",
+        summarizer_txt,
+        "### RESPUESTA FINAL (modo usuario)",
+        user_answer
+    ])
+
+    # DEEP OUT (similar, un poco más limpio)
+    deep_out = "\\n\\n".join([
+        "## Resumen deep del pipeline",
+        "### ANALYZER",
+        analyzer_txt,
+        "### PLANNER",
+        planner_txt,
+        "### EXECUTOR",
+        executor_txt,
+        "### SUMMARIZER",
+        summarizer_txt,
+        "### RESPUESTA FINAL",
+        user_answer
+    ])
+
+    return {
+        "user_out": user_answer,
+        "dev_out": dev_out,
+        "deep_out": deep_out,
+        "tool_runs": [ToolRun(id=str(r["id"]), name=r["name"], args=r["args"], output=r["output"]) for r in tool_runs_list]
+    }
+
 
 # ─────────────────────────────────────────────
 # Nodos del Grafo
@@ -117,9 +409,16 @@ def build_graph_agent(
     def analyzer_node(state: AgentState) -> Dict[str, Any]:
         user_prompt = state.get("user_prompt", "")
         
+        # Cargar preposiciones (contexto lógico extra)
+        prepositions_txt = _load_prepositions_content()
+        
+        system_content = ANALYZER_SYSTEM_PROMPT
+        if prepositions_txt:
+            system_content += f"\\n\\nCONTEXTO ADICIONAL (Preposiciones y Lógica):\\n{prepositions_txt}"
+
         # Invocamos al LLM con el prompt de Analyzer
         messages = [
-            SystemMessage(content=ANALYZER_SYSTEM_PROMPT),
+            SystemMessage(content=system_content),
             HumanMessage(content=f"User Prompt: {user_prompt}")
         ]
         
@@ -145,7 +444,7 @@ def build_graph_agent(
     # ---------------------------------------------------------
     def planner_node(state: AgentState) -> Dict[str, Any]:
         intent = state.get("analyzer_intent")
-        tools_desc = "\n".join([_get_tool_description(t) for t in tools])
+        tools_desc = "\\n".join([_get_tool_description(t) for t in tools])
         
         input_data = {
             "propositions": [p.dict() for p in intent.propositions],
@@ -180,10 +479,6 @@ def build_graph_agent(
         step_results = state.get("step_results", {})
         
         # Identificar tareas ejecutables
-        # Una tarea es ejecutable si:
-        # 1. Estado es PENDING
-        # 2. Todas sus dependencias están en step_results (o completadas)
-        
         runnable_tasks = []
         for task in plan.tasks:
             if task.status == TaskStatus.PENDING:
@@ -192,20 +487,17 @@ def build_graph_agent(
                     runnable_tasks.append(task)
         
         if not runnable_tasks:
-            return {} # Nada que hacer en esta vuelta
+            return {} 
 
-        # Ejecutar tareas (secuencialmente por ahora por simplicidad, podría ser paralelo)
+        # Ejecutar tareas
         for task in runnable_tasks:
             task.status = TaskStatus.RUNNING
             
-            # Resolver tool
             if task.tool_name:
                 tool = next((t for t in tools if t.name == task.tool_name), None)
                 if tool:
                     try:
-                        # Resolver argumentos
                         final_args = _resolve_args(task.tool_args, step_results)
-                        # Ejecutar
                         result = tool.invoke(final_args)
                         
                         task.result = result
@@ -215,21 +507,17 @@ def build_graph_agent(
                     except Exception as e:
                         task.error = str(e)
                         task.status = TaskStatus.FAILED
-                        # Opcional: Fail fast o continuar? Continuamos.
                 else:
                     task.error = f"Tool '{task.tool_name}' not found."
                     task.status = TaskStatus.FAILED
             else:
-                # Tarea sin tool (lógica, razonamiento puro)
-                # La marcamos completada, resultado es su instrucción/thought?
-                # O quizás requerimos intervención del LLM?
-                # Por ahora, asumimos que es 'passthrough' o hecha.
+                # Tarea sin tool
                 task.result = "Executed logic/reasoning step."
                 task.status = TaskStatus.COMPLETED
                 step_results[task.id] = task.result
 
         return {
-            "planner_plan": plan, # Actualiza el estado de las tareas
+            "planner_plan": plan,
             "step_results": step_results
         }
 
@@ -238,13 +526,8 @@ def build_graph_agent(
     # ---------------------------------------------------------
     def should_continue(state: AgentState) -> str:
         plan = state.get("planner_plan")
-        
-        # Verificar si quedan tareas pendientes
         pending = [t for t in plan.tasks if t.status == TaskStatus.PENDING]
         
-        # Verificar si falló todo o si hay progreso posible
-        # Si hay pendientes pero sus dependencias fallaron, estamos en deadlock.
-        # Check deadlock:
         runnable = False
         step_results = state.get("step_results", {})
         for task in pending:
@@ -253,44 +536,14 @@ def build_graph_agent(
                  break
         
         if pending and runnable:
-            return "executor" # Volver a ejecutar
+            return "executor"
         
-        return "summarizer" # Terminamos (o deadlock)
-
-    # ---------------------------------------------------------
-    # SUMMARIZER NODE
-    # ---------------------------------------------------------
-    def summarizer_node(state: AgentState) -> Dict[str, Any]:
-        plan = state.get("planner_plan")
-        intent = state.get("analyzer_intent")
-        
-        # Construir contexto para el LLM sumarizador
-        context_str = f"Objetivo: {intent.main_objective}\n\nEjecución:\n"
-        for task in plan.tasks:
-            status_icon = "✅" if task.status == TaskStatus.COMPLETED else "❌" if task.status == TaskStatus.FAILED else "⏳"
-            context_str += f"{status_icon} [{task.id}] {task.instruction}\n"
-            if task.result:
-                context_str += f"   Resultado: {str(task.result)[:500]}\n" # Truncar resultados largos
-            if task.error:
-                context_str += f"   Error: {task.error}\n"
-
-        # Prompt simple para respuesta final (podríamos usar los de prompts.py adaptados)
-        sys_msg = build_summarizer_system_message("user")
-        msgs = [
-            sys_msg,
-            HumanMessage(content=f"Genera la respuesta final basada en esta ejecución:\n{context_str}")
-        ]
-        
-        response = planner_llm.invoke(msgs)
-        final_text = response.content if hasattr(response, "content") else str(response)
-        
-        return {"user_out": final_text}
+        return "summarizer"
 
     # ---------------------------------------------------------
     # VALIDATOR NODE
     # ---------------------------------------------------------
     def validator_node(state: AgentState) -> Dict[str, Any]:
-        # Implementación simple por ahora
         return {"validation": ValidationResult(all_covered=True)}
 
     # ---------------------------------------------------------
@@ -335,7 +588,4 @@ def load_logic(
     planner_config: Optional[PlannerConfig] = None,
     logic_config: Optional[LogicConfig] = None,
 ) -> Any:
-    # (Mantener implementación original de carga dinámica si se desea, 
-    #  o simplificar llamando directo a build_graph_agent)
-    cfg = logic_config or LogicConfig()
     return build_graph_agent(planner_llm, tools, planner_config)
