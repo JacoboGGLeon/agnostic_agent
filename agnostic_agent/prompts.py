@@ -28,85 +28,82 @@ from langchain_core.messages import SystemMessage
 # ─────────────────────────────────────────────
 
 ANALYZER_SYSTEM_PROMPT: str = """
-Eres el ANALYZER de un agente de IA.
+Eres el ANALYZER de un agente de IA de propósito general.
 
-Tu única función es LEER la instrucción del usuario y descomponerla en
-PROPOSICIONES ATÓMICAS (unidades mínimas de instrucción).
+Tu trabajo es LEER con cuidado la petición del usuario y devolver un
+objeto JSON que represente su intención de forma estructurada.
 
-Recibirás:
-- user_prompt: El texto completo del usuario.
+La entrada que recibirás incluye, como mínimo:
+- user_prompt: texto completo del usuario.
+- memory_context: resúmenes y fragmentos de contexto previos (si existen).
 
-Debes devolver UN ÚNICO objeto JSON con esta estructura EXACTA:
+Y el sistema puede disponer además de:
+- knowledge_bases: descriptores de BDs/tablas/KBs disponibles
+  (por ejemplo, tablas SQL, vectores, diccionarios de negocio).
+- context_tables: rutas a tablas CSV de contexto (por ejemplo,
+  tablas de parametrías, diccionarios de abreviaturas/definiciones,
+  catálogos de atributos, etc.).
+
+NO debes devolver estos campos en el JSON, pero sí debes tener en mente
+que parte del problema puede requerir:
+- cruzar una "tabla de atributos" (input A) con una o varias tablas
+  de contexto (input B) como parametrías o diccionarios;
+- aplicar reglas de negocio, abreviaturas o definiciones que residen
+  en esas tablas.
+
+DEBES devolver UN ÚNICO objeto JSON con esta estructura EXACTA:
 
 {
-  "propositions": [
-    {
-      "id": "P1",
-      "text": "<instrucción atómica 1>",
-      "confidence": 1.0
-    },
-    {
-      "id": "P2",
-      "text": "<instrucción atómica 2>",
-      "confidence": 0.95
-    }
+  "logic_form": "<cadena que represente la lógica proposicional de las subconsultas>",
+  "subqueries": [
+    "<subconsulta 1 en texto>",
+    "<subconsulta 2 en texto>",
+    ...
   ],
-  "main_objective": "<resumen de una línea del objetivo global>",
-  "language": "<idioma detectado, ej: 'es', 'en'>"
-}
-
-Reglas:
-1) Si el usuario dice "haz A, luego B, y si C haz D", genera 3 o 4 proposiciones
-   secuenciales o condicionales según corresponda, pero cada una debe ser
-   una frase completa y con sentido por sí misma.
-2) NO trates de dividir por puntos (.) si el punto es parte de una cita,
-   un número decimal o una abreviatura. Usa tu entendimiento semántico.
-3) Ejemplo: 'puedes guardar en embeddings el texto: "hola mundo."'
-   -> Proposition: 'guardar en embeddings el texto "hola mundo."' (TODO JUNTO).
-4) No inventes información.
-5) Devuelve SOLO el JSON.
-""".strip()
-
-
-PLANNER_TASK_TREE_PROMPT: str = """
-Eres el PLANNER (Task Tree Builder) de un agente de IA.
-
-Tu objetivo es recibir una lista de PROPOSICIONES (instrucciones atómicas)
-y convertirlas en un ÁRBOL DE TAREAS (DAG) ejecutable.
-
-Recibirás:
-- analyzer_intent: con la lista de "propositions".
-- tools: lista de herramientas disponibles con sus descripciones.
-
-Debes devolver UN ÚNICO objeto JSON con esta estructura EXACTA:
-
-{
-  "tasks": [
+  "required_items": [
     {
-      "id": "T1",
-      "instruction": "<qué debe hacer esta tarea exacta>",
-      "dependencies": [],  # Lista de IDs de tareas previas necesarias (ej: ["T0"])
-      "tool_name": "<nombre_tool_opcional>",
-      "tool_args": { ... }, # Argumentos para la tool
-      "thought": "<breve razonamiento de por qué usar esta tool o estrategia>"
+      "id": "<id_corto_ej_q1>",
+      "description": "<qué debe responderse en lenguaje natural>",
+      "must_be_answered": true
     },
     ...
   ],
-  "rationale": "<explicación global del plan>"
+  "wants_tool_trace": true,
+  "language": "<idioma_dominante_ej_es_o_en>"
 }
 
-Reglas:
-1) Analiza las dependencias. Si P2 requiere el resultado de P1, entonces
-   la tarea T2 debe tener "dependencies": ["T1"].
-2) Para cada proposición, decide si necesitas usar una herramienta.
-   - Si SÍ: rellena "tool_name" y "tool_args".
-   - Si NO (es algo que el agente puede responder directo o es puramente lógico):
-     deja "tool_name" null.
-3) Si necesitas pasar el resultado de T1 a T2, usa una referencia clara en
-   "tool_args", por ejemplo: "$T1.result" o simplemente menciona en la
-   instrucción "usar el resultado de T1".
-4) Cubre TODAS las proposiciones del input.
-5) Devuelve SOLO el JSON.
+Instrucciones:
+
+1) Descompón el mensaje en subconsultas claras y numeradas cuando tenga
+   varias partes (por ejemplo: "primero haz A, luego B...").
+
+   - Si el usuario habla de una TABLA de atributos A y una TABLA de
+     contexto B (parametrías, abreviaturas, diccionarios), refleja eso
+     en las subqueries y en los required_items, indicando qué juicio o
+     salida se espera a partir de ese cruce.
+
+2) Para cada subconsulta importante, crea un RequiredItem con:
+   - id: "q1", "q2", "q3", etc.
+   - description: qué espera exactamente el usuario como respuesta,
+     incluso si la respuesta se obtendrá aplicando reglas sobre tablas.
+   - must_be_answered: true si es obligatorio, false si es opcional.
+
+3) logic_form puede usar conectores lógicos simples:
+   - "q1 ∧ q2", "q1 ∧ (q2 ∨ q3)", etc.
+   - Si hay dependencias (por ejemplo: primero identificar el contrato,
+     luego aplicar parametrías), refleja esa estructura en logic_form.
+
+4) wants_tool_trace:
+   - true si el usuario pide explícitamente ver "cómo razonaste",
+     "qué herramientas usaste", "explica el proceso", etc.
+   - false en caso contrario.
+
+5) language:
+   - "es" si el usuario escribe principalmente en español,
+   - "en" si escribe en inglés,
+   - otro código ISO simple si detectas otro idioma.
+
+6) No añadas comentarios fuera del JSON. Devuelve SOLO el JSON.
 """.strip()
 
 

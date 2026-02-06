@@ -1,107 +1,41 @@
 from __future__ import annotations
 
 """
-Contexto externo y Knowledge Bases para el Agnostic Deep Agent 2026.
+Gestión del CONTEXTO para el Agnostic Deep Agent 2026.
 
-Este módulo define:
-- KnowledgeBase: descriptor ligero de una KB (faostat, sql, vector, api, etc.).
-- get_default_context(): lista base de KBs disponibles (opcionalmente desde setup.yaml).
-- get_kb_by_names(): helper para filtrar KBs según AgentInput.kb_names.
-- build_kb_from_paths(): helper para crear KBs a partir de rutas (CSV, SQLite, etc.).
-- build_kb_from_setup(): helper para mapear la sección `knowledge_bases`
-  de setup.yaml a objetos KnowledgeBase.
-
-Casos típicos:
-- kind="sqlite"      → BD tabular (SQLite clásica).
-- kind="sqlite-vec"  → VDB vectorial sobre sqlite-vec.
-- kind="table"       → tabla externa (CSV, parquet) tratada como KB tabular.
+Define:
+- KnowledgeBase: dataclass con la info de una fuente de conocimiento.
+- get_default_context: recupera KBs por defecto o desde un dict (setup.yaml).
+- Helpers para filtrar y construir KBs.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Iterable
-from pathlib import Path
-
-
-__all__ = [
-    "KnowledgeBase",
-    "build_kb_from_paths",
-    "build_kb_from_setup",
-    "get_default_context",
-    "get_kb_by_names",
-]
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
 
 
 @dataclass
 class KnowledgeBase:
     """
-    Descriptor simple de una KB tabular/vectorial/etc.
-
-    - name: identificador único de la KB (ej. 'FAOSTAT_WORLD').
-    - kind: tipo de backend (ej. 'sqlite', 'sqlite-vec', 'table', 'api', ...).
-    - config: parámetros para conectar (rutas, DSNs, tablas, índices, etc.).
-
-      Convenciones suaves para `config` (no obligatorias, pero recomendadas):
-      - "path": ruta a archivo o DB (CSV, .db, parquet, etc.).
-      - "table": nombre de tabla (si aplica, p.ej. en SQLite).
-      - "role": rol lógico ('param_table', 'rules_table', 'dictionary', ...).
+    Representa una fuente de conocimiento disponible para el agente.
     """
-    name: str
-    kind: str = "generic"
-    config: Dict[str, Any] = field(default_factory=dict)
+    name: str                # ID único (ej. "PARAM_TABLE", "FAOSTAT_DB")
+    kind: str                # Tipo (ej. "table", "sqlite", "sqlite-vec", "generic")
+    config: Dict[str, Any]   # Configuración específica (path, connection_string, etc.)
 
-    # Helpers de conveniencia (no obligatorios)
-    @property
-    def path(self) -> Optional[str]:
-        """Ruta principal asociada a la KB (si existe en config)."""
-        return self.config.get("path")
-
-    @property
-    def table(self) -> Optional[str]:
-        """Nombre de tabla asociado (si aplica en backends tabulares)."""
-        return self.config.get("table")
-
-    @property
-    def role(self) -> Optional[str]:
-        """Rol lógico de la KB (param_table, rules_table, dictionary, ...)."""
-        return self.config.get("role")
-
-
-# ─────────────────────────────────────────────
-# Builders de KB
-# ─────────────────────────────────────────────
 
 def build_kb_from_paths(
-    paths: Iterable[str],
-    *,
+    file_paths: List[str],
     kind: str = "table",
-    default_role: Optional[str] = None,
+    role_prefix: str = "custom",
 ) -> List[KnowledgeBase]:
     """
-    Crea KnowledgeBase a partir de una lista de rutas (CSV, parquet, etc.).
-
-    Pensado para casos como:
-      context = ["parametrias.csv", "diccionario_abreviaturas.csv"]
-
-    Ejemplo:
-        kbs = build_kb_from_paths(
-            ["parametrias.csv", "diccionario.csv"],
-            kind="table",
-        )
-
-    Cada KB tendrá:
-      - name: nombre derivado del stem del archivo (MAYÚSCULAS).
-      - kind: el proporcionado (por defecto "table").
-      - config: {"path": <ruta>, "role": default_role} si se pasa.
+    Crea objetos KnowledgeBase al vuelo a partir de una lista de archivos.
+    Útil para context_files inyectados en runtime.
     """
-    kb_list: List[KnowledgeBase] = []
-    for p in paths:
-        if not p:
-            continue
-        path_obj = Path(p)
-        name = path_obj.stem.upper()
-        cfg: Dict[str, Any] = {"path": str(path_obj)}
-        if default_role is not None:
-            cfg["role"] = default_role
+    kb_list = []
+    for idx, path in enumerate(file_paths):
+        name = f"{role_prefix.upper()}_{idx}"
+        cfg = {"path": path}
         kb_list.append(
             KnowledgeBase(
                 name=name,
