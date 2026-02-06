@@ -1,24 +1,7 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+# Ignore everything by default
+*
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Virtual environments
-venv/
-.venv/
-env/
-
-# IDE files
-.vscode/
-.idea/
-.gemini/
-
-# Notebooks checkpoints
-.ipynb_checkpoints
-
-# Local config
-setup.yaml
+# Whitelist (Allow) these files/directories
+!.gitignore
+!setup.py
+!agnostic_agent/
