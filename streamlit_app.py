@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, List, Tuple
 
 import streamlit as st
 from agnostic_agent.agent import Agent
+from agnostic_agent.capabilities import PlannerConfig
 
 # -----------------------------
 # Page
@@ -250,13 +251,20 @@ def next_id() -> int:
 
 def get_or_init_agent(mode: str) -> Agent:
     if st.session_state.agent is None:
+        # Actualizamos envs por si acaso, aunque Agent.init(PlannerConfig(...)) es más explícito
         os.environ["PLANNER_POLICY_MODE"] = mode
         os.environ["AGENT_POLICY_MODE"] = mode
+        
         with st.spinner(f"Inicializando agente (mode={mode})…"):
             try:
-                st.session_state.agent = Agent.init(policy_mode=mode)
-            except TypeError:
-                st.session_state.agent = Agent.init()
+                # CREAMOS CONFIG DE PLANNER EXPLÍCITA
+                cfg = PlannerConfig(policy_mode=mode)
+                
+                # Inicializamos pasando esa config
+                st.session_state.agent = Agent.init(config_or_setup=cfg)
+            except Exception as e:
+                st.error(f"Error iniciando agente: {e}")
+                st.stop()
     return st.session_state.agent
 
 def normalize_output(raw: Any) -> Dict[str, Any]:

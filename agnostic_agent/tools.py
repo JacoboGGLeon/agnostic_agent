@@ -838,11 +838,22 @@ def get_default_tools(enabled_names: List[str] | None = None) -> List[Any]:
     """
     Tools por defecto del agente agnóstico.
 
-    - Si enabled_names es None → devuelve TODAS las tools registradas.
-    - Si enabled_names es una lista → sólo devuelve las que estén en TOOL_REGISTRY.
+    - Si enabled_names es None → devuelve SÓLO las tools CORE (embeddings, search, rerank).
+      (Se excluyen las toy tools como word_count para evitar ruido en demos).
+    - Si enabled_names es una lista → devuelve las que estén en TOOL_REGISTRY y en la lista.
     """
     if enabled_names is None:
-        return list(TOOL_REGISTRY.values())
+        # Default: Solo tools "reales" de RAG / Contexto
+        default_keys = [
+            "embed_texts",
+            "semantic_search",
+            "semantic_search_in_csv",
+            "embed_context_tables",
+            "rerank_qwen3",
+            "judge_row_with_context",
+        ]
+        return [TOOL_REGISTRY[k] for k in default_keys if k in TOOL_REGISTRY]
+        
     return [TOOL_REGISTRY[name] for name in enabled_names if name in TOOL_REGISTRY]
 
 
