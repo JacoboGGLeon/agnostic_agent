@@ -52,6 +52,26 @@ from .communication import ToolRun # Import ToolRun for strict typing in state
 # Helpers
 # ─────────────────────────────────────────────
 
+_THINK_RE = re.compile(r"<think>(.*?)</think>", flags=re.S | re.I)
+
+def split_think_and_content(text: str) -> Tuple[str, str]:
+    """
+    Separa el contenido <think>...</think> del resto.
+    Retorna (thinking_content, clean_content).
+    """
+    if not text:
+        return "", ""
+    
+    match = _THINK_RE.search(text)
+    if match:
+        thinking = match.group(1).strip()
+        # Removemos todo el bloque <think>...</think> del texto original
+        clean = _THINK_RE.sub("", text).strip()
+        return thinking, clean
+    
+    return "", text.strip()
+
+
 def _parse_json_from_llm(text: str) -> Dict[str, Any]:
     """
     Intenta extraer y parsear un bloque JSON del texto del LLM.
@@ -317,17 +337,26 @@ def summarizer_node(state: AgentState) -> Dict[str, Any]:
                     "id": task.id
                 })
     
-    # 1. ANALYZER TXT
+    # 1. ANALYZER TXT (con thinking si existe)
     analyzer_txt = (
         f"Input Payload: {{'user_prompt': '{state.get('user_prompt')}'}}\\n"
+    )
+    if intent.reasoning_content:
+        analyzer_txt += f"Thinking (Analyzer):\\n> {intent.reasoning_content.replace('\\n', '\\n> ')}\\n\\n"
+        
+    analyzer_txt += (
         f"Lógica proposicional: {intent.logic_form}\\n"
         f"Proposiciones ({len(intent.propositions)}):\\n"
     )
     for p in intent.propositions:
         analyzer_txt += f"- [{p.id}] {p.text}\\n"
 
-    # 2. PLANNER TXT
-    planner_txt = (
+    # 2. PLANNER TXT (con thinking si existe)
+    planner_txt = ""
+    if plan.reasoning_content:
+        planner_txt += f"Thinking (Planner):\\n> {plan.reasoning_content.replace('\\n', '\\n> ')}\\n\\n"
+
+    planner_txt += (
         f"Rationale: {plan.rationale}\\n"
         "Plan Tareas:\\n"
     )
@@ -423,9 +452,13 @@ def build_graph_agent(
         ]
         
         response = planner_llm.invoke(messages)
-        content = response.content if hasattr(response, "content") else str(response)
+        content_raw = response.content if hasattr(response, "content") else str(response)
         
-        data = _parse_json_from_llm(content)
+        # 1) Extraemos thinking si existe
+        thinking, content_clean = split_think_and_content(content_raw)
+        
+        # 2) Parseamos el JSON del contenido limpio
+        data = _parse_json_from_llm(content_clean)
         
         propositions_data = data.get("propositions", [])
         propositions = [Proposition(**p) for p in propositions_data]
@@ -434,7 +467,8 @@ def build_graph_agent(
             propositions=propositions,
             logic_form=data.get("logic_form", ""),
             main_objective=data.get("main_objective", ""),
-            language=data.get("language")
+            language=data.get("language"),
+            reasoning_content=thinking  # ✅ Guardamos el thinking
         )
         
         return {"analyzer_intent": intent}
@@ -457,16 +491,21 @@ def build_graph_agent(
         ]
         
         response = planner_llm.invoke(messages)
-        content = response.content if hasattr(response, "content") else str(response)
+        content_raw = response.content if hasattr(response, "content") else str(response)
         
-        data = _parse_json_from_llm(content)
+        # 1) Extraemos thinking si existe
+        thinking, content_clean = split_think_and_content(content_raw)
+        
+        # 2) Parseamos el JSON
+        data = _parse_json_from_llm(content_clean)
         
         tasks_data = data.get("tasks", [])
         tasks = [TaskNode(**t) for t in tasks_data]
         
         plan = PlannerPlan(
             tasks=tasks,
-            rationale=data.get("rationale")
+            rationale=data.get("rationale"),
+            reasoning_content=thinking  # ✅ Guardamos el thinking
         )
         
         return {"planner_plan": plan, "step_results": {}}

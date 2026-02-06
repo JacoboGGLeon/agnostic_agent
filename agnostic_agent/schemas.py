@@ -64,6 +64,7 @@ class AnalyzerIntent(BaseModel):
     logic_form: str = ""
     main_objective: str = ""
     language: Optional[str] = None
+    reasoning_content: Optional[str] = None
     
     # Legacy/Compatibilidad (si se necesita)
     subqueries: List[str] = Field(default_factory=list)
@@ -114,6 +115,7 @@ class PlannerPlan(BaseModel):
     """
     tasks: List[TaskNode] = Field(default_factory=list, description="Lista plana de nodos que forman el DAG.")
     rationale: Optional[str] = None
+    reasoning_content: Optional[str] = None
 
 
 # ─────────────────────────────────────────────
