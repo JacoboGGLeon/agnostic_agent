@@ -18,6 +18,7 @@ import uuid
 import re
 
 from typing_extensions import TypedDict
+from dataclasses import dataclass
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import (
     AIMessage,
