@@ -530,14 +530,17 @@ class Agent:
         raw_runs = out_state.get("tool_runs", []) or []
         tool_runs: List[ToolRun] = []
         for r in raw_runs:
-            tool_runs.append(
-                ToolRun(
-                    id=str(r.get("id", "")),
-                    name=str(r.get("name", "")),
-                    args=r.get("args", {}),
-                    output=r.get("output"),
+            if isinstance(r, ToolRun):
+                tool_runs.append(r)
+            else:
+                tool_runs.append(
+                    ToolRun(
+                        id=str(r.get("id", "")),
+                        name=str(r.get("name", "")),
+                        args=r.get("args", {}),
+                        output=r.get("output"),
+                    )
                 )
-            )
 
         # 8) Resolver textos finales por vista con prioridades claras
         # USER:
