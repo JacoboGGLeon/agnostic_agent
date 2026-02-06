@@ -1154,3 +1154,53 @@ def load_logic() -> StateGraph:
     workflow.add_edge("validator", END)
 
     return workflow
+
+
+# ─────────────────────────────────────────────
+# Logic loader (registro de grafos)
+# ─────────────────────────────────────────────
+
+@dataclass
+class LogicConfig:
+    module: str = "agnostic_agent.logic"
+    builder_fn: str = "build_graph_agent"
+
+
+def load_logic(
+    planner_llm: Any,
+    tools: List[Any],
+    planner_config: Optional[PlannerConfig] = None,
+    logic_config: Optional[LogicConfig] = None,
+) -> Any:
+    """
+    Carga y ejecuta la función builder que construye el grafo del agente.
+
+    Por defecto usa este mismo módulo:
+        agnostic_agent.logic.build_graph_agent
+    """
+    cfg = logic_config or LogicConfig()
+
+    if cfg.module == "agnostic_agent.logic":
+        builder: Callable[..., Any] = globals().get(cfg.builder_fn)  # type: ignore[assignment]
+        if builder is None or not callable(builder):
+            raise AttributeError(
+                f"No se encontró función builder '{cfg.builder_fn}' en agnostic_agent.logic."
+            )
+        return builder(planner_llm, tools, planner_config)
+
+    import importlib
+
+    try:
+        mod = importlib.import_module(cfg.module)
+    except ModuleNotFoundError as e:
+        raise ImportError(
+            f"No se pudo importar el módulo de lógica '{cfg.module}'."
+        ) from e
+
+    builder = getattr(mod, cfg.builder_fn, None)
+    if builder is None or not callable(builder):
+        raise AttributeError(
+            f"El módulo '{cfg.module}' no tiene una función callable '{cfg.builder_fn}'."
+        )
+
+    return builder(planner_llm, tools, planner_config)
