@@ -450,6 +450,9 @@ class PlannerConfig:
         "tools_strict",
     )  # "tools_strict" | "free_policies"
 
+    # Timeout para evitar httpx.ReadTimeout
+    request_timeout: float = float(os.getenv("PLANNER_REQUEST_TIMEOUT", "120.0"))
+
     # Prompt base del planner (agnóstico de dominio)
     system_text: str = (
         "Eres el PLANNER de un agente de IA con acceso opcional a herramientas (tools).\n"
@@ -498,4 +501,5 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
         model=cfg.model_name,
         temperature=cfg.temperature,
         enable_thinking=cfg.enable_thinking,
+        request_timeout=cfg.request_timeout,
     )
