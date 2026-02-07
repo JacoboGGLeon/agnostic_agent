@@ -613,59 +613,151 @@ with tab_online:
 # TAB 2: OFFLINE MANAGER
 # ==========================================
 with tab_offline:
-    st.markdown("## 🛠 Gestor de Conocimiento Offline")
+    # Prepare tool list
+    # If we have a tools_config in session state, filter the tools
+    if "tools_config" in st.session_state:
+        enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
+        # Always ensure search_knowledge_base is available if not explicitly disabled (or manage it via UI)
+        # For now, UI drives it completely.
+    else:
+        enabled_tools = None # All tools
+
+    tools_map = get_default_tools(enabled_tools)
+    # ---------------------------------------------------------------------
     
-    st.info(
-        "Aquí puedes subir documentos PDF para procesarlos (Parsing -> Chunking -> Embedding -> SQLite-Vec). "
-        "Esto poblará la base de datos local `embeddings.db`."
+    # Instantiate agent
+    # We might want to persist agent in session state to avoid reloading if config doesn't change
+    # But for now, re-instantiating ensures config changes take effect immediately on next run
+    agent = Agent(
+        llm=llm,
+        tools=tools_map,
+        system_prompt=SYSTEM_PROMPT
     )
+    # Create sub-tabs
+    tab_km, tab_tm = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager"])
 
-    # File uploader
-    uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
-    
-    # DB path configuration (could be env var, defaulting to local)
-    DB_PATH = os.path.join(os.getcwd(), "embeddings.db")
-    DOCS_DIR = os.path.join(os.getcwd(), "documents")
-    os.makedirs(DOCS_DIR, exist_ok=True)
-    
-    if uploaded_file is not None:
-        # Save to temp/docs dir
-        # Use absolute path for clarity and robustness
-        save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
+    # -------------------------------------------------------------------------
+    # 📚 Knowledge Manager Tab
+    # -------------------------------------------------------------------------
+    with tab_km:
+        st.markdown("### 📚 Gestor de Conocimiento")
+        st.info(
+            "Aquí puedes subir documentos PDF para procesarlos (Parsing → Chunking → Embedding → SQLite-Vec). "
+            "Esto poblará la base de datos local `embeddings.db`."
+        )
+
+        # File uploader
+        uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         
-        with open(save_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-            
-        st.success(f"Archivo guardado en: `{save_path}`")
+        # DB path configuration (could be env var, defaulting to local)
+        DB_PATH = os.path.join(os.getcwd(), "embeddings.db")
+        DOCS_DIR = os.path.join(os.getcwd(), "documents")
+        os.makedirs(DOCS_DIR, exist_ok=True)
         
-        if st.button("🚀 Procesar e Ingestar", type="primary"):
-            from agnostic_agent.knowledge_offline import ingest_pdf_file
+        if uploaded_file is not None:
+            # Save to temp/docs dir
+            # Use absolute path for clarity and robustness
+            save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
             
-            with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
-                try:
-                    res = ingest_pdf_file(save_path, DB_PATH)
-                    if "error" in res:
-                        st.error(f"Error: {res['error']}")
-                        st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
-                    else:
-                        st.balloons()
-                        st.success("¡Ingesta completada!")
-                        st.json(res)
-                except Exception as e:
-                    st.error(f"Excepción crítica: {e}")
+            with open(save_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+                
+            st.success(f"Archivo guardado en: `{save_path}`")
+            
+            if st.button("🚀 Procesar e Ingestar", type="primary"):
+                from agnostic_agent.knowledge_offline import ingest_pdf_file
+                
+                with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
+                    try:
+                        res = ingest_pdf_file(save_path, DB_PATH)
+                        if "error" in res:
+                            st.error(f"Error: {res['error']}")
+                            st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
+                        else:
+                            st.balloons()
+                            st.success("¡Ingesta completada!")
+                            st.json(res)
+                    except Exception as e:
+                        st.error(f"Excepción crítica: {e}")
 
-    st.divider()
-    
-    # DB Stats
-    st.markdown("### 📊 Estado de la Base de Datos")
-    try:
-        from agnostic_agent.knowledge_offline import get_stats
-        stats = get_stats(DB_PATH)
-        c1, c2 = st.columns(2)
-        c1.metric("Chunks Indexados", stats.get("chunks", 0))
-        c2.metric("Archivos Únicos", stats.get("files", 0))
-    except ImportError:
-        st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
-    except Exception as e:
-        st.warning(f"No se pudo leer la DB: {e}")
+        st.divider()
+        
+        # DB Stats
+        st.markdown("### 📊 Estado de la Base de Datos")
+        try:
+            from agnostic_agent.knowledge_offline import get_stats
+            stats = get_stats(DB_PATH)
+            c1, c2 = st.columns(2)
+            c1.metric("Chunks Indexados", stats.get("chunks", 0))
+            c2.metric("Archivos Únicos", stats.get("files", 0))
+        except ImportError:
+            st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
+        except Exception as e:
+            st.warning(f"No se pudo leer la DB: {e}")
 
+    # -------------------------------------------------------------------------
+    # 🛠 Tools Manager Tab
+    # -------------------------------------------------------------------------
+    with tab_tm:
+        st.markdown("### 🛠 Gestor de Herramientas")
+        st.markdown("Activa o desactiva las herramientas disponibles para el agente.")
+        
+        from agnostic_agent.tools import TOOL_REGISTRY
+        
+        # Initialize session state for tools config if not exists
+        if "tools_config" not in st.session_state:
+            st.session_state.tools_config = {name: True for name in TOOL_REGISTRY.keys()}
+        
+        # --- Tool Toggles ---
+        cols = st.columns(3)
+        for i, tool_name in enumerate(TOOL_REGISTRY.keys()):
+            col = cols[i % 3]
+            is_active = st.session_state.tools_config.get(tool_name, True)
+            
+            new_state = col.toggle(
+                label=tool_name, 
+                value=is_active, 
+                key=f"toggle_{tool_name}"
+            )
+            st.session_state.tools_config[tool_name] = new_state
+
+        st.divider()
+        
+        # --- Visualization (Dummy for now, could be real history) ---
+        st.markdown("### 🕸 Visualización de Procesos (Input → Output)")
+        
+        # Example visualization using graphviz or mermaid
+        # For now, let's show a simple example of how a tool flow looks
+        
+        st.graphviz_chart('''
+            digraph ToolsFlow {
+                rankdir=LR;
+                node [shape=box, style=filled, color=lightblue];
+                
+                Input [label="Input User Query", shape=ellipse, color=lightgrey];
+                Agent [label="Agent Decision", shape=diamond, color=orange];
+                
+                Input -> Agent;
+                
+                subgraph cluster_tools {
+                    label = "Active Tools";
+                    style=dashed;
+                    color=grey;
+                    
+                    Tool1 [label="search_knowledge_base"];
+                    Tool2 [label="sum_numbers"];
+                }
+                
+                Agent -> Tool1 [label="call"];
+                Tool1 -> Output1 [label="result"];
+                
+                Output1 [label="Output Context", shape=ellipse, color=lightgreen];
+            }
+        ''')
+        
+        with st.expander("Ver logs de ejecución recientes (Simulado)"):
+            st.code("""
+[10:00:01] Agent called 'search_knowledge_base' with query="OpenAI Gym"
+[10:00:02] Tool 'search_knowledge_base' processing...
+[10:00:03] Tool returned 3 chunks.
+            """, language="log")
