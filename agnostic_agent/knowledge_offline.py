@@ -139,7 +139,7 @@ def _parse_with_docling(pdf_path: str) -> Tuple[List[ElementNode], int]:
 
 def _parse_with_pymupdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
     if fitz is None:
-        logger.warning("PyMuPDF (fitz) not installed. Skipping fallback.")
+        logger.warning(f"PyMuPDF (fitz) not installed. Skipping fallback for {pdf_path}.")
         return [], 0
         
     try:
@@ -152,10 +152,17 @@ def _parse_with_pymupdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
     nodes: List[ElementNode] = []
     node_seq = 0
     
+    logger.info(f"PyMuPDF: Processing {total_pages} pages in {pdf_path}")
+    
     for page_idx in range(total_pages):
         page = doc[page_idx]
         blocks = page.get_text("blocks") # (x0, y0, x1, y1, text, block_no, block_type)
         
+        # Check if blocks is empty or None
+        if not blocks:
+            logger.info(f"PyMuPDF: Page {page_idx+1} has no text blocks.")
+            continue
+
         for b in blocks:
             if len(b) < 5:
                 continue
@@ -176,6 +183,7 @@ def _parse_with_pymupdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
             ))
             node_seq += 1
             
+    logger.info(f"PyMuPDF: Extracted {len(nodes)} nodes.")
     return _link_nodes(nodes), total_pages
 
 def _link_nodes(nodes: List[ElementNode]) -> List[ElementNode]:
@@ -192,10 +200,24 @@ def _link_nodes(nodes: List[ElementNode]) -> List[ElementNode]:
 
 def parse_pdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
     """Tries Docling first, falls back to PyMuPDF."""
-    nodes, total_pages = _parse_with_docling(pdf_path)
+    nodes = []
+    total_pages = 0
+    
+    # 1. Try Docling
+    if DocumentConverter:
+        logger.info(f"Using Docling parser for {pdf_path}")
+        nodes, total_pages = _parse_with_docling(pdf_path)
+    else:
+        logger.info("Docling not available.")
+
+    # 2. Fallback to PyMuPDF if Docling failed or returned no nodes
     if not nodes:
-        logger.info(f"Docling returned no nodes for {pdf_path}, falling back to PyMuPDF.")
+        logger.info(f"Docling returned no nodes (or not avail). Falling back to PyMuPDF for {pdf_path}.")
         nodes, total_pages = _parse_with_pymupdf(pdf_path)
+    
+    if not nodes:
+        logger.error(f"Failed to extract text from {pdf_path} with both Docling and PyMuPDF.")
+        
     return nodes, total_pages
 
 # -----------------------------------------------------------------------------
@@ -239,12 +261,31 @@ def build_chunks(nodes: List[ElementNode], k_neighbors: int = 1) -> List[Chunk]:
 
 _EMBEDDER_CACHE: Dict[str, Any] = {}
 
+def get_vllm_client():
+    from openai import OpenAI
+    # Default vLLM embedding port in agnostic setup is often 8001
+    api_base = os.getenv("VLLM_EMB_URL", "http://localhost:8001/v1")
+    api_key = os.getenv("VLLM_API_KEY", "EMPTY")
+    return OpenAI(base_url=api_base, api_key=api_key)
+
+def check_vllm_embedding_available() -> bool:
+    """Checks if vLLM embedding endpoint is responsive."""
+    try:
+        client = get_vllm_client()
+        # Try a dummy embedding
+        client.embeddings.create(input=["test"], model=EMB_MODEL_REPO)
+        logger.info(f"vLLM embedding endpoint found at {client.base_url}")
+        return True
+    except Exception:
+        logger.info("vLLM embedding endpoint not found or error. prompting local fallback.")
+        return False
+
 def get_embedder():
     """Singleton-ish loader for the embedding model."""
     if "tokenizer" in _EMBEDDER_CACHE and "model" in _EMBEDDER_CACHE:
         return _EMBEDDER_CACHE["tokenizer"], _EMBEDDER_CACHE["model"]
 
-    logger.info(f"Loading embedding model: {EMB_MODEL_REPO}")
+    logger.info(f"Loading embedding model (LOCAL): {EMB_MODEL_REPO}")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Try mps
@@ -278,11 +319,35 @@ def _mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) ->
     counts = mask.sum(dim=1).clamp(min=1e-9)
     return torch.nn.functional.normalize(summed / counts, dim=1)
 
-@torch.inference_mode()
 def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
     if not texts:
         return np.zeros((0, EMB_DIM), dtype="float32")
+
+    # 1. Try vLLM first
+    # Check explicitly or just try? 
+    # To avoid timeout on every call, we can check env var or valid connection once.
+    # For now, let's try calling it if configured.
+    use_vllm = os.getenv("USE_VLLM_EMBEDDING", "1") == "1"
     
+    if use_vllm:
+        try:
+            client = get_vllm_client()
+            # OpenAI API handles batching, but we can respect batch_size too
+            all_vecs = []
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                # Replace newlines as recommended for some models, though Qwen usually handles it
+                batch = [t.replace("\n", " ") for t in batch] 
+                
+                resp = client.embeddings.create(input=batch, model=EMB_MODEL_REPO)
+                vecs = [d.embedding for d in resp.data]
+                all_vecs.append(np.array(vecs, dtype="float32"))
+            
+            return np.vstack(all_vecs)
+        except Exception:
+             logger.warning("vLLM embedding failed, falling back to local Transformers.")
+    
+    # 2. Local Fallback
     tokenizer, model = get_embedder()
     all_vecs = []
 
@@ -296,9 +361,10 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
             return_tensors="pt"
         ).to(model.device)
         
-        out = model(**inputs)
-        vecs = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
-        all_vecs.append(vecs.float().cpu().numpy())
+        with torch.no_grad():
+            out = model(**inputs)
+            vecs = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
+            all_vecs.append(vecs.float().cpu().numpy())
     
     return np.vstack(all_vecs)
 

@@ -630,9 +630,12 @@ with tab_offline:
     
     if uploaded_file is not None:
         # Save to temp/docs dir
-        save_path = os.path.join(DOCS_DIR, uploaded_file.name)
+        # Use absolute path for clarity and robustness
+        save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
+        
         with open(save_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
+            
         st.success(f"Archivo guardado en: `{save_path}`")
         
         if st.button("🚀 Procesar e Ingestar", type="primary"):
@@ -643,6 +646,7 @@ with tab_offline:
                     res = ingest_pdf_file(save_path, DB_PATH)
                     if "error" in res:
                         st.error(f"Error: {res['error']}")
+                        st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
                     else:
                         st.balloons()
                         st.success("¡Ingesta completada!")
