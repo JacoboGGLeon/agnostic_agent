@@ -16,5 +16,9 @@ setup(
         "sqlite-vec",
         "pandas",
         "numpy",
+        "pymupdf",          # for PDF parsing (fitz)
+        "transformers",     # for local embeddings
+        "torch",            # for local embeddings
+        "openai",           # for potential vLLM client
     ],
 )

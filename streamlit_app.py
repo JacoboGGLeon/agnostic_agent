@@ -627,13 +627,24 @@ with tab_offline:
     # ---------------------------------------------------------------------
     
     # Instantiate agent
-    # We might want to persist agent in session state to avoid reloading if config doesn't change
-    # But for now, re-instantiating ensures config changes take effect immediately on next run
-    agent = Agent(
-        llm=llm,
-        tools=tools_map,
-        system_prompt=SYSTEM_PROMPT
-    )
+    # We use get_or_init_agent to ensure we use the globally configured LLM and tools
+    # If tools_config changed, we might need to force re-init or update tools.
+    # For now, let's just get the agent. The 'get_or_init_agent' function in this file 
+    # (lines 282-308) handles LLM creation if missing.
+    
+    # However, get_or_init_agent relies on st.session_state.agent_mode.
+    # If we want to force specific tools enabled/disabled, we might need to modify it or 
+    # manually re-create the agent here if config changed.
+    
+    # Let's start by getting the current agent to avoid 'llm' NameError.
+    agent = get_or_init_agent(st.session_state.agent_mode)
+    
+    # If we want to apply the tools_config dynamically:
+    if "tools_config" in st.session_state:
+        enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
+        agent.tools = get_default_tools(enabled_tools)
+        # We also need to update the key_map for tool lookup
+        agent.tools_map = {t.name: t for t in agent.tools}
     # Create sub-tabs
     tab_km, tab_tm = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager"])
 
