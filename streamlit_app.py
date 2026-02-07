@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, List, Tuple
 import streamlit as st
 from agnostic_agent.agent import Agent
 from agnostic_agent.capabilities import PlannerConfig
+from agnostic_agent.tools import get_default_tools
 
 # -----------------------------
 # Page
