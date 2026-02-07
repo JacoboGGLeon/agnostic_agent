@@ -287,14 +287,11 @@ def get_embedder():
 
     logger.info(f"Loading embedding model (LOCAL): {EMB_MODEL_REPO}")
     
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Try mps
-    if device == "cpu":
-        try:
-             if torch.backends.mps.is_available():
-                device = "mps"
-        except:
-            pass
+    # FORCE CPU to avoid OOM when vLLM is hogging the GPU
+    # User confirmed vLLM is running in POWER mode taking almost all VRAM.
+    # NOW CONFIGURABLE: Defaults to "cpu" for safety, but can be overridden.
+    device = os.getenv("LOCAL_EMBEDDING_DEVICE", "cpu")
+    logger.info(f"Using device '{device}' for local embeddings (default: cpu).")
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(EMB_MODEL_REPO, trust_remote_code=True)
@@ -302,7 +299,7 @@ def get_embedder():
             EMB_MODEL_REPO, 
             trust_remote_code=True, 
             device_map=device,
-            torch_dtype=torch.float16 if device != "cpu" else torch.float32
+            torch_dtype=torch.float32 # CPU usually needs float32
         )
     except Exception as e:
         logger.error(f"Failed to load model from HF {EMB_MODEL_REPO}: {e}")

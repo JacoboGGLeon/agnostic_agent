@@ -493,6 +493,29 @@ with tab_online:
                 raw_state = get_raw_state(out)
                 tool_runs = extract_tool_runs(out, raw_state)
 
+                # --- Capture Tool Logs for Offline Manager ---
+                if "tool_logs" not in st.session_state:
+                    st.session_state["tool_logs"] = []
+                
+                import datetime
+                for tr in tool_runs:
+                    # Check if this run is already logged to avoid duplicates? 
+                    # Simpler is to just append, but we might get duplicates on re-runs.
+                    # Ideally, logging should happen inside the agent, but here we extract for display.
+                    # We'll prepend to be newer first, or append and show reversed.
+                    
+                    # Using a simple signature to avoid dupes in this session view if needed, 
+                    # but for now let's just add them.
+                    
+                    log_entry = {
+                        "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+                        "tool": tr.get("name", "unknown"),
+                        "input": tr.get("args", {}),
+                        "output": tr.get("output", "")
+                    }
+                    st.session_state["tool_logs"].append(log_entry)
+                # ---------------------------------------------
+
                 with st.chat_message("assistant"):
                     # Pretty answer only
                     card_md(
@@ -617,33 +640,96 @@ with tab_offline:
     # Prepare tool list
     # If we have a tools_config in session state, filter the tools
     if "tools_config" in st.session_state:
-        enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
-        # Always ensure search_knowledge_base is available if not explicitly disabled (or manage it via UI)
-        # For now, UI drives it completely.
-    else:
-        enabled_tools = None # All tools
+        # Prepare tool list
+        # If we have a tools_config in session state, filter the tools
+        if "tools_config" in st.session_state:
+            enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
+        else:
+            enabled_tools = None # All tools
 
-    tools_map = get_default_tools(enabled_tools)
+        tools_map = get_default_tools(enabled_tools)
+        
+        # --- Tool Inspection Section ---
+        st.divider()
+        st.markdown("### 🔬 Inspector de Herramientas")
+        
+        # Select a tool to inspect
+        tool_names = list(tools_map.keys())
+        if tool_names:
+            selected_tool_name = st.selectbox("Selecciona una herramienta para inspeccionar:", tool_names)
+            
+            if selected_tool_name:
+                tool = tools_map[selected_tool_name]
+                
+                c1, c2 = st.columns([1, 1])
+                
+                with c1:
+                    st.markdown(f"**Nombre:** `{tool.name}`")
+                    st.markdown("**Descripción:**")
+                    st.info(tool.description or "Sin descripción")
+                    
+                    # Show Input Schema if pydantic args
+                    st.markdown("**Esquema de Entrada (Args):**")
+                    if tool.args_schema:
+                        st.json(tool.args_schema.schema())
+                    else:
+                        st.text("Sin esquema definido (str por defecto)")
+
+                with c2:
+                    st.markdown("**🕸 Visualización del Proceso**")
+                    # Graphviz visualization of this specific tool's flow
+                    st.graphviz_chart(f'''
+                        digraph ToolProc {{
+                            rankdir=LR;
+                            node [shape=box, style=filled, color=lightblue];
+                            
+                            In [label="Input", shape=ellipse, color=lightgrey];
+                            Proc [label="{tool.name}", shape=box, color=orange, style="rounded,filled"];
+                            Out [label="Output", shape=ellipse, color=lightgreen];
+                            
+                            In -> Proc [label="args"];
+                            Proc -> Out [label="return"];
+                        }}
+                    ''')
+
+        else:
+            st.warning("No hay herramientas habilitadas.")
+
+        st.divider()
+        
+        # --- Real-time Logs Visualization ---
+        st.markdown("### 📜 Logs de Ejecución (Tiempo Real)")
+        
+        # Initialize logs in session state if not present
+        if "tool_logs" not in st.session_state:
+            st.session_state["tool_logs"] = []
+            
+        # Display logs
+        if st.session_state["tool_logs"]:
+            for log_entry in reversed(st.session_state["tool_logs"][-10:]): # Show last 10
+                with st.chat_message("tool", avatar="🛠"):
+                    st.markdown(f"**{log_entry['timestamp']}** - `{log_entry['tool']}`")
+                    with st.expander("Ver detalles"):
+                        st.markdown("**Input:**")
+                        st.code(str(log_entry['input']))
+                        st.markdown("**Output:**")
+                        st.code(str(log_entry['output']))
+        else:
+            st.caption("No hay logs de ejecución recientes.")
+
     # ---------------------------------------------------------------------
     
-    # Instantiate agent
-    # We use get_or_init_agent to ensure we use the globally configured LLM and tools
-    # If tools_config changed, we might need to force re-init or update tools.
-    # For now, let's just get the agent. The 'get_or_init_agent' function in this file 
-    # (lines 282-308) handles LLM creation if missing.
+    # Instantiate agent with logging wrapper if we want to capture logs (TODO: Implement callback/wrapper)
+    # For now, we will just use the standard instantiation but we need to hook into it for logging.
+    # Since we can't easily hook without changing Agent class, we'll rely on the Agent's output 
+    # to populate 'tool_logs' in the processing loop (tab_online).
     
-    # However, get_or_init_agent relies on st.session_state.agent_mode.
-    # If we want to force specific tools enabled/disabled, we might need to modify it or 
-    # manually re-create the agent here if config changed.
-    
-    # Let's start by getting the current agent to avoid 'llm' NameError.
     agent = get_or_init_agent(st.session_state.agent_mode)
     
     # If we want to apply the tools_config dynamically:
     if "tools_config" in st.session_state:
         enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
         agent.tools = get_default_tools(enabled_tools)
-        # We also need to update the key_map for tool lookup
         agent.tools_map = {t.name: t for t in agent.tools}
     # Create sub-tabs
     tab_km, tab_tm = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager"])
@@ -661,9 +747,9 @@ with tab_offline:
         # File uploader
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         
-        # DB path configuration (could be env var, defaulting to local)
-        DB_PATH = os.path.join(os.getcwd(), "embeddings.db")
-        DOCS_DIR = os.path.join(os.getcwd(), "documents")
+        # DB path configuration (env vars with local defaults)
+        DB_PATH = os.getenv("AGNOSTIC_DB_PATH", os.path.join(os.getcwd(), "embeddings.db"))
+        DOCS_DIR = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
         os.makedirs(DOCS_DIR, exist_ok=True)
         
         if uploaded_file is not None:
