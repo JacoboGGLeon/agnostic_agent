@@ -467,140 +467,201 @@ st.markdown(
 )
 
 # -----------------------------
-# Main layout: Feed | Inspector
+# Main layout: Tabs for Online / Offline
 # -----------------------------
-feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
+tab_online, tab_offline = st.tabs(["💬 Online Chat", "🛠 Offline Manager"])
 
-# -------- FEED (left) --------
-with feed_col:
-    for msg in st.session_state.messages:
-        role = msg.get("role", "user")
+# ==========================================
+# TAB 1: ONLINE CHAT
+# ==========================================
+with tab_online:
+    feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
 
-        if role == "user":
-            with st.chat_message("user"):
-                st.markdown(f'<div class="bubble-user">{html.escape(msg.get("content",""))}</div>', unsafe_allow_html=True)
+    # -------- FEED (left) --------
+    with feed_col:
+        for msg in st.session_state.messages:
+            role = msg.get("role", "user")
 
-        elif role == "assistant":
-            out = msg.get("out") or {}
-            answer = strip_user_prefix(as_text(out.get("user_out")))
+            if role == "user":
+                with st.chat_message("user"):
+                    st.markdown(f'<div class="bubble-user">{html.escape(msg.get("content",""))}</div>', unsafe_allow_html=True)
+
+            elif role == "assistant":
+                out = msg.get("out") or {}
+                answer = strip_user_prefix(as_text(out.get("user_out")))
+                raw_state = get_raw_state(out)
+                tool_runs = extract_tool_runs(out, raw_state)
+
+                with st.chat_message("assistant"):
+                    # Pretty answer only
+                    card_md(
+                        title="Respuesta",
+                        body_md=html.escape(answer or "_(sin respuesta)_").replace("\n", "<br>"),
+                        icon="👤",
+                        hint=f"id={msg.get('id')}",
+                    )
+
+                    c1, c2, c3 = st.columns([1.2, 1.0, 0.8])
+                    with c1:
+                        st.caption(f"🛠 tools: {len(tool_runs)}")
+                    with c2:
+                        pass # st.caption("📎 Inspector →")
+                    with c3:
+                        if st.button("🔎 Inspect", key=f"inspect_{msg.get('id')}", use_container_width=True):
+                            st.session_state.selected_msg_id = msg.get("id")
+                            st.toast(f"Inspector → id={msg.get('id')}", icon="🔎")
+                            st.rerun()
+
+    # -------- INSPECTOR (right) --------
+    with insp_col:
+        st.markdown('<div class="inspector">', unsafe_allow_html=True)
+        st.markdown("### 🔎 Inspector")
+
+        a_msgs = assistant_messages()
+        if not a_msgs:
+            st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            ids = [m["id"] for m in a_msgs]
+
+            def label(mid: int) -> str:
+                m = find_message_by_id(mid) or {}
+                out = m.get("out") or {}
+                text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
+                text = (text[:60] + "…") if len(text) > 60 else text
+                return f"id={mid} · {text or '(sin texto)'}"
+
+            if st.session_state.selected_msg_id not in ids:
+                st.session_state.selected_msg_id = ids[-1]
+
+            sel = st.selectbox(
+                "Mensaje seleccionado",
+                options=ids,
+                index=ids.index(st.session_state.selected_msg_id),
+                format_func=label,
+                key="inspector_selectbox",
+            )
+            st.session_state.selected_msg_id = sel
+
+            m = find_message_by_id(st.session_state.selected_msg_id) or {}
+            out = m.get("out") or {}
             raw_state = get_raw_state(out)
+
+            thinking = extract_thinking(raw_state)
+            deep_txt = extract_summary_deep(raw_state, as_text(out.get("deep_out")))
             tool_runs = extract_tool_runs(out, raw_state)
 
-            with st.chat_message("assistant"):
-                # Pretty answer only
-                card_md(
-                    title="Respuesta",
-                    body_md=html.escape(answer or "_(sin respuesta)_").replace("\n", "<br>"),
-                    icon="👤",
-                    hint=f"id={msg.get('id')}",
-                )
+            tab_specs: List[Tuple[str, str]] = []
+            if show_thinking_tab:
+                tab_specs.append(("🧠 Thinking", "thinking"))
+            if show_deep_tab:
+                tab_specs.append(("🧠 Deep", "deep"))
+            if show_dev_tab:
+                tab_specs.append(("🔍 Dev", "dev"))
 
-                c1, c2, c3 = st.columns([1.2, 1.0, 0.8])
-                with c1:
-                    st.caption(f"🛠 tools: {len(tool_runs)}")
-                with c2:
-                    st.caption("📎 Inspector →")
-                with c3:
-                    if st.button("🔎 Inspect", key=f"inspect_{msg.get('id')}", use_container_width=True):
-                        st.session_state.selected_msg_id = msg.get("id")
-                        st.toast(f"Inspector → id={msg.get('id')}", icon="🔎")
-                        st.rerun()
+            tabs = st.tabs([t[0] for t in tab_specs])
 
-# -------- INSPECTOR (right) --------
-with insp_col:
-    st.markdown('<div class="inspector">', unsafe_allow_html=True)
-    st.markdown("### 🔎 Inspector")
+            for (tab_title, tab_key), tab in zip(tab_specs, tabs):
+                with tab:
+                    if tab_key == "thinking":
+                        card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
 
-    a_msgs = assistant_messages()
-    if not a_msgs:
-        st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
-        st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        ids = [m["id"] for m in a_msgs]
+                    elif tab_key == "deep":
+                        body = deep_txt or "_(vacío)_"
+                        body_html = html.escape(body).replace("\n", "<br>")
+                        card_md("Vista profunda (deep_out / summary)", body_html, icon="🧠", hint="pipeline")
 
-        def label(mid: int) -> str:
-            m = find_message_by_id(mid) or {}
-            out = m.get("out") or {}
-            text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
-            text = (text[:60] + "…") if len(text) > 60 else text
-            return f"id={mid} · {text or '(sin texto)'}"
+                    elif tab_key == "dev":
+                        render_tool_runs(tool_runs)
 
-        if st.session_state.selected_msg_id not in ids:
-            st.session_state.selected_msg_id = ids[-1]
+                        with st.expander("🧬 raw_state (debug)", expanded=False):
+                            if isinstance(raw_state, dict) and raw_state:
+                                st.json(raw_state)
+                            else:
+                                st.markdown("_(sin raw_state)_")
 
-        sel = st.selectbox(
-            "Mensaje seleccionado",
-            options=ids,
-            index=ids.index(st.session_state.selected_msg_id),
-            format_func=label,
-            key="inspector_selectbox",
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # -----------------------------
+    # Chat input (bottom of Online tab)
+    # -----------------------------
+    prompt = st.chat_input("Escribe tu mensaje…")
+
+    if prompt:
+        uid = next_id()
+        st.session_state.messages.append({"id": uid, "role": "user", "content": prompt, "out": None})
+
+        agent = get_or_init_agent(st.session_state.agent_mode)
+        try:
+            # Pass full params if strict mode or updated logic requires
+            raw_out = agent.run_turn(prompt)
+        except Exception as e:
+            st.error(f"Error corriendo agente: {e}")
+            st.stop()
+
+        out = normalize_output(raw_out)
+        aid = next_id()
+        st.session_state.messages.append(
+            {"id": aid, "role": "assistant", "content": strip_user_prefix(as_text(out.get("user_out"))), "out": out}
         )
-        st.session_state.selected_msg_id = sel
 
-        m = find_message_by_id(st.session_state.selected_msg_id) or {}
-        out = m.get("out") or {}
-        raw_state = get_raw_state(out)
+        st.session_state.selected_msg_id = aid
+        st.rerun()
 
-        thinking = extract_thinking(raw_state)
-        deep_txt = extract_summary_deep(raw_state, as_text(out.get("deep_out")))
-        tool_runs = extract_tool_runs(out, raw_state)
 
-        tab_specs: List[Tuple[str, str]] = []
-        if show_thinking_tab:
-            tab_specs.append(("🧠 Thinking", "thinking"))
-        if show_deep_tab:
-            tab_specs.append(("🧠 Deep", "deep"))
-        if show_dev_tab:
-            tab_specs.append(("🔍 Dev", "dev"))
-
-        tabs = st.tabs([t[0] for t in tab_specs])
-
-        for (tab_title, tab_key), tab in zip(tab_specs, tabs):
-            with tab:
-                if tab_key == "thinking":
-                    # ✅ Now it looks like a proper "markdown code block" card (monospace, wrapped, bordered)
-                    card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
-
-                elif tab_key == "deep":
-                    # Keep as-is (you said you like it)
-                    # We keep newlines readable and let emphasis render in markdown-ish style
-                    body = deep_txt or "_(vacío)_"
-                    # Render markdown emphasis by replacing to HTML-ish layout; deep usually ok as plain text too
-                    body_html = html.escape(body).replace("\n", "<br>")
-                    card_md("Vista profunda (deep_out / summary)", body_html, icon="🧠", hint="pipeline")
-
-                elif tab_key == "dev":
-                    # ✅ Dev: tools like before + raw_state collapsed
-                    render_tool_runs(tool_runs)
-
-                    with st.expander("🧬 raw_state (debug)", expanded=False):
-                        if isinstance(raw_state, dict) and raw_state:
-                            st.json(raw_state)
-                        else:
-                            st.markdown("_(sin raw_state)_")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# -----------------------------
-# Chat input (bottom)
-# -----------------------------
-prompt = st.chat_input("Escribe tu mensaje…")
-
-if prompt:
-    uid = next_id()
-    st.session_state.messages.append({"id": uid, "role": "user", "content": prompt, "out": None})
-
-    agent = get_or_init_agent(st.session_state.agent_mode)
-    try:
-        raw_out = agent.run_turn(prompt, policy_mode=st.session_state.agent_mode)
-    except TypeError:
-        raw_out = agent.run_turn(prompt)
-
-    out = normalize_output(raw_out)
-    aid = next_id()
-    st.session_state.messages.append(
-        {"id": aid, "role": "assistant", "content": strip_user_prefix(as_text(out.get("user_out"))), "out": out}
+# ==========================================
+# TAB 2: OFFLINE MANAGER
+# ==========================================
+with tab_offline:
+    st.markdown("## 🛠 Gestor de Conocimiento Offline")
+    
+    st.info(
+        "Aquí puedes subir documentos PDF para procesarlos (Parsing -> Chunking -> Embedding -> SQLite-Vec). "
+        "Esto poblará la base de datos local `embeddings.db`."
     )
 
-    st.session_state.selected_msg_id = aid
-    st.rerun()
+    # File uploader
+    uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
+    
+    # DB path configuration (could be env var, defaulting to local)
+    DB_PATH = os.path.join(os.getcwd(), "embeddings.db")
+    DOCS_DIR = os.path.join(os.getcwd(), "documents")
+    os.makedirs(DOCS_DIR, exist_ok=True)
+    
+    if uploaded_file is not None:
+        # Save to temp/docs dir
+        save_path = os.path.join(DOCS_DIR, uploaded_file.name)
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success(f"Archivo guardado en: `{save_path}`")
+        
+        if st.button("🚀 Procesar e Ingestar", type="primary"):
+            from agnostic_agent.knowledge_offline import ingest_pdf_file
+            
+            with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
+                try:
+                    res = ingest_pdf_file(save_path, DB_PATH)
+                    if "error" in res:
+                        st.error(f"Error: {res['error']}")
+                    else:
+                        st.balloons()
+                        st.success("¡Ingesta completada!")
+                        st.json(res)
+                except Exception as e:
+                    st.error(f"Excepción crítica: {e}")
+
+    st.divider()
+    
+    # DB Stats
+    st.markdown("### 📊 Estado de la Base de Datos")
+    try:
+        from agnostic_agent.knowledge_offline import get_stats
+        stats = get_stats(DB_PATH)
+        c1, c2 = st.columns(2)
+        c1.metric("Chunks Indexados", stats.get("chunks", 0))
+        c2.metric("Archivos Únicos", stats.get("files", 0))
+    except ImportError:
+        st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
+    except Exception as e:
+        st.warning(f"No se pudo leer la DB: {e}")
+

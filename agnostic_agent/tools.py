@@ -815,6 +815,37 @@ def judge_row_with_context(
 
 
 # ─────────────────────────────────────────────
+# KNOWLEDGE BASE SEARCH (Offline / Local DB)
+# ─────────────────────────────────────────────
+
+@tool
+def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
+    """
+    Busca información relevante en la base de datos de conocimiento local (PDFs procesados).
+    Retorna fragmentos de texto (chunks) con su contexto y metadatos fuente.
+    
+    Útil para responder preguntas basadas en documentos ingestados previamente.
+    """
+    try:
+        from agnostic_agent.knowledge_offline import search_db
+    except ImportError:
+        return [{"error": "Module knowledge_offline not found."}]
+
+    # Default path used in streamlit_app.py
+    # Ideally should be in a config/env, but this aligns with current implementation
+    db_path = os.path.join(os.getcwd(), "embeddings.db")
+    
+    if not os.path.exists(db_path):
+        return [{"warning": "No knowledge base found (embeddings.db). Please ingest documents via the Offline Manager tab."}]
+        
+    try:
+        results = search_db(db_path, query, top_k=5)
+        return results
+    except Exception as e:
+        return [{"error": f"Search failed: {e}"}]
+
+
+# ─────────────────────────────────────────────
 # Registro de tools
 # ─────────────────────────────────────────────
 
@@ -831,6 +862,7 @@ TOOL_REGISTRY: Dict[str, Any] = {
     "embed_context_tables": embed_context_tables,
     "rerank_qwen3": rerank_qwen3,
     "judge_row_with_context": judge_row_with_context,
+    "search_knowledge_base": search_knowledge_base,
 }
 
 
