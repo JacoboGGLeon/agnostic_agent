@@ -319,15 +319,15 @@ def _mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) ->
     counts = mask.sum(dim=1).clamp(min=1e-9)
     return torch.nn.functional.normalize(summed / counts, dim=1)
 
+@torch.inference_mode()
 def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
     if not texts:
         return np.zeros((0, EMB_DIM), dtype="float32")
 
-    # 1. Try vLLM first
-    # Check explicitly or just try? 
-    # To avoid timeout on every call, we can check env var or valid connection once.
-    # For now, let's try calling it if configured.
-    use_vllm = os.getenv("USE_VLLM_EMBEDDING", "1") == "1"
+    # 1. Try vLLM first IF configured and available
+    # User logs show 404 for embeddings, so vLLM is likely LLM-only.
+    # We'll check the env var but default to False if not explicitly set to force usage.
+    use_vllm = os.getenv("USE_VLLM_EMBEDDING", "0") == "1"
     
     if use_vllm:
         try:
@@ -336,7 +336,6 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
             all_vecs = []
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
-                # Replace newlines as recommended for some models, though Qwen usually handles it
                 batch = [t.replace("\n", " ") for t in batch] 
                 
                 resp = client.embeddings.create(input=batch, model=EMB_MODEL_REPO)
@@ -344,12 +343,16 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
                 all_vecs.append(np.array(vecs, dtype="float32"))
             
             return np.vstack(all_vecs)
-        except Exception:
-             logger.warning("vLLM embedding failed, falling back to local Transformers.")
+        except Exception as e:
+             logger.warning(f"vLLM embedding failed ({e}), falling back to local Transformers.")
     
-    # 2. Local Fallback
+    # 2. Local Fallback (CPU/GPU)
+    # This is the primary path if vLLM embeddings are disabled (start_emb_server=False)
     tokenizer, model = get_embedder()
     all_vecs = []
+    
+    # Ensure model is in eval mode
+    model.eval()
 
     for i in range(0, len(texts), batch_size):
         batch_texts = texts[i : i + batch_size]
@@ -361,10 +364,9 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
             return_tensors="pt"
         ).to(model.device)
         
-        with torch.no_grad():
-            out = model(**inputs)
-            vecs = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
-            all_vecs.append(vecs.float().cpu().numpy())
+        out = model(**inputs)
+        vecs = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
+        all_vecs.append(vecs.float().cpu().numpy())
     
     return np.vstack(all_vecs)
 
