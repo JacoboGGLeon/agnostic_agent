@@ -901,6 +901,10 @@ def build_graph_agent(
         if available_skills_txt:
             sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"
             
+        # Refuerzo para latencia: si el usuario desactivó el pensamiento
+        if cfg and not cfg.enable_thinking:
+            sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON block."
+            
         sys_msg = SystemMessage(content=sys_content)
         # Enviamos un mensaje dummy de usuario para activar la generación
         user_msg = HumanMessage(content="Analiza mi petición y genera el JSON.")
@@ -1072,35 +1076,36 @@ def build_graph_agent(
         
         # 3. Preparar Prompt DAG
         from agnostic_agent.prompts import PLANNER_DAG_SYSTEM_PROMPT
-        import json
         
         # Inyectar variables
         sys_content = PLANNER_DAG_SYSTEM_PROMPT
         
-        # Crear mensaje de usuario con los inputs estructurados
-        planner_input = {
-            "subqueries": subqs,
-            "context_summary": "Ver System Prompt para definitions.",
-            "available_tools_names": [t.name for t in active_tools],
-            "available_kb_names": active_kb_names
-        }
+        # Si el usuario desactivó el pensamiento, forzamos al modelo en el prompt
+        if cfg and not cfg.enable_thinking:
+            sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON DAG block."
         
-        user_msg = HumanMessage(content=f"""
-CONTEXTO DISPONIBLE:
+        # Crear mensaje de usuario con los inputs estructurados
+        user_msg_content = f"""CONTEXTO DISPONIBLE:
 {rich_context_text}
 
 TAREA:
-Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
-""")
-        
+Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
+
+        user_msg = HumanMessage(content=user_msg_content)
         sys_msg = SystemMessage(content=sys_content)
         
-        # 4. Invocar Planner LLM
+        # 4. Invocar Planner LLM (Pasando historia relevante)
+        # Filtramos solo mensajes reales (Human/AI) para no saturar con mensajes internos del pipeline
+        history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
+        # Pero quitamos el último mensaje de usuario si ya lo estamos inyectando en user_msg_content
+        # O mejor, usamos la historia y el sys_msg + el user_msg con el contexto.
+        
         tool_calls = []
         llm_raw_out = ""
         
         try:
-            response = planner_llm.invoke([sys_msg, user_msg])
+            # Enviamos [sys, ...history, user]
+            response = planner_llm.invoke([sys_msg] + history[:-1] + [user_msg])
             llm_raw_out = response.content
             
             # 5. Parseo DAG JSON (Wait! Clean thinking first)
@@ -1421,6 +1426,11 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
                 "- Citas: Si es posible, menciona la fuente (ej: 'según el documento X...').\n"
                 "- Responde en el mismo idioma del usuario."
             )
+            
+            # Refuerzo para latencia
+            if cfg and not cfg.enable_thinking:
+                hybrid_sys += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the final natural language answer."
+            
             hybrid_user_msg = (
                 f"Pregunta del usuario: {user_prompt}\n\n"
                 f"Información de Herramientas (Contexto):\n{tools_summary_text}\n\n"
@@ -1731,7 +1741,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
         ["executor", "summarizer"],
     )
     builder.add_edge("executor", "catcher")
-    builder.add_edge("catcher", "planner")  # ✅ Loop back to planner for multi-turn
+    builder.add_edge("catcher", "summarizer")  # ✅ Fixed: Loop to summarizer to stop infinite DAG replanning
     builder.add_edge("summarizer", "validator")
     builder.add_edge("validator", END)
 
