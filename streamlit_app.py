@@ -279,8 +279,8 @@ with st.sidebar:
     # Models Section
     st.markdown("#### 🤖 Models")
     
-    llm_name = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
-    emb_name = os.getenv("EMB_SERVED_NAME", "Qwen/Qwen3-Embedding-0.6B")
+    llm_name = os.getenv("LLM_SERVED_NAME", "custom-llm-model")
+    emb_name = os.getenv("EMB_SERVED_NAME", "custom-embedding-model")
     
     # st.caption("Planner / Main LLM")
     planner_model_name = st.text_input("Model Name", value=llm_name, disabled=True)

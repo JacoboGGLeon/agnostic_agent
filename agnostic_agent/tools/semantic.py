@@ -347,7 +347,7 @@ def _ensure_reranker_loaded() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Importante: trust_remote_code=True si el modelo lo requiere (Qwen, etc.)
+    # Importante: trust_remote_code=True si el modelo lo requiere (Custom architectures, etc.)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         trust_remote_code=True,

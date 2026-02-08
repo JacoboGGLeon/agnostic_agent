@@ -337,9 +337,9 @@ def _extract_tool_calls_via_xmlish_bracescan(text: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _extract_qwen_xml_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
+def _extract_xml_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     """
-    Fallback robusto para Qwen3-XML:
+    Fallback robusto para modelos con salida XML (tipo Qwen/Anthropic):
       1) intenta XML real (ElementTree) con wrapper <root>
       2) si falla (XML roto), usa búsqueda xml-ish + brace-scan
     Luego normaliza a {"id","name","args"} (misma forma que el resto).
@@ -374,9 +374,9 @@ def extract_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     """
     API robusta para obtener tool_calls de un AIMessage.
     Compatible con:
-    - tool_calls nativos (OpenAI / qwen)
+    - tool_calls nativos (OpenAI / standard)
     - additional_kwargs["tool_calls"]
-    - XML qwen3-XML (<tool_call>{...}</tool_call>)
+    - XML-based calling (<tool_call>{...}</tool_call>)
     """
     if not isinstance(ai_msg, AIMessage):
         return []
@@ -392,7 +392,7 @@ def extract_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     if norm2:
         return norm2
 
-    return _extract_qwen_xml_calls(ai_msg)
+    return _extract_xml_tool_calls(ai_msg)
 
 
 def call_planner_with_retry(
@@ -1088,7 +1088,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             # Soportar dict o objeto ToolCall
             if isinstance(tc, dict):
                 name = tc.get("name")
-                args = tc.get("args", {}) or {}
+                args_raw = tc.get("args", {}) or {}
                 t_id = tc.get("id")
             else:
                 name = getattr(tc, "name", "")

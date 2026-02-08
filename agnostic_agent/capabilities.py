@@ -44,9 +44,9 @@ def _str_to_bool(x: str) -> bool:
 # Descarga de modelos (HF snapshot)
 # ─────────────────────────────────────────────
 
-DEFAULT_LLM_ID = "Qwen/Qwen3-0.6B"
-DEFAULT_EMB_ID = "Qwen/Qwen3-Embedding-0.6B"
-DEFAULT_RERANK_ID = "Qwen/Qwen3-Reranker-0.6B"
+DEFAULT_LLM_ID = "Qwen/Qwen3-0.6B" # Example default
+DEFAULT_EMB_ID = "Qwen/Qwen3-Embedding-0.6B" # Example default
+DEFAULT_RERANK_ID = "Qwen/Qwen3-Reranker-0.6B" # Example default
 
 @dataclass
 class LocalModelPaths:
@@ -131,12 +131,12 @@ class VllmConfig:
     rerank_max_num_seqs: int = int(os.getenv("VLLM_RERANK_MAX_NUM_SEQS", "4"))
 
     # Nombres "served_model_name" dentro de vLLM
-    llm_served_name: str = os.getenv("LLM_SERVED_NAME", "qwen3-0.6b")
-    emb_served_name: str = os.getenv("EMB_SERVED_NAME", "qwen3-embedding-0.6b")
-    rerank_served_name: str = os.getenv("RERANK_SERVED_NAME", "qwen3-reranker-0.6b")
+    llm_served_name: str = os.getenv("LLM_SERVED_NAME", "agnostic-llm")
+    emb_served_name: str = os.getenv("EMB_SERVED_NAME", "agnostic-embed")
+    rerank_served_name: str = os.getenv("RERANK_SERVED_NAME", "agnostic-rerank")
 
-    # Parser de tool-calls y razonamiento (alineado Qwen3 + langchain-qwq)
-    # Por defecto usamos el parser XML de Qwen3, que es el que mejor encaja con langchain-qwq.
+    # Parser de tool-calls y razonamiento
+    # Default: "qwen3_xml" (o "tool_calling_system" según soporte de vLLM)
     tool_call_parser: str = os.getenv("VLLM_TOOL_CALL_PARSER", "qwen3_xml")
     enable_reasoning: bool = _str_to_bool(os.getenv("VLLM_ENABLE_REASONING", "1"))
     reasoning_parser: Optional[str] = os.getenv("VLLM_REASONING_PARSER", "qwen3")
