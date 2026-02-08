@@ -141,35 +141,41 @@ section[data-testid="stSidebar"]{
   background: rgba(0,0,0,.28);
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: rgba(255,255,255,.92);
-}
-
 /* Agent/Assistant bubble (Right aligned, Orange/Standard) */
-div[data-testid="stChatMessage"]:nth-child(even) {
-    flex-direction: row-reverse;
-    background-color: rgba(255,255,255,0.05); /* Slight highlight */
-}
-div[data-testid="stChatMessage"]:nth-child(even) .stMarkdown {
-    text-align: right;
+div[data-testid="stChatMessage"] {
+    background-color: transparent !important;
 }
 
-/* User bubble (Left aligned, Purpleish as requested) */
-div[data-testid="stChatMessage"]:nth-child(odd) {
-    flex-direction: row;
-    background-color: transparent; 
-}
+/* Identificar msg de user (nth-child(odd) suele ser user si empieza user) */
+/* PERO mejor usaremos clases inyectadas en el HTML */
 
-/* Custom bubble styling for User */
+/* User bubble adjustment */
 .bubble-user{
   padding: 10px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(138, 43, 226, 0.45); /* Purple border */
+  border-top-left-radius: 4px; /* Opcional: estilo chat */
+  border: 1px solid rgba(138, 43, 226, 0.45);
   background: linear-gradient(180deg, rgba(138, 43, 226, 0.15), rgba(255,255,255,.02));
   box-shadow: 0 4px 12px rgba(0,0,0,.2);
   color: #E2D1F9;
+  width: fit-content;
+  max-width: 85%;
+  margin-right: auto; /* Force Left */
+}
+
+/* Agent bubble adjustment */
+.bubble-agent{
+  padding: 10px 12px;
+  border-radius: 16px;
+  border-top-right-radius: 4px; 
+  border: 1px solid rgba(255, 165, 0, 0.45); /* Orange border */
+  background: linear-gradient(180deg, rgba(255, 165, 0, 0.15), rgba(255,255,255,.02));
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  color: #FFE4B5;
+  width: fit-content;
+  max-width: 85%;
+  margin-left: auto; /* Force Right */
+  text-align: right;
 }
 
 /* Inspector wrapper */
@@ -179,35 +185,17 @@ div[data-testid="stChatMessage"]:nth-child(odd) {
   background: rgba(255,255,255,.05);
   box-shadow: var(--shadow);
   padding: 12px;
-  margin-top: 0px !important; /* Remove top margin/container effect */
-}
-.inspector-box{
-  border-radius: var(--r);
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.05);
-  box-shadow: var(--shadow);
-  padding: 16px;
-  margin-bottom: 20px;
-}
-.inspector h3{ margin: 0 0 6px 0; }
-
-/* Remove empty containers if any */
-div[data-testid="stVerticalBlock"] > div:has(> .element-container:empty) {
-    display: none;
+  margin-top: 0px !important; 
 }
 
-/* Expanders */
-[data-testid="stExpander"]{
-  border-radius: var(--r);
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,.04);
-  overflow:hidden;
-}
+/* Remove empty containers explicitly */
+div.element-container:has(iframe[height="0"]) { display: none; }
+div[data-testid="stVerticalBlock"] > div.element-container:empty { display: none; }
+div[data-testid="stVerticalBlock"] > div:has(> .element-container:empty) { display: none; }
 
-/* Chat spacing */
-[data-testid="stChatMessage"]{
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
+/* Remove extra padding from top of sidebar/main */
+.block-container {
+    padding-top: 2rem !important;
 }
 </style>
 """,
@@ -607,12 +595,19 @@ with tab_online:
                 badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
                 
                 with st.chat_message("assistant"):
-                    # Pretty answer only
-                    card_md(
-                        title=f"Respuesta {badge_html}",
-                        body_md=html.escape(content or "_(sin respuesta)_").replace("\n", "<br>"),
-                        icon="👤",
-                        hint=f"id={msg.get('id')}",
+                    # Custom Bubble for Agent
+                    # We wrap the content in a div with .bubble-agent class
+                    # And we manually render the "header" inside the bubble or just the text
+                    
+                    safe_content = html.escape(content or "_(sin respuesta)_").replace("\n", "<br>")
+                    st.markdown(
+                        f"""
+                        <div class="bubble-agent">
+                          <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 4px;">👤 Respuesta {badge_html} <span class="hint">id={msg.get('id')}</span></div>
+                          {safe_content}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
 
                     c1, c2, c3 = st.columns([1.2, 1.0, 0.8])

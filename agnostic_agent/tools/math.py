@@ -104,11 +104,8 @@ def sum_numbers(numbers: List[Any]) -> float:
     Devuelve la suma de una lista de números.
 
     La tool es robusta: acepta tanto números puros como estructuras
-    que contengan el número, por ejemplo:
-
-      - [1, 2.5, "3"]
-      - [{"value": 10}, {"number": "20"}]
-
+    que contengan el número.
+    
     Para evitar errores de validación Pydantic, el tipo es List[Any]
     y se hace coerción interna a float.
     """
