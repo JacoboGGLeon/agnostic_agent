@@ -1010,7 +1010,8 @@ with tab_offline:
     # (Simplemente no mostramos nada o ponemos un badge informativo)
     st.sidebar.info("Modo Unificado Activo (Hybrid + Skills)")
 
-    planner_model_name = st.sidebar.text_input("Planner Model", value="qwen2.5-14b-instruct")
+    default_model = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
+    planner_model_name = st.sidebar.text_input("Planner Model", value=default_model, help="Debe coincidir con el modelo servido en vLLM (o ignorarse si vLLM sirve solo uno).")
     temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
 
     # ... (resto de configs)

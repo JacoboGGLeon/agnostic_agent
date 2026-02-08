@@ -1004,7 +1004,6 @@ def build_graph_agent(
             system_message=current_sys_msg,
             user_or_history_messages=msgs,
             planner_config=cfg,
-            tools=tools
         )
 
         if not subqs:
