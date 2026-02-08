@@ -14,9 +14,10 @@ from agnostic_agent.tools import get_default_tools
 # Page
 # -----------------------------
 st.set_page_config(
-    page_title="Agnostic Agent · Chat Studio (Inspector)",
-    page_icon="🧪",
+    page_title="Agentic Lab · BBVA",
+    page_icon="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # -----------------------------
@@ -44,14 +45,14 @@ st.markdown(
     """
 <style>
 :root{
-  --bg: #0b1020;
-  --panel: rgba(255,255,255,.06);
-  --panel2: rgba(255,255,255,.08);
-  --border: rgba(255,255,255,.10);
+  --bg: #041731;
+  --panel: rgba(255,255,255,.07);
+  --panel2: rgba(255,255,255,.10);
+  --border: rgba(255,255,255,.14);
   --text: rgba(255,255,255,.92);
   --muted: rgba(255,255,255,.65);
-  --accent: #7c5cff;
-  --good: #2dd4bf;
+  --accent: #00A1E0;
+  --good: #49A5E6;
 
   --r: 18px;
   --r2: 14px;
@@ -61,17 +62,17 @@ st.markdown(
 
 .stApp{
   background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(124,92,255,.35), transparent 60%),
-    radial-gradient(900px 500px at 90% 0%, rgba(45,212,191,.18), transparent 60%),
-    linear-gradient(180deg, var(--bg), #070a14 60%, #050712);
+    radial-gradient(1200px 500px at 10% -10%, rgba(0,161,224,.30), transparent 60%),
+    radial-gradient(900px 500px at 90% 0%, rgba(73,165,230,.22), transparent 60%),
+    linear-gradient(180deg, var(--bg), #072146 60%, #001B44);
   color: var(--text);
 }
 
 .block-container{ padding-top: 1.0rem; padding-bottom: 1.6rem; }
 
 section[data-testid="stSidebar"]{
-  background: rgba(0,0,0,.18);
-  border-right: 1px solid rgba(255,255,255,.06);
+  background: rgba(7,33,70,.86);
+  border-right: 1px solid rgba(73,165,230,.28);
 }
 
 .topbar{
@@ -85,12 +86,10 @@ section[data-testid="stSidebar"]{
   margin-bottom: 10px;
 }
 .brand{display:flex; align-items:center; gap:10px;}
-.logo{
-  width: 38px; height: 38px; border-radius: 12px;
-  display:flex; align-items:center; justify-content:center;
-  background: linear-gradient(135deg, rgba(124,92,255,.9), rgba(45,212,191,.6));
-  box-shadow: 0 10px 25px rgba(124,92,255,.22);
-  font-size: 18px;
+.logo-img{
+  width: 108px;
+  height: auto;
+  object-fit: contain;
 }
 .title{font-size: 15px; font-weight: 800; line-height: 1.1;}
 .subtitle{font-size: 12px; color: var(--muted);}
@@ -104,8 +103,8 @@ section[data-testid="stSidebar"]{
   background: rgba(255,255,255,.06);
   color: var(--text);
 }
-.badge.accent{ border-color: rgba(124,92,255,.45); }
-.badge.good{ border-color: rgba(45,212,191,.45); }
+.badge.accent{ border-color: rgba(0,161,224,.55); }
+.badge.good{ border-color: rgba(73,165,230,.55); }
 
 .card{
   border-radius: var(--r);
@@ -161,8 +160,8 @@ div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
 .bubble-user{
   padding: 10px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(124,92,255,.35);
-  background: linear-gradient(180deg, rgba(124,92,255,.22), rgba(255,255,255,.05));
+  border: 1px solid rgba(0,161,224,.45);
+  background: linear-gradient(180deg, rgba(0,161,224,.22), rgba(255,255,255,.05));
   box-shadow: 0 8px 24px rgba(0,0,0,.25);
 }
 
@@ -224,7 +223,12 @@ if "export_json" not in st.session_state:
 # -----------------------------
 with st.sidebar:
     # Sidebar Header
-    st.markdown("### Agnostic Agent · Settings")
+    st.image(
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png",
+        width=140,
+    )
+    st.markdown("### Agentic Lab · Settings")
+    st.caption("Un framework de agentes de BBVA")
 
     st.markdown("#### 🧭 Inspector")
     show_inspector = st.toggle("Activar Inspector", value=True)
@@ -497,9 +501,10 @@ st.markdown(
     f"""
 <div class="topbar">
   <div class="brand">
-    <div class="logo">🧪</div>
+    <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
     <div>
-      <div class="title">Agnostic Agent · Chat Studio</div>
+      <div class="title">Agentic Lab</div>
+      <div class="subtitle">Un framework de agentes de BBVA</div>
     </div>
   </div>
   <div class="badges">

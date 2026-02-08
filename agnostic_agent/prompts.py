@@ -44,7 +44,7 @@ LOGIC_DEFINITIONS = """
 # ─────────────────────────────────────────────
 
 
-ANALYZER_SYSTEM_PROMPT: str = f"""
+ANALYZER_SYSTEM_PROMPT: str = """
 Eres el ANALYZER de un agente de IA de propósito general.
 
 Tu trabajo es LEER con cuidado la petición del usuario y devolver un
@@ -123,7 +123,7 @@ Instrucciones:
    - otro código ISO simple si detectas otro idioma.
 
 6) No añadas comentarios fuera del JSON. Devuelve SOLO el JSON.
-""".strip()
+""".strip().replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
 
 
 def build_analyzer_system_message() -> SystemMessage:
