@@ -506,7 +506,10 @@ with tab_online:
 
             elif role == "assistant":
                 out = msg.get("out") or {}
-                answer = strip_user_prefix(as_text(out.get("user_out")))
+                content = msg.get("content") or ""
+                # Try to get mode from 'out', fallback to session state if current run, else '?'
+                used_mode = out.get("agent_mode", "")
+                
                 raw_state = get_raw_state(out)
                 tool_runs = extract_tool_runs(out, raw_state)
 
@@ -516,14 +519,6 @@ with tab_online:
                 
                 import datetime
                 for tr in tool_runs:
-                    # Check if this run is already logged to avoid duplicates? 
-                    # Simpler is to just append, but we might get duplicates on re-runs.
-                    # Ideally, logging should happen inside the agent, but here we extract for display.
-                    # We'll prepend to be newer first, or append and show reversed.
-                    
-                    # Using a simple signature to avoid dupes in this session view if needed, 
-                    # but for now let's just add them.
-                    
                     log_entry = {
                         "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
                         "tool": tr.get("name", "unknown"),
@@ -531,11 +526,6 @@ with tab_online:
                         "output": tr.get("output", "")
                     }
                     st.session_state["tool_logs"].append(log_entry)
-              elif role == "assistant":
-                out = msg.get("out") or {}
-                content = msg.get("content") or ""
-                # Try to get mode from 'out', fallback to session state if current run, else '?'
-                used_mode = out.get("agent_mode", "")
                 
                 badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
                 
