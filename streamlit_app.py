@@ -215,11 +215,7 @@ if "export_json" not in st.session_state:
 # -----------------------------
 with st.sidebar:
     st.markdown("## Agnostic Agent · Chat Studio")
-    agent_mode = st.selectbox(
-        "Agentic Policy Mode",
-        ["tools_strict", "free_policies", "hybrid"],
-        index=["tools_strict", "free_policies", "hybrid"].index(st.session_state.agent_mode),
-    )
+    # agent_mode selector removed (Unified only)
 
     show_inspector = st.toggle("🧭 Inspector", value=True)
     
@@ -241,7 +237,7 @@ with st.sidebar:
             st.rerun()
 
         if st.button("⬇️ Export transcript", use_container_width=True):
-            export = {"agent_mode": st.session_state.agent_mode, "messages": st.session_state.messages}
+            export = {"messages": st.session_state.messages}
             st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
             st.toast("Transcript listo.", icon="⬇️")
 
@@ -254,11 +250,7 @@ with st.sidebar:
                 use_container_width=True,
             )
 
-# Mode change => reset agent (history stays)
-if st.session_state.agent_mode != agent_mode:
-    st.session_state.agent_mode = agent_mode
-    st.session_state.agent = None
-    st.toast(f"Modo: {agent_mode}", icon="🧭")
+# (Mode change logic removed)
 
 # -----------------------------
 # Helpers
@@ -267,16 +259,12 @@ def next_id() -> int:
     st.session_state.msg_counter += 1
     return st.session_state.msg_counter
 
-def get_or_init_agent(mode: str) -> Agent:
+def get_or_init_agent() -> Agent:
     if st.session_state.agent is None:
-        # Actualizamos envs por si acaso, aunque Agent.init(PlannerConfig(...)) es más explícito
-        os.environ["PLANNER_POLICY_MODE"] = mode
-        os.environ["AGENT_POLICY_MODE"] = mode
-        
-        with st.spinner(f"Inicializando agente (mode={mode})…"):
+        with st.spinner(f"Inicializando agente (Unified Mode)…"):
             try:
-                # CREAMOS CONFIG DE PLANNER EXPLÍCITA
-                cfg = PlannerConfig(policy_mode=mode)
+                # CREAMOS CONFIG DE PLANNER EXPLÍCITA (Unified Mode default)
+                cfg = PlannerConfig()
                 
                 # Inicializamos pasando esa config
                 st.session_state.agent = Agent.init(config_or_setup=cfg)
@@ -468,9 +456,6 @@ if st.session_state.selected_msg_id is None:
 # -----------------------------
 # Top bar
 # -----------------------------
-mode_badge = "tools_strict" if st.session_state.agent_mode == "tools_strict" else "free_policies"
-mode_class = "accent" if st.session_state.agent_mode == "tools_strict" else "good"
-
 st.markdown(
     f"""
 <div class="topbar">
@@ -481,7 +466,7 @@ st.markdown(
     </div>
   </div>
   <div class="badges">
-    <span class="badge {mode_class}">🧭 {mode_badge}</span>
+    <span class="badge accent">🧭 Unified Mode</span>
     <!-- <span class="badge">🔎 inspector: on</span> -->
   </div>
 </div>
@@ -661,11 +646,11 @@ with tab_online:
             "id": uid, 
             "role": "user", 
             "content": prompt, 
-            "out": {"agent_mode": st.session_state.agent_mode} 
+            "out": {"agent_mode": "unified"} 
         }
         st.session_state.messages.append(msg_payload)
 
-        agent = get_or_init_agent(st.session_state.agent_mode)
+        agent = get_or_init_agent()
         try:
             # Pass full params if strict mode or updated logic requires
             raw_out = agent.run_turn(prompt)
@@ -690,7 +675,7 @@ with tab_offline:
     # Instantiate agent (the tool config is applied inside the agent init or run loop if logic permits, 
     # but here we update the instance's tool list for hot-swapping if possible)
     
-    agent = get_or_init_agent(st.session_state.agent_mode)
+    agent = get_or_init_agent()
     
     # Apply tools_config dynamically:
     if "tools_config" in st.session_state:
@@ -706,7 +691,7 @@ with tab_offline:
     # Since we can't easily hook without changing Agent class, we'll rely on the Agent's output 
     # to populate 'tool_logs' in the processing loop (tab_online).
     
-    agent = get_or_init_agent(st.session_state.agent_mode)
+    agent = get_or_init_agent()
     
     # If we want to apply the tools_config dynamically:
     if "tools_config" in st.session_state:

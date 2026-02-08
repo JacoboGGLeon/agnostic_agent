@@ -1,7 +1,7 @@
 ---
 name: "semantic_researcher"
 description: "Investigador Semántico que utiliza todas las herramientas y conocimientos disponibles para responder con citas y fundamentos."
-tools: ["search_knowledge_base", "semantic_search_in_csv", "rerank_qwen3", "to_upper", "word_count"]
+tools: ["search_knowledge_base", "semantic_search_in_csv", "rerank_qwen3"]
 knowledge: ["*"]
 ---
 
