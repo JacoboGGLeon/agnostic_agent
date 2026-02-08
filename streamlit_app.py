@@ -148,6 +148,15 @@ section[data-testid="stSidebar"]{
   color: rgba(255,255,255,.92);
 }
 
+/* Right-align assistant messages (best effort assumption: alternating user/ai) */
+div[data-testid="stChatMessage"]:nth-child(even) {
+    flex-direction: row-reverse;
+    background-color: rgba(255,255,255,0.02);
+}
+div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
+    text-align: right;
+}
+
 /* User bubble */
 .bubble-user{
   padding: 10px 12px;
@@ -214,8 +223,8 @@ if "export_json" not in st.session_state:
 # Sidebar controls
 # -----------------------------
 with st.sidebar:
-    st.markdown("## Agnostic Agent · Chat Studio")
-    # agent_mode selector removed (Unified only)
+    # Header removed per user request (merged into Session Info)
+
 
     show_inspector = st.toggle("🧭 Inspector", value=True)
     
@@ -226,29 +235,38 @@ with st.sidebar:
         show_dev_tab = st.checkbox("🔍 Dev", value=True)
 
     # Session Info in Expander to save space
-    with st.expander("ℹ️ Session Info & Actions", expanded=False):
-        st.caption(f"Mensajes: {len(st.session_state.messages)}")
-        
-        if st.button("🗑️ Limpiar todo", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.agent = None
-            st.session_state.selected_msg_id = None
-            st.toast("Chat reiniciado.", icon="🧹")
-            st.rerun()
+    # Session Info (Static, no expander)
+    st.markdown("### Agnostic Agent · Chat Studio")
+    # with st.expander removed, content unindented below
+    # Note: We must unindent the block. Since multi-replace replaces the *target content*, 
+    # and the target content is the expander line, I need to check indentation of the block.
+    # The block below uses `with st.expander...`.
+    # I will replace the `with st.expander...` line with the header, but I can't easily unindent the *body* 
+    # unless I include the body in the target content.
+    # Let's include the body in the target content.
 
-        if st.button("⬇️ Export transcript", use_container_width=True):
-            export = {"messages": st.session_state.messages}
-            st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
-            st.toast("Transcript listo.", icon="⬇️")
+    st.caption(f"Mensajes: {len(st.session_state.messages)}")
+    
+    if st.button("🗑️ Limpiar todo", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.agent = None
+        st.session_state.selected_msg_id = None
+        st.toast("Chat reiniciado.", icon="🧹")
+        st.rerun()
 
-        if isinstance(st.session_state.export_json, str):
-            st.download_button(
-                "Descargar JSON",
-                data=st.session_state.export_json,
-                file_name="transcript.json",
-                mime="application/json",
-                use_container_width=True,
-            )
+    if st.button("⬇️ Export transcript", use_container_width=True):
+        export = {"messages": st.session_state.messages}
+        st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
+        st.toast("Transcript listo.", icon="⬇️")
+
+    if isinstance(st.session_state.export_json, str):
+        st.download_button(
+            "Descargar JSON",
+            data=st.session_state.export_json,
+            file_name="transcript.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
 # (Mode change logic removed)
 
@@ -466,7 +484,7 @@ st.markdown(
     </div>
   </div>
   <div class="badges">
-    <span class="badge accent">🧭 Unified Mode</span>
+    <!-- Unified Mode badge removed -->
     <!-- <span class="badge">🔎 inspector: on</span> -->
   </div>
 </div>
@@ -603,24 +621,13 @@ with tab_online:
                         elif tab_key == "deep":
                             # Render Deep/Summary with real Markdown support
                             # We split the card HTML to inject the markdown in between
-                            st.markdown(
-                                """
-                                <div class="card">
-                                  <div class="card-h">
-                                    <div>🧠 Vista profunda (deep_out / summary)</div>
-                                    <span class="hint">pipeline</span>
-                                  </div>
-                                  <div class="card-b">
-                                """, 
-                                unsafe_allow_html=True
-                            )
+                            st.markdown("### 🧠 Vista profunda (deep_out / summary)")
+                            st.caption("pipeline")
                             
                             if deep_txt:
                                 st.markdown(deep_txt)
                             else:
                                 st.markdown("_(vacío)_")
-                                
-                            st.markdown("</div></div>", unsafe_allow_html=True)
 
                         elif tab_key == "dev":
                             render_tool_runs(tool_runs)
@@ -1004,11 +1011,8 @@ with tab_offline:
     # --------------------------------------------------------------------------
     # 4. Agent Config
     # --------------------------------------------------------------------------
-    st.sidebar.markdown("### ⚙️ Agent Config")
+    # Agent Config header and info removed per user request
 
-    # Eliminamos el selector de Policy Mode. Ahora es "Unified/Hybrid".
-    # (Simplemente no mostramos nada o ponemos un badge informativo)
-    st.sidebar.info("Modo Unificado Activo (Hybrid + Skills)")
 
     default_model = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
     planner_model_name = st.sidebar.text_input("Planner Model", value=default_model, help="Debe coincidir con el modelo servido en vLLM (o ignorarse si vLLM sirve solo uno).")
