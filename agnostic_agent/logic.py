@@ -999,12 +999,22 @@ def build_graph_agent(
                 )
             )
 
+        # Recuperar subqueries si existen
+        subqs = analyzer.get("subqueries") or []
+
         ai_msg: AIMessage = call_planner_with_retry(
             planner_llm=planner_llm,
             system_message=current_sys_msg,
             user_or_history_messages=msgs,
             planner_config=cfg,
         )
+        
+        # Extract tool calls locally for the node logic
+        tool_calls = extract_tool_calls(ai_msg)
+        
+        # Prepare raw/clean outputs
+        llm_raw_out = _coerce_content_str(ai_msg.content)
+        llm_clean_out = strip_think(llm_raw_out)
 
         if not subqs:
             user_messages = [m for m in msgs if isinstance(m, HumanMessage)]
