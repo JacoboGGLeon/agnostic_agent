@@ -444,7 +444,12 @@ class Agent:
         if agent_in.metadata:
             user_id = agent_in.metadata.get("user_id")
 
-        kb_names = agent_in.kb_names or []
+        # Force default to ALL registered KBs if none specified
+        # This fixes the issue where Planner sees "(No knowledge bases active)"
+        # when running from Streamlit without explicit kb_names in payload.
+        kb_names = agent_in.kb_names
+        if not kb_names:
+            kb_names = [kb.name for kb in self.knowledge_bases]
 
         # Seleccionar KBs activas para este turno (si kb_names está vacío, usamos todas)
         kb_selected = get_kb_by_names(kb_names, self.knowledge_bases)

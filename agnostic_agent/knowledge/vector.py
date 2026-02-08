@@ -6,7 +6,7 @@ import hashlib
 import sqlite3
 import logging
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any, Union
+from typing import List, Tuple, Optional, Dict, Any, Union, Callable
 
 import numpy as np
 import torch
@@ -490,20 +490,35 @@ def get_stats(db_path: str) -> Dict[str, Any]:
 # Main Facade
 # -----------------------------------------------------------------------------
 
-def ingest_pdf_file(pdf_path: str, db_path: str, k_neighbors: int = 1) -> Dict[str, Any]:
+def ingest_pdf_file(
+    pdf_path: str, 
+    db_path: str, 
+    k_neighbors: int = 1,
+    progress_callback: Optional[Callable[[float, str], None]] = None
+) -> Dict[str, Any]:
     """High-level function to ingest a PDF."""
     if not os.path.exists(pdf_path):
         return {"error": f"File not found: {pdf_path}"}
+
+    def _update_progress(p: float, msg: str):
+        if progress_callback:
+            progress_callback(p, msg)
+
+    _update_progress(0.1, "Analyzing document structure (Parsing)...")
 
     # 1. Parse
     nodes, total_pages = parse_pdf(pdf_path)
     if not nodes:
         return {"error": "No text extracted from PDF."}
 
+    _update_progress(0.3, f"Parsed {total_pages} pages. Creating chunks...")
+
     # 2. Chunk
     chunks = build_chunks(nodes, k_neighbors=k_neighbors)
     if not chunks:
         return {"error": "No chunks created."}
+
+    _update_progress(0.5, f"Created {len(chunks)} chunks. Embedding...")
 
     # 3. Embed
     try:
@@ -512,12 +527,16 @@ def ingest_pdf_file(pdf_path: str, db_path: str, k_neighbors: int = 1) -> Dict[s
     except Exception as e:
         return {"error": f"Embedding failed: {e}"}
 
+    _update_progress(0.9, "Storing vectors in database...")
+
     # 4. Store
     try:
         init_db(db_path) 
         upsert_chunks(db_path, chunks, embeddings)
     except Exception as e:
         return {"error": f"Database insertion failed: {e}"}
+    
+    _update_progress(1.0, "Ingestion complete!")
 
     return {
         "success": True,

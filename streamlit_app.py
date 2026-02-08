@@ -223,41 +223,37 @@ if "export_json" not in st.session_state:
 # Sidebar controls
 # -----------------------------
 with st.sidebar:
-    # Header removed per user request (merged into Session Info)
+    # Sidebar Header
+    st.markdown("### Agnostic Agent · Settings")
 
-
-    show_inspector = st.toggle("🧭 Inspector", value=True)
+    st.markdown("#### 🧭 Inspector")
+    show_inspector = st.toggle("Activar Inspector", value=True)
     
     if show_inspector:
         st.caption("Vistas:")
         show_thinking_tab = st.checkbox("🧠 Thinking", value=True)
         show_deep_tab = st.checkbox("🧠 Deep", value=True)
         show_dev_tab = st.checkbox("🔍 Dev", value=True)
+    
+    st.divider()
 
-    # Session Info in Expander to save space
-    # Session Info (Static, no expander)
-    st.markdown("### Agnostic Agent · Chat Studio")
-    # with st.expander removed, content unindented below
-    # Note: We must unindent the block. Since multi-replace replaces the *target content*, 
-    # and the target content is the expander line, I need to check indentation of the block.
-    # The block below uses `with st.expander...`.
-    # I will replace the `with st.expander...` line with the header, but I can't easily unindent the *body* 
-    # unless I include the body in the target content.
-    # Let's include the body in the target content.
-
+    # Session / Transcript
     st.caption(f"Mensajes: {len(st.session_state.messages)}")
     
-    if st.button("🗑️ Limpiar todo", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.agent = None
-        st.session_state.selected_msg_id = None
-        st.toast("Chat reiniciado.", icon="🧹")
-        st.rerun()
-
-    if st.button("⬇️ Export transcript", use_container_width=True):
-        export = {"messages": st.session_state.messages}
-        st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
-        st.toast("Transcript listo.", icon="⬇️")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🗑️ Limpiar", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.agent = None
+            st.session_state.selected_msg_id = None
+            st.toast("Chat reiniciado.", icon="🧹")
+            st.rerun()
+            
+    with c2:
+        if st.button("⬇️ Export", use_container_width=True):
+            export = {"messages": st.session_state.messages}
+            st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
+            st.toast("Transcript listo.", icon="⬇️")
 
     if isinstance(st.session_state.export_json, str):
         st.download_button(
@@ -267,6 +263,24 @@ with st.sidebar:
             mime="application/json",
             use_container_width=True,
         )
+
+    st.divider()
+
+    # Models Section
+    st.markdown("#### 🤖 Models")
+    
+    llm_name = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
+    emb_name = os.getenv("EMB_SERVED_NAME", "Qwen/Qwen3-Embedding-0.6B")
+    
+    st.caption("Planner / Main LLM")
+    planner_model_name = st.text_input("Model Name", value=llm_name, disabled=True)
+    
+    st.caption("Embedding Server")
+    st.text_input("Emb Name", value=emb_name, disabled=True)
+
+    temperature = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+
+    # Removed old session info block (merged above)
 
 # (Mode change logic removed)
 
@@ -282,7 +296,12 @@ def get_or_init_agent() -> Agent:
         with st.spinner(f"Inicializando agente (Unified Mode)…"):
             try:
                 # CREAMOS CONFIG DE PLANNER EXPLÍCITA (Unified Mode default)
-                cfg = PlannerConfig()
+                # Usamos las variables globales definidas en el sidebar (top-level scope)
+                cfg = PlannerConfig(
+                    model_name=planner_model_name if 'planner_model_name' in globals() else None,
+                    temperature=temperature if 'temperature' in globals() else 0.0,
+                    max_steps=16,
+                )
                 
                 # Inicializamos pasando esa config
                 st.session_state.agent = Agent.init(config_or_setup=cfg)
@@ -739,75 +758,80 @@ with tab_offline:
             if st.button("🚀 Procesar e Ingestar", type="primary"):
                 from agnostic_agent.knowledge.vector import ingest_pdf_file
                 
-                with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
-                    try:
-                        res = ingest_pdf_file(save_path, DB_PATH)
-                        if "error" in res:
-                            st.error(f"Error: {res['error']}")
-                            st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
-                        else:
-                            st.balloons()
-                            st.success("¡Ingesta completada!")
-                            st.json(res)
-                            
-                            # Log to history
-                            from agnostic_agent.knowledge.vector import log_ingestion_event
-                            
-                            # Construct metadata
-                            meta = {
-                                "file": uploaded_file.name,
-                                "chunks": res.get("chunks_inserted", 0),
-                                "db_path": DB_PATH,
-                                "status": "success"
-                            }
-                            # JSONL file in same dir as docs
-                            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
-                            log_ingestion_event(meta, history_file)
-                            
-                    except Exception as e:
-                        st.error(f"Excepción crítica: {e}")
+                progress_bar = st.progress(0.0, text="Iniciando...")
+                
+                def _streamlit_progress_cb(p: float, msg: str):
+                    progress_bar.progress(p, text=msg)
 
-        st.divider()
+                # with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
+                try:
+                    res = ingest_pdf_file(save_path, DB_PATH, progress_callback=_streamlit_progress_cb)
+                    if "error" in res:
+                        st.error(f"Error: {res['error']}")
+                        st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
+                    else:
+                        st.balloons()
+                        st.success("¡Ingesta completada!")
+                        st.json(res)
+                        
+                        # Log to history
+                        from agnostic_agent.knowledge.vector import log_ingestion_event
+                        
+                        # Construct metadata
+                        meta = {
+                            "file": uploaded_file.name,
+                            "chunks": res.get("chunks_inserted", 0),
+                            "db_path": DB_PATH,
+                            "status": "success"
+                        }
+                        # JSONL file in same dir as docs
+                        history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+                        log_ingestion_event(meta, history_file)
+                        
+                except Exception as e:
+                    st.error(f"Excepción crítica: {e}")
+
+    st.divider()
+    
+    # DB Stats
+    st.markdown("### 📊 Estado de la Base de Datos")
+    try:
+        # FORCE RELOAD to ensure new functions are picked up
+        import sys
+        import importlib
+        import agnostic_agent.knowledge.vector
+        importlib.reload(agnostic_agent.knowledge.vector)
+        from agnostic_agent.knowledge.vector import get_stats, get_ingestion_history
         
-        # DB Stats
-        st.markdown("### 📊 Estado de la Base de Datos")
-        try:
-            # FORCE RELOAD to ensure new functions are picked up
-            import sys
-            import importlib
-            import agnostic_agent.knowledge.vector
-            importlib.reload(agnostic_agent.knowledge.vector)
-            from agnostic_agent.knowledge.vector import get_stats, get_ingestion_history
-            
-            stats = get_stats(DB_PATH)
-            
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("Chunks / Vectores", f"{stats.get('vector_count', 0)}")
-            s2.metric("Archivos", stats.get("files", 0))
-            
-            # Format bytes to MB
-            sz = stats.get("size_bytes", 0)
-            sz_mb = f"{sz / (1024*1024):.2f} MB"
-            s3.metric("Tamaño en Disco", sz_mb)
-            
-            s4.metric("Dimensiones", stats.get("dim", 0))
-            
-            st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
-            
-            st.markdown("#### 📜 Historial de Ingesta (Persistente)")
-            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
-            history = get_ingestion_history(history_file)
-            
-            if history:
-                # Convert to dataframe for nicer display
-                st.dataframe(history, use_container_width=True)
-            else:
-                st.write("_(Sin historial previo)_")
+        stats = get_stats(DB_PATH)
+        
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Chunks / Vectores", f"{stats.get('vector_count', 0)}")
+        s2.metric("Archivos", stats.get("files", 0))
+        
+        # Format bytes to MB
+        sz = stats.get("size_bytes", 0)
+        sz_mb = f"{sz / (1024*1024):.2f} MB"
+        s3.metric("Tamaño en Disco", sz_mb)
+        
+        s4.metric("Dimensiones", stats.get("dim", 0))
+        
+        st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
+        
+        st.markdown("#### 📜 Historial de Ingesta (Persistente)")
+        history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+        history = get_ingestion_history(history_file)
+        
+        if history:
+            # Convert to dataframe for nicer display
+            st.dataframe(history, use_container_width=True)
+        else:
+            st.write("_(Sin historial previo)_")
 
-        except ImportError:
-            st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
-        except Exception as e:
-            st.warning(f"No se pudo leer la DB: {e}")
+    except ImportError:
+        st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
+    except Exception as e:
+        st.warning(f"No se pudo leer la DB: {e}")
 
     # -------------------------------------------------------------------------
     # 🛠 Tools Manager Tab
@@ -1007,26 +1031,10 @@ with tab_offline:
                     st.divider()
         else:
             st.error("No se ha cargado el registro de skills (Agent no inicializado o sin registry).")
-
-    # --------------------------------------------------------------------------
-    # 4. Agent Config
-    # --------------------------------------------------------------------------
-    # Agent Config header and info removed per user request
-
-
-    default_model = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
-    planner_model_name = st.sidebar.text_input("Planner Model", value=default_model, help="Debe coincidir con el modelo servido en vLLM (o ignorarse si vLLM sirve solo uno).")
-    temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
-
-    # ... (resto de configs)
+    # Removed old Agent Config section (merged to top sidebar)
     
-    config = PlannerConfig(
-        model_name=planner_model_name,
-        temperature=temperature,
-        max_steps=16,
-        # policy_mode ya no existe o no se usa
-    )
-
+    # Config moved to get_or_init_agent
+    pass
     # -------------------------------------------------------------------------
     # 📜 Logs de Ejecución Tab
     # -------------------------------------------------------------------------
