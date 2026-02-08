@@ -97,7 +97,7 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
 4. **Resiliencia**: Si una tool puede fallar, estructura el plan para manejarlo.
 5. **ANTI-ALUCINACIÓN (CRÍTICO)**: 
    - JAMÁS inventes valores para argumentos de funciones (ej: no uses números aleatorios en `average_numbers`).
-   - Si necesitas un dato que no está en el input, DEBES buscarlo primero (ej: `semantic_search`) y usar su output como input (`$step_1.output`).
+   - Si necesitas un dato que no está en el input, DEBES buscarlo primero (ej: `search_knowledge_base`) y usar su output como input (`$step_1.output`).
    - Si no puedes resolver una dependencia, NO llames a la herramienta.
 
 ### ENTRADA
