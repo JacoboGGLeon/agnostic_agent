@@ -1115,18 +1115,37 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
         user_msg = HumanMessage(content=user_msg_content)
         sys_msg = SystemMessage(content=sys_content)
         
+
         # 4. Invocar Planner LLM (Pasando historia relevante)
         # Filtramos solo mensajes reales (Human/AI) para no saturar con mensajes internos del pipeline
         history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
-        # Pero quitamos el último mensaje de usuario si ya lo estamos inyectando en user_msg_content
-        # O mejor, usamos la historia y el sys_msg + el user_msg con el contexto.
         
         tool_calls = []
         llm_raw_out = ""
         
         try:
+            # ─────────────────────────────────────────────────────────────
+            # DYNAMIC TOOL RE-BINDING (Skill Isolation)
+            # ─────────────────────────────────────────────────────────────
+            # Si estamos en modo Skill, el LLM NO debe ver tools que no sean de la skill.
+            # Como agent.py bindea TODAS las tools al inicio, aquí debemos re-bindear
+            # solo las permitidas (active_tools) sobre el modelo base.
+            # ─────────────────────────────────────────────────────────────
+            current_llm = planner_llm
+            if skill_mode and active_tools:
+                # Comprobamos si realmente estamos restringiendo algo
+                # (Si active_tools == tools, no hace falta re-bindear, pero por seguridad lo hacemos si hay skills)
+                
+                # Desempaquetar RunnableBinding si existe
+                base_model = getattr(planner_llm, "bound", planner_llm)
+                
+                # Re-bind explícito con solo las tools activas
+                # Esto asegura que la API definition que recibe el modelo solo tenga lo permitido.
+                current_llm = base_model.bind_tools(active_tools)
+                print(f"[PLANNER] 🔒 Skill Mode Active. Re-bound LLM to {len(active_tools)} tools: {[t.name for t in active_tools]}")
+
             # Enviamos [sys, ...history, user]
-            response = planner_llm.invoke([sys_msg] + history[:-1] + [user_msg])
+            response = current_llm.invoke([sys_msg] + history[:-1] + [user_msg])
             llm_raw_out = response.content
             
             # 5. Parseo DAG JSON (Wait! Clean thinking first)

@@ -63,21 +63,20 @@ Recomendación: Considera refinar la pregunta o ingestar documentos más especí
 
 ## 🎯 Ejemplo Completo de Flujo RAG
 
-**User Query**: "¿Cuántas variables meteorológicas tenía el vector predictor?"
+**User Query**: "¿Cuáles son los principales factores de riesgo en el proyecto Delta?"
 
 **Paso 1 - Retrieval**:
 ```
-search_knowledge_base(query="variables meteorológicas vector predictor")
+search_knowledge_base(query="factores riesgo proyecto Delta")
 → Devuelve 5 chunks con scores [0.92, 0.88, 0.75, 0.65, 0.52]
 ```
 
 **Paso 2 - Augmented Generation**:
 ```
-"El vector predictor contenía 8 variables meteorológicas: temperatura, 
-humedad, presión atmosférica, velocidad del viento, dirección del viento, 
-radiación solar, precipitación y nubosidad.
+"El proyecto Delta identificó 3 factores de riesgo principales: volatilidad del mercado, 
+retrasos en la cadena de suministro y cambios regulatorios imprevistos.
 
-Fuente: documento_ozono_LA.pdf (score de relevancia: 0.92)"
+Fuente: analisis_riesgos_delta.pdf (score de relevancia: 0.92)"
 ```
 
 ---
