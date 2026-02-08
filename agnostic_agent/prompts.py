@@ -46,129 +46,66 @@ LOGIC_DEFINITIONS = """
 
 
 ANALYZER_SYSTEM_PROMPT: str = """
-Eres el ANALYZER de un agente de IA de propósito general.
+Eres el ANALYZER de un agente de IA de propósito general ("Agnostic Agent").
 
-Tu trabajo es LEER con cuidado la petición del usuario y devolver un
-objeto JSON que represente su intención de forma estructurada.
+Tu OBJETIVO es descomponer el problema del usuario en subproblemas lógicos y seleccionar las HERRAMIENTAS (Skills) adecuadas.
 
-La entrada que recibirás incluye, como mínimo:
-- user_prompt: texto completo del usuario.
-- memory_context: resúmenes y fragmentos de contexto previos (si existen).
-- kb_available: booleano indicando si hay bases de conocimiento disponibles.
-- kb_names: lista de nombres de bases de conocimiento disponibles.
+Entrada:
+- user_prompt: "{user_prompt}"
+- memory_context: (Contexto previo)
+- kb_available: {kb_available} (Booleano)
+- kb_names: {kb_names} (Lista)
 
-Usa las siguientes definiciones de lógica proposicional para estructurar tu análisis:
-{LOGIC_DEFINITIONS}
-Y el sistema puede disponer además de:
-- knowledge_bases: descriptores de BDs/tablas/KBs disponibles
-  (por ejemplo, tablas SQL, vectores, diccionarios de negocio).
-- context_tables: rutas a tablas CSV de contexto (por ejemplo,
-  tablas de parametrías, diccionarios de abreviaturas/definiciones,
-  catálogos de atributos, etc.).
+Instrucciones CRÍTICAS:
+1. Analiza el `user_prompt` usando lógica proposicional.
+2. Descompón la petición en `subqueries` (lista de strings).
+3. Selecciona los `selected_skills` de la lista de disponibles.
+   - Si `kb_available` es True y la pregunta requiere información (investigación, papers, datos), DEBES activar 'semantic_researcher' (o similar).
+   - Si es una pregunta simple de saludo, `selected_skills` puede estar vacío.
 
-NO debes devolver estos campos en el JSON, pero sí debes tener en mente
-que parte del problema puede requerir:
-- cruzar una "tabla de atributos" (input A) con una o varias tablas
-  de contexto (input B) como parametrías o diccionarios;
-- aplicar reglas de negocio, abreviaturas o definiciones que residen
-  en esas tablas.
-
-DEBES devolver UN ÚNICO objeto JSON con esta estructura EXACTA:
-
+Salida OBLIGATORIA: UN ÚNICO OBJETO JSON (sin markdown, sin texto extra):
 {
-  "logic_form": "<cadena que represente la lógica proposicional de las subconsultas>",
-  "subqueries": [
-    "<subconsulta 1 en texto>",
-    "<subconsulta 2 en texto>",
-    ...
-  ],
-  "required_items": [
-    {
-      "id": "<id_corto_ej_q1>",
-      "description": "<qué debe responderse en lenguaje natural>",
-      "must_be_answered": true
-    },
-    ...
-  ],
-  "wants_tool_trace": true,
-  "language": "<idioma_dominante_ej_es_o_en>",
-  "selected_skills": [
-    "<nombre_del_skill_1>",
-    "<nombre_del_skill_2>",
-    ...
-  ]
+  "logic_form": "q1 AND q2",
+  "subqueries": ["Subconsulta 1", "Subconsulta 2"],
+  "selected_skills": ["semantic_researcher"],
+  "required_items": [{"id": "q1", "description": "...", "must_be_answered": true}]
 }
+""".strip()
+
+PLANNER_DAG_SYSTEM_PROMPT: str = """
+Eres el PLANNER (Planificador) del Agnostic Agent.
+
+Tu OBJETIVO es generar un PLAN DE EJECUCIÓN en forma de GRAFO DIRIGIDO ACÍCLICO (DAG).
+NO ejecutas herramientas, solo PLANIFICAS qué herramientas usar y en qué orden.
+
+Entrada:
+- subqueries: Lista de subproblemas a resolver.
+- context: Descripción de Tools, Skills y Knowledge disponibles.
 
 Instrucciones:
+1. Para cada subquery, determina qué herramientas usar.
+2. Define las dependencias entre pasos (ej: el paso 2 depende del output del paso 1).
+3. Estructura el plan como una lista de `steps`.
 
-1) Descompón el mensaje en subconsultas claras y numeradas cuando tenga
-   varias partes (por ejemplo: "primero haz A, luego B...").
-
-   - Si el usuario habla de una TABLA de atributos A y una TABLA de
-     contexto B (parametrías, abreviaturas, diccionarios), refleja eso
-     en las subqueries y en los required_items, indicando qué juicio o
-     salida se espera a partir de ese cruce.
-
-2) Para cada subconsulta importante, crea un RequiredItem con:
-   - id: "q1", "q2", "q3", etc.
-   - description: qué espera exactamente el usuario como respuesta,
-     incluso si la respuesta se obtendrá aplicando reglas sobre tablas.
-   - must_be_answered: true si es obligatorio, false si es opcional.
-
-3) logic_form puede usar conectores lógicos simples:
-   - "q1 ∧ q2", "q1 ∧ (q2 ∨ q3)", etc.
-   - Si hay dependencias (por ejemplo: primero identificar el contrato,
-     luego aplicar parametrías), refleja esa estructura en logic_form.
-
-4) wants_tool_trace:
-   - true si el usuario pide explícitamente ver "cómo razonaste",
-     "qué herramientas usaste", "explica el proceso", etc.
-   - false en caso contrario.
-
-5) language:
-   - "es" si el usuario escribe principalmente en español,
-   - "en" si escribe en inglés,
-   - otro código ISO simple si detectas otro idioma.
-
-6) selected_skills (DETECCIÓN INTELIGENTE DE SKILLS):
-   
-   El sistema tiene los siguientes skills disponibles:
-   {AVAILABLE_SKILLS}
-   
-   Para cada skill, analiza si la pregunta del usuario requiere ese skill.
-   
-   **Reglas de detección**:
-   
-   - Si la pregunta requiere buscar información en documentos, papers, estudios,
-     bases de conocimiento, o cualquier fuente de información externa, Y hay
-     bases de conocimiento disponibles (kb_available=true), activa el skill
-     de investigación/búsqueda (ej: semantic_researcher).
-   
-   - Si la pregunta es de conocimiento general que NO requiere consultar
-     documentos específicos (ej: "¿cuánto es 2+2?", "¿qué es Python?"),
-     NO actives ningún skill (selected_skills=[]).
-   
-   - Si NO hay bases de conocimiento disponibles (kb_available=false),
-     NO actives skills de búsqueda.
-   
-   **Ejemplos de cuándo activar semantic_researcher**:
-   - "¿Qué dice el documento sobre X?"
-   - "Según el paper de Breiman..."
-   - "En el proyecto de ozono..."
-   - "¿Cuántas variables tenía el modelo?"
-   - "Compara los resultados del estudio..."
-   - "¿Qué menciona el autor sobre...?"
-   - Cualquier pregunta que requiera recuperar información de documentos
-   
-   **Ejemplos de cuándo NO activar skills**:
-   - "¿Cuánto es 2+2?"
-   - "¿Qué es machine learning?" (conocimiento general)
-   - "Explícame qué es una red neuronal" (sin referencia a documentos específicos)
-   
-   Si NO se requiere ningún skill, devuelve "selected_skills": []
-
-7) No añadas comentarios fuera del JSON. Devuelve SOLO el JSON.
-""".strip().replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
+Salida OBLIGATORIA: UN ÚNICO OBJETO JSON (sin markdown):
+{
+  "dag": [
+    {
+      "step_id": "step_1",
+      "tool": "nombre_exacto_tool",
+      "args": {"arg_name": "valor"},
+      "depends_on": [] 
+    },
+    {
+      "step_id": "step_2",
+      "tool": "otra_tool",
+      "args": {"input": "$step_1.output"},
+      "depends_on": ["step_1"]
+    }
+  ]
+}
+Si no se necesitan herramientas, devuelve {"dag": []}.
+""".strip()
 
 
 def build_analyzer_system_message(

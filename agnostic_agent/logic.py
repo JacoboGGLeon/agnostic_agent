@@ -859,88 +859,83 @@ def build_graph_agent(
     cfg = planner_config or PlannerConfig()
     base_system_msg = build_planner_system_message(cfg)
 
-    # ANALYZER (rule-based inicial, pero ya guarda payload rico)
+    # ANALYZER (LLM-based with Strict JSON)
     def analyzer_node(state: State) -> Dict[str, Any]:
         """
-        ANALYZER (LLM-based): Analiza la pregunta del usuario y detecta skills de forma inteligente.
-        
-        Reemplaza la heurística hardcodeada con un LLM que decide qué skills activar
-        basándose en el contexto semántico de la pregunta.
+        ANALYZER: Descompone la query y selecciona Skills usando JSON estricto.
         """
         messages = state.get("messages", [])
         user_messages = [m for m in messages if isinstance(m, HumanMessage)]
         last_user = user_messages[-1] if user_messages else None
         user_text = last_user.content if isinstance(last_user, HumanMessage) else ""
 
-        # Permitimos que el llamador ya haya rellenado user_prompt
         user_prompt = state.get("user_prompt") or user_text
         kb_names = state.get("kb_names", [])
-        memory_context = state.get("memory_context", {})
-
-        # ═══════════════════════════════════════════════════════════════════
-        # LLM-BASED ANALYZER (Agnostic Skill Detection)
-        # ═══════════════════════════════════════════════════════════════════
+        kb_available = bool(kb_names)
         
-        # 1. Preparar lista de skills disponibles
-        available_skills = []
+        # 1. Preparar prompts
+        from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT
+        
+        # Inyectar variables en el prompt
+        # Nota: available_skills podríamos inyectarlo también si el prompt lo pidiera,
+        # pero el nuevo prompt simplificado confía en que el modelo 'sabe' o se le pasa en contexto.
+        # Ajustemos para pasarle las skills disponibles si el prompt lo requiere implicitamente
+        # o agreguémoslo al user message.
+        
+        # Para ser robustos, listamos las skills y las pegamos en el prompt si hay placeholder,
+        # o simplemente las agregamos al final del system prompt.
+        available_skills_txt = ""
         if skill_registry:
-            for skill in skill_registry.list_skills():
-                available_skills.append({
-                    "name": skill.name,
-                    "description": skill.description
-                })
+            s_list = [f"- {s.name}: {s.description}" for s in skill_registry.list_skills()]
+            available_skills_txt = "\n".join(s_list)
         
-        # 2. Construir system message con skills inyectados
-        from agnostic_agent.prompts import build_analyzer_system_message
-        analyzer_sys_msg = build_analyzer_system_message(available_skills)
+        # Renderizar prompt
+        # El prompt nuevo tiene {user_prompt}, {kb_available}, {kb_names}
+        # A veces user_prompt tiene llaves, así que cuidado con .format.
+        # Usaremos replace para ser seguros.
         
-        # 3. Preparar input para el Analyzer LLM
-        analyzer_input = {
-            "user_prompt": user_prompt,
-            "memory_context": memory_context,
-            "kb_available": bool(kb_names),
-            "kb_names": kb_names
-        }
+        sys_content = ANALYZER_SYSTEM_PROMPT.replace("{user_prompt}", user_prompt) \
+                                          .replace("{kb_available}", str(kb_available)) \
+                                          .replace("{kb_names}", str(kb_names))
         
-        analyzer_user_msg = HumanMessage(content=json.dumps(
-            analyzer_input, 
-            ensure_ascii=False, 
-            indent=2
-        ))
-        
-        # 4. Llamar al LLM Analyzer
+        if available_skills_txt:
+            sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"
+            
+        sys_msg = SystemMessage(content=sys_content)
+        # Enviamos un mensaje dummy de usuario para activar la generación
+        user_msg = HumanMessage(content="Analiza mi petición y genera el JSON.")
+
+        # 2. Invocar LLM
         selected_skills = []
         subqueries = [user_prompt]
         logic_form = "q1"
         
         try:
-            # Usar planner_llm para el Analyzer (mismo LLM)
-            analyzer_response = planner_llm.invoke([analyzer_sys_msg, analyzer_user_msg])
+            response = planner_llm.invoke([sys_msg, user_msg])
+            content = response.content
             
-            # Parsear JSON response
-            analyzer_json = json.loads(analyzer_response.content)
+            # 3. Parseo Robusto de JSON
+            # Limpiar bloques markdown ```json ... ```
+            if "```" in content:
+                import re
+                content = re.sub(r"```json\s*", "", content)
+                content = re.sub(r"```\s*", "", content)
             
-            # Extraer campos
-            subqueries = analyzer_json.get("subqueries", [user_prompt])
-            logic_form = analyzer_json.get("logic_form", "q1")
-            selected_skills = analyzer_json.get("selected_skills", [])
+            data = json.loads(content.strip())
             
-            print(f"[ANALYZER] LLM detected skills: {selected_skills}")
+            subqueries = data.get("subqueries", [user_prompt])
+            logic_form = data.get("logic_form", "q1")
+            selected_skills = data.get("selected_skills", [])
+            
+            print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
         except Exception as e:
-            # Fallback: Si el LLM falla, usar heurística simple
-            print(f"[ANALYZER] LLM failed: {e}, using fallback")
-            
-            # Fallback: Si hay KB, activar semantic_researcher
-            if kb_names and skill_registry:
-                for skill in skill_registry.list_skills():
-                    sname = skill.name.lower()
-                    if "researcher" in sname or "investigador" in sname or "semantic" in sname:
-                        selected_skills = [skill.name]
-                        print(f"[ANALYZER] Fallback: Auto-activating '{skill.name}' (KB available)")
-                        break
+            print(f"[ANALYZER] Error parsing JSON: {e}. Content: {getattr(response, 'content', '')[:100]}...")
+            # Fallback simple: si hay KB, activar researcher
+            if kb_available:
+                 selected_skills = ["semantic_researcher"]
         
-        # 5. Construir AnalyzerResult
+        # 4. Construir resultado
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
         
         analyzer: AnalyzerResult = {
@@ -952,11 +947,11 @@ def build_graph_agent(
             "active_skills": selected_skills,
         }
         
-        # 6. Mensaje interno del pipeline
         analyzer_msg = AIMessage(
-            content=f"### ANALYZER\n\nSkills detectados: {selected_skills}\nSubqueries: {subqueries}",
+            content=f"### ANALYZER (JSON Mode)\nSkills: {selected_skills}\nSubqueries: {subqueries}",
             additional_kwargs={"pipeline_internal": True, "node": "analyzer"}
         )
+        
         return {"analyzer": analyzer, "messages": [analyzer_msg]}
 
     def _format_rich_context(skills_reg, tools_list, kb_names_list) -> str:
@@ -1033,25 +1028,21 @@ def build_graph_agent(
         
         return "\n".join(lines)
 
-    # PLANNER
+    # PLANNER v2 (DAG JSON)
     def planner_node(state: State) -> Dict[str, Any]:
+        """
+        PLANNER: Genera un plan DAG en JSON y lo convierte a tool_calls lineales.
+        """
         msgs: List[AnyMessage] = state["messages"]
-
-        # Contextos adicionales
-        mem_ctx = state.get("memory_context")
+        
+        # Contextos
         kb_names = state.get("kb_names") or []
-        mem_str = _format_memory_context(mem_ctx)
-
-        # Recuperar skills activas del Analyzer
         analyzer = state.get("analyzer") or {}
         active_skills = analyzer.get("active_skills") or []
         subqueries = analyzer.get("subqueries") or []
         
-        # ═══════════════════════════════════════════════════════════
-        # SKILL-DRIVEN MODE: Filtrar tools y construir instrucciones
-        # ═══════════════════════════════════════════════════════════
+        # 1. Filtrado de Tools/KBs (Skill Logic)
         skill_mode = len(active_skills) > 0
-        skill_instructions_parts = []
         required_tool_names = set()
         required_kb_names = set()
         
@@ -1059,104 +1050,101 @@ def build_graph_agent(
             for skill_name in active_skills:
                 skill = skill_registry.get_skill(skill_name)
                 if skill:
-                    # Agregar instrucciones de la skill
-                    skill_instructions_parts.append(
-                        f"🧩 SKILL: {skill.name.upper()}\n"
-                        f"Descripción: {skill.description}\n\n"
-                        f"Instrucciones:\n{skill.instructions}\n"
-                    )
-                    
-                    # Recolectar tools y knowledge requeridos
                     if skill.tools:
                         required_tool_names.update(skill.tools)
                     if skill.knowledge:
                         required_kb_names.update(skill.knowledge)
-        
-        # Filtrar tools si estamos en skill mode
+
         active_tools = tools
         if skill_mode and required_tool_names:
-            # Solo exponer las tools requeridas por las skills
             active_tools = [t for t in tools if t.name in required_tool_names]
             
-            # Logging para debugging
-            filtered_out = [t.name for t in tools if t.name not in required_tool_names]
-            if filtered_out:
-                print(f"[SKILL MODE] Filtered out tools: {filtered_out}")
-            print(f"[SKILL MODE] Active tools: {[t.name for t in active_tools]}")
-        
-        # Filtrar knowledge bases si las skills especifican
         active_kb_names = kb_names
         if skill_mode and required_kb_names and "*" not in required_kb_names:
-            # Solo exponer las KBs requeridas (a menos que sea "*" = todas)
             active_kb_names = [kb for kb in kb_names if kb in required_kb_names]
-            print(f"[SKILL MODE] Active KBs: {active_kb_names}")
-        
-        # Construir contexto rico con tools/KBs filtradas
+
+        # 2. Construir Contexto
         rich_context_text = _format_rich_context(
             skill_registry, 
-            active_tools,  # ← Tools filtradas
-            active_kb_names  # ← KBs filtradas
+            active_tools, 
+            active_kb_names
         )
         
-        # Unir instrucciones de todas las skills activas
-        skill_instructions = "\n\n".join(skill_instructions_parts)
-
-        # Construir SYSTEM MESSAGE con modo skill
-        from agnostic_agent.prompts import build_planner_rich_system_message
+        # 3. Preparar Prompt DAG
+        from agnostic_agent.prompts import PLANNER_DAG_SYSTEM_PROMPT
+        import json
         
-        current_sys_msg = build_planner_rich_system_message(
-            rich_context_text=rich_context_text,
-            subqueries=subqueries,
-            skill_instructions=skill_instructions,
-            skill_mode=skill_mode  # ← NUEVO parámetro
+        # Inyectar variables
+        sys_content = PLANNER_DAG_SYSTEM_PROMPT
+        
+        # Crear mensaje de usuario con los inputs estructurados
+        planner_input = {
+            "subqueries": subqueries,
+            "context_summary": "Ver System Prompt para definitions.",
+            "available_tools_names": [t.name for t in active_tools],
+            "available_kb_names": active_kb_names
+        }
+        
+        user_msg = HumanMessage(content=f"""
+CONTEXTO DISPONIBLE:
+{rich_context_text}
+
+TAREA:
+Genera el DAG para resolver: {json.dumps(subqueries, ensure_ascii=False)}
+""")
+        
+        sys_msg = SystemMessage(content=sys_content)
+        
+        # 4. Invocar Planner LLM
+        tool_calls = []
+        llm_raw_out = ""
+        
+        try:
+            response = planner_llm.invoke([sys_msg, user_msg])
+            llm_raw_out = response.content
+            
+            # 5. Parseo DAG JSON
+            content = llm_raw_out
+            if "```" in content:
+                import re
+                content = re.sub(r"```json\s*", "", content)
+                content = re.sub(r"```\s*", "", content)
+            
+            dag_data = json.loads(content.strip())
+            dag_steps = dag_data.get("dag", [])
+            
+            # 6. Convertir DAG a Tool Calls lineales
+            # Asumimos que la lista 'dag' ya viene ordenada topológicamente o secuencialmente
+            for step in dag_steps:
+                t_name = step.get("tool")
+                t_args = step.get("args", {})
+                t_id = step.get("step_id") or str(uuid.uuid4())[:8]
+                
+                # Validar existencias
+                if t_name:
+                    tool_calls.append({
+                        "name": t_name,
+                        "args": t_args,
+                        "id": t_id,
+                        "type": "tool_call" # LangChain compatibility
+                    })
+            
+            print(f"[PLANNER] DAG generado con {len(tool_calls)} pasos.")
+            
+        except Exception as e:
+            print(f"[PLANNER] Error generating/parsing DAG: {e}")
+            # Fallback: Respuesta vacía o error
+            
+        # 7. Construir AIMessage compatible
+        clean_out = strip_think(llm_raw_out)
+        
+        ai_msg = AIMessage(
+            content=clean_out,
+            tool_calls=tool_calls,
+            additional_kwargs={"dag_raw": llm_raw_out}
         )
-
-        extra_system_messages: List[SystemMessage] = []
-        if mem_str:
-            extra_system_messages.append(
-                SystemMessage(
-                    content=(
-                        "Contexto de memoria para esta sesión:\n"
-                        f"{mem_str}"
-                    )
-                )
-            )
-
-        # Recuperar subqueries si existen
-        subqs = analyzer.get("subqueries") or []
-
-        ai_msg: AIMessage = call_planner_with_retry(
-            planner_llm=planner_llm,
-            system_message=current_sys_msg,
-            user_or_history_messages=msgs,
-            planner_config=cfg,
-        )
         
-        # Extract tool calls locally for the node logic
-        tool_calls = extract_tool_calls(ai_msg)
-        
-        # ═══════════════════════════════════════════════════════════
-        # VALIDACIÓN POST-PLANNER: Verificar que se usen las tools
-        # ═══════════════════════════════════════════════════════════
-        if skill_mode and required_tool_names and not tool_calls:
-            # El planner no generó tool calls pero las skills lo requieren
-            print(f"[SKILL MODE WARNING] No tool calls generated, but skills require: {required_tool_names}")
-            # Podríamos forzar un retry o generar un error
-            # Por ahora, solo loggeamos
-        
-        # Validar que las tool calls usen solo las herramientas permitidas
-        if skill_mode and tool_calls:
-            used_tools = {tc["name"] for tc in tool_calls}
-            invalid_tools = used_tools - required_tool_names
-            if invalid_tools:
-                print(f"[SKILL MODE ERROR] Invalid tools used: {invalid_tools}")
-                # Aquí podríamos filtrar o rechazar el plan
-            else:
-                print(f"[SKILL MODE OK] All tool calls are valid: {used_tools}")
-        
-        # Prepare raw/clean outputs
-        llm_raw_out = _coerce_content_str(ai_msg.content)
-        llm_clean_out = strip_think(llm_raw_out)
+        llm_clean_out = clean_out
 
         if not subqs:
             user_messages = [m for m in msgs if isinstance(m, HumanMessage)]
@@ -1315,7 +1303,14 @@ def build_graph_agent(
                     "Revisa EXECUTOR/CATCHER o el registro de tools."
                 )
             else:
-                user_answer = llm_clean or "¿Qué te gustaría hacer?"
+                # Mejor UX: Si el modelo pensó pero no respondió (todo era <think>), avisar.
+                if not llm_clean and llm_raw and llm_raw.strip():
+                    user_answer = (
+                        "_(El modelo generó un razonamiento interno pero no una respuesta final. "
+                        "Ver pestaña 'Thinking' en el Inspector)_"
+                    )
+                else:
+                    user_answer = llm_clean or "¿Qué te gustaría hacer?"
 
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
