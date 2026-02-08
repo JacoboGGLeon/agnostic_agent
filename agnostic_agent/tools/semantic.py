@@ -393,9 +393,10 @@ def _format_rerank_prompts(
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def rerank_qwen3(query: str, documents: List[str]) -> List[Dict[str, Any]]:
+def rerank_qwen3(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     """
     Usa Qwen3-Reranker (local, vía Transformers) para ordenar documentos por relevancia.
+    Soporta lista de strings O lista de objetos (dicts) retornados por search_knowledge_base.
     """
     _ensure_reranker_loaded()
     state = _RERANK_STATE
@@ -407,12 +408,31 @@ def rerank_qwen3(query: str, documents: List[str]) -> List[Dict[str, Any]]:
     false_token_id = state["false_token_id"]
     max_length = state["max_length"]
 
-    if isinstance(documents, str):
-        docs = [documents]
-    else:
-        docs = list(documents)
+    # --- INPUT NORMALIZATION ---
+    # Convertir documents (que puede ser list[str] o list[dict]) a list[str]
+    docs_text = []
+    original_docs = []
 
-    if not docs:
+    if isinstance(documents, str):
+        documents = [documents]
+    
+    documents = list(documents) # Ensure list
+
+    for d in documents:
+        if isinstance(d, str):
+            docs_text.append(d)
+            original_docs.append({"content": d})
+        elif isinstance(d, dict):
+            # Try to extract text content from common fields
+            txt = d.get("md") or d.get("content") or d.get("text") or d.get("page_content") or str(d)
+            docs_text.append(txt)
+            original_docs.append(d)
+        else:
+            # Fallback
+            docs_text.append(str(d))
+            original_docs.append({"content": str(d)})
+
+    if not docs_text:
         return []
 
     instruction = os.getenv(
@@ -420,32 +440,40 @@ def rerank_qwen3(query: str, documents: List[str]) -> List[Dict[str, Any]]:
         "Given a web search query, rank documents by how well they answer the query.",
     )
 
-    prompts = _format_rerank_prompts(query, docs, instruction)
+    prompts = _format_rerank_prompts(query, docs_text, instruction)
 
-    enc = tokenizer(
-        prompts,
-        padding=True,
-        truncation=True,
-        max_length=max_length,
-        return_tensors="pt",
-    )
-    enc = {k: v.to(device) for k, v in enc.items()}
+    # Batch processing to avoid OOM if many docs
+    batch_size = 4 
+    all_probs = []
+    
+    for i in range(0, len(prompts), batch_size):
+        batch_prompts = prompts[i:i + batch_size]
+        
+        enc = tokenizer(
+            batch_prompts,
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        enc = {k: v.to(device) for k, v in enc.items()}
 
-    with torch.no_grad():
-        outputs = model(**enc)
-        logits = outputs.logits[:, -1, :]   # (batch, vocab)
-        yes_logits = logits[:, true_token_id]
-        no_logits = logits[:, false_token_id]
-        stacked = torch.stack([no_logits, yes_logits], dim=-1)  # (batch, 2)
-        probs = torch.nn.functional.softmax(stacked, dim=-1)[:, 1].tolist()
+        with torch.no_grad():
+            outputs = model(**enc)
+            logits = outputs.logits[:, -1, :]   # (batch, vocab)
+            yes_logits = logits[:, true_token_id]
+            no_logits = logits[:, false_token_id]
+            stacked = torch.stack([no_logits, yes_logits], dim=-1)  # (batch, 2)
+            probs = torch.nn.functional.softmax(stacked, dim=-1)[:, 1].tolist()
+            all_probs.extend(probs)
 
     results: List[Dict[str, Any]] = []
-    for idx, (doc, score) in enumerate(zip(docs, probs)):
+    for idx, (doc_obj, score) in enumerate(zip(original_docs, all_probs)):
         results.append(
             {
                 "index": idx,
-                "document": doc,
                 "score": float(score),
+                "document": doc_obj # Return the original object (preserving metadata)
             }
         )
 
