@@ -56,7 +56,8 @@ class AnalyzerResult(TypedDict, total=False):
     propositional_logic: str
     subqueries: List[str]
     subqueries_logic: List[str]
-    selected_skill: Optional[str]  # ✅ Skill seleccionado por nombre
+    selected_skill: Optional[str]  # ✅ Skill seleccionado por nombre (legacy)
+    active_skills: List[str]  # ✅ Lista de skills activas (multi-skill support)
 
 
 class PlannerTrajectory(TypedDict, total=False):
@@ -925,6 +926,7 @@ def build_graph_agent(
             "subqueries": subqueries,
             "subqueries_logic": subqueries_logic,
             "selected_skill": selected_skill,
+            "active_skills": [selected_skill] if selected_skill else [],  # ✅ Multi-skill support
         }
 
         return {"analyzer": analyzer}
@@ -1010,34 +1012,75 @@ def build_graph_agent(
         # Contextos adicionales
         mem_ctx = state.get("memory_context")
         kb_names = state.get("kb_names") or []
-        
         mem_str = _format_memory_context(mem_ctx)
 
-        # Recuperar skill activada y subqueries del Analyzer
+        # Recuperar skills activas del Analyzer
         analyzer = state.get("analyzer") or {}
-        selected_skill_name = analyzer.get("selected_skill")
+        active_skills = analyzer.get("active_skills") or []
         subqueries = analyzer.get("subqueries") or []
         
-        # CONSTRUIR REGISTRO "RICO"
-        rich_context_text = _format_rich_context(skill_registry, tools, kb_names)
+        # ═══════════════════════════════════════════════════════════
+        # SKILL-DRIVEN MODE: Filtrar tools y construir instrucciones
+        # ═══════════════════════════════════════════════════════════
+        skill_mode = len(active_skills) > 0
+        skill_instructions_parts = []
+        required_tool_names = set()
+        required_kb_names = set()
+        
+        if skill_mode and skill_registry:
+            for skill_name in active_skills:
+                skill = skill_registry.get_skill(skill_name)
+                if skill:
+                    # Agregar instrucciones de la skill
+                    skill_instructions_parts.append(
+                        f"🧩 SKILL: {skill.name.upper()}\n"
+                        f"Descripción: {skill.description}\n\n"
+                        f"Instrucciones:\n{skill.instructions}\n"
+                    )
+                    
+                    # Recolectar tools y knowledge requeridos
+                    if skill.tools:
+                        required_tool_names.update(skill.tools)
+                    if skill.knowledge:
+                        required_kb_names.update(skill.knowledge)
+        
+        # Filtrar tools si estamos en skill mode
+        active_tools = tools
+        if skill_mode and required_tool_names:
+            # Solo exponer las tools requeridas por las skills
+            active_tools = [t for t in tools if t.name in required_tool_names]
+            
+            # Logging para debugging
+            filtered_out = [t.name for t in tools if t.name not in required_tool_names]
+            if filtered_out:
+                print(f"[SKILL MODE] Filtered out tools: {filtered_out}")
+            print(f"[SKILL MODE] Active tools: {[t.name for t in active_tools]}")
+        
+        # Filtrar knowledge bases si las skills especifican
+        active_kb_names = kb_names
+        if skill_mode and required_kb_names and "*" not in required_kb_names:
+            # Solo exponer las KBs requeridas (a menos que sea "*" = todas)
+            active_kb_names = [kb for kb in kb_names if kb in required_kb_names]
+            print(f"[SKILL MODE] Active KBs: {active_kb_names}")
+        
+        # Construir contexto rico con tools/KBs filtradas
+        rich_context_text = _format_rich_context(
+            skill_registry, 
+            active_tools,  # ← Tools filtradas
+            active_kb_names  # ← KBs filtradas
+        )
+        
+        # Unir instrucciones de todas las skills activas
+        skill_instructions = "\n\n".join(skill_instructions_parts)
 
-        # Instrucción de Skill Activada (sigue siendo útil si hay una explícita)
-        skill_instructions = ""
-        if selected_skill_name and skill_registry:
-            skill = skill_registry.get_skill(selected_skill_name)
-            if skill:
-                 skill_instructions = (
-                     f"\n\n🚨 SKILL PRIORITARIA DETECTADA: {skill.name.upper()}\n"
-                     f"Receta sugerida: {skill.instructions}\n"
-                 )
-
-        # Construir SYSTEM MESSAGE usando prompts.py
+        # Construir SYSTEM MESSAGE con modo skill
         from agnostic_agent.prompts import build_planner_rich_system_message
         
         current_sys_msg = build_planner_rich_system_message(
             rich_context_text=rich_context_text,
             subqueries=subqueries,
-            skill_instructions=skill_instructions
+            skill_instructions=skill_instructions,
+            skill_mode=skill_mode  # ← NUEVO parámetro
         )
 
         extra_system_messages: List[SystemMessage] = []
@@ -1063,6 +1106,25 @@ def build_graph_agent(
         
         # Extract tool calls locally for the node logic
         tool_calls = extract_tool_calls(ai_msg)
+        
+        # ═══════════════════════════════════════════════════════════
+        # VALIDACIÓN POST-PLANNER: Verificar que se usen las tools
+        # ═══════════════════════════════════════════════════════════
+        if skill_mode and required_tool_names and not tool_calls:
+            # El planner no generó tool calls pero las skills lo requieren
+            print(f"[SKILL MODE WARNING] No tool calls generated, but skills require: {required_tool_names}")
+            # Podríamos forzar un retry o generar un error
+            # Por ahora, solo loggeamos
+        
+        # Validar que las tool calls usen solo las herramientas permitidas
+        if skill_mode and tool_calls:
+            used_tools = {tc["name"] for tc in tool_calls}
+            invalid_tools = used_tools - required_tool_names
+            if invalid_tools:
+                print(f"[SKILL MODE ERROR] Invalid tools used: {invalid_tools}")
+                # Aquí podríamos filtrar o rechazar el plan
+            else:
+                print(f"[SKILL MODE OK] All tool calls are valid: {used_tools}")
         
         # Prepare raw/clean outputs
         llm_raw_out = _coerce_content_str(ai_msg.content)

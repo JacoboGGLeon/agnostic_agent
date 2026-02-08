@@ -424,15 +424,41 @@ No añadas nada fuera del JSON. Devuelve SOLO el JSON.
 def build_planner_rich_system_message(
     rich_context_text: str,
     subqueries: list[str],
-    skill_instructions: str = ""
+    skill_instructions: str = "",
+    skill_mode: bool = False
 ) -> SystemMessage:
     """
     Construye el SystemMessage para el PLANNER v2 (Rich Context).
+    
+    Args:
+        rich_context_text: Contexto estructurado con Tools, Knowledge, Skills
+        subqueries: Lista de subconsultas detectadas por el Analyzer
+        skill_instructions: Instrucciones completas de las skills activas
+        skill_mode: Si True, las skills son OBLIGATORIAS (policy-driven mode)
     """
     import json
     
+    # Si hay skills activas, modo ESTRICTO (Skills como Policy)
+    if skill_mode and skill_instructions:
+        policy_section = (
+            "\n"
+            "═══════════════════════════════════════════════════════════\n"
+            "⚠️  MODO SKILL-DRIVEN ACTIVADO - POLÍTICA OBLIGATORIA  ⚠️\n"
+            "═══════════════════════════════════════════════════════════\n\n"
+            f"{skill_instructions}\n\n"
+            "🚨 INSTRUCCIONES CRÍTICAS:\n"
+            "- DEBES seguir las instrucciones de las skills al pie de la letra\n"
+            "- SOLO puedes usar las herramientas especificadas en el contexto\n"
+            "- NO respondas directamente sin ejecutar las herramientas requeridas\n"
+            "- Si no puedes cumplir con las skills, indica el error explícitamente\n\n"
+            "═══════════════════════════════════════════════════════════\n\n"
+        )
+    else:
+        policy_section = ""
+    
     system_content = (
         "Eres el PLANNER (Planificador) del Agnostic Agent.\n"
+        f"{policy_section}"  # ← Skills ANTES del contexto general
         "Tu objetivo es generar UN PLAN de ejecución (lista de tool_calls) para resolver "
         "las peticiones del usuario, basándote en el CONTEXTO disponible.\n\n"
         
@@ -450,8 +476,6 @@ def build_planner_rich_system_message(
         "3. Genera el PLAN COMPLETO (todas las tool_calls necesarias) en un solo bloque.\n"
         "   - Respeta los esquemas de entrada (@tool input={...}).\n"
         "   - Si no necesitas herramientas, responde vacío (el sistema pasará la pregunta al modelo directo).\n"
-        
-        f"{skill_instructions}"
     )
 
     return SystemMessage(content=system_content)
