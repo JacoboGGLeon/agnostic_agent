@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import html
+import markdown
 from typing import Any, Dict, Optional, List, Tuple
 
 import streamlit as st
@@ -76,7 +77,7 @@ section[data-testid="stSidebar"]{
 }
 
 .topbar{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex; align-items:center; justify-content:flex-end; /* Right align */
   gap:12px;
   padding: 12px 14px;
   border-radius: var(--r);
@@ -85,14 +86,19 @@ section[data-testid="stSidebar"]{
   box-shadow: var(--shadow);
   margin-bottom: 10px;
 }
-.brand{display:flex; align-items:center; gap:10px;}
+.brand{
+    display:flex; 
+    flex-direction: column; /* Stack vertically */
+    align-items:center;     /* Center horizontally */
+    gap:4px;
+}
 .logo-img{
   width: 108px;
   height: auto;
   object-fit: contain;
 }
-.title{font-size: 15px; font-weight: 800; line-height: 1.1;}
-.subtitle{font-size: 12px; color: var(--muted);}
+.title{font-size: 15px; font-weight: 800; line-height: 1.1; text-align: center;}
+.subtitle{font-size: 12px; color: var(--muted); text-align: center;}
 
 .badges{display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;}
 .badge{
@@ -276,13 +282,14 @@ with st.sidebar:
     llm_name = os.getenv("LLM_SERVED_NAME", "qwen2.5-14b-instruct")
     emb_name = os.getenv("EMB_SERVED_NAME", "Qwen/Qwen3-Embedding-0.6B")
     
-    st.caption("Planner / Main LLM")
+    # st.caption("Planner / Main LLM")
     planner_model_name = st.text_input("Model Name", value=llm_name, disabled=True)
     
     st.caption("Embedding Server")
     st.text_input("Emb Name", value=emb_name, disabled=True)
 
-    temperature = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+    # temperature = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+    temperature = 0.0 # Default value hidden
 
     # Removed old session info block (merged above)
 
@@ -527,13 +534,10 @@ st.markdown(
 <div class="topbar">
   <div class="brand">
     <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
-    <div>
-      <div class="title">Agentic Lab · Studio</div>
-    </div>
+    <div class="title">Agentic Lab · Studio</div>
   </div>
   <div class="badges">
-    <!-- Unified Mode badge removed -->
-    <!-- <span class="badge">🔎 inspector: on</span> -->
+    <!-- Badges here if needed -->
   </div>
 </div>
 """,
@@ -591,25 +595,28 @@ with tab_online:
                         "output": tr.get("output", "")
                     }
                     st.session_state["tool_logs"].append(log_entry)
-                
+
                 badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
                 
                 with st.chat_message("assistant"):
                     # Custom Bubble for Agent
-                    # We wrap the content in a div with .bubble-agent class
-                    # And we manually render the "header" inside the bubble or just the text
-                    
-                    safe_content = html.escape(content or "_(sin respuesta)_").replace("\n", "<br>")
+                    # Use markdown lib to convert content to HTML so bold/tables/etc show up
+                    # We use extensions for better support (tables, fenced code if needed)
+                    # Use a try-except block just in case markdown fails, fallback to simple escape
+                    try:
+                        raw_html = markdown.markdown(content or "_(sin respuesta)_", extensions=['extra'])
+                    except:
+                        raw_html = html.escape(content or "_(sin respuesta)_").replace("\n", "<br>")
+
                     st.markdown(
                         f"""
                         <div class="bubble-agent">
                           <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 4px;">👤 Respuesta {badge_html} <span class="hint">id={msg.get('id')}</span></div>
-                          {safe_content}
+                          <div class="bubble-content">{raw_html}</div>
                         </div>
                         """,
                         unsafe_allow_html=True
                     )
-
                     c1, c2, c3 = st.columns([1.2, 1.0, 0.8])
                     with c1:
                         st.caption(f"🛠 tools: {len(tool_runs)}")
