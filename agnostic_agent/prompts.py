@@ -56,11 +56,15 @@ Entrada:
 - kb_available: {kb_available} (Booleano)
 - kb_names: {kb_names} (Lista)
 
+Definiciones de Lógica Proposicional (Tu 'acordeón'):
+{LOGIC_DEFINITIONS}
+
 Instrucciones CRÍTICAS:
 1. Analiza el `user_prompt` usando lógica proposicional.
 2. Descompón la petición en `subqueries` (lista de strings).
 3. Selecciona los `selected_skills` de la lista de disponibles.
-   - Si `kb_available` es True y la pregunta requiere información (investigación, papers, datos), DEBES activar 'semantic_researcher' (o similar).
+   - Si `kb_available` es True y la pregunta requiere información (investigación, papers, datos, ENTIDADES, HECHOS), DEBES activar 'semantic_researcher' (o similar).
+   - Si la pregunta es sobre una Persona, Concepto o Definición (ej: "Breiman", "Cultura X"), DEBES activar tools de búsqueda.
    - Si es una pregunta simple de saludo, `selected_skills` puede estar vacío.
 
 Salida OBLIGATORIA: UN ÚNICO OBJETO JSON (sin markdown, sin texto extra):
@@ -128,7 +132,8 @@ def build_analyzer_system_message(
         skills_text = "   (No hay skills disponibles)"
     
     # Inyectar en el prompt
-    prompt = ANALYZER_SYSTEM_PROMPT.replace("{AVAILABLE_SKILLS}", skills_text)
+    prompt = ANALYZER_SYSTEM_PROMPT.replace("{AVAILABLE_SKILLS}", skills_text) \
+                                   .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
     
     return SystemMessage(content=prompt)
 
@@ -485,7 +490,11 @@ def build_planner_rich_system_message(
         "2. Para CADA subconsulta, revisa el Contexto (Tools, Knowledge, Skills) y decide qué herramientas llamar.\n"
         "   - Puedes mezclar herramientas de diferentes tipos.\n"
         "   - Si una Skill es relevante, observa sus 'tools' sugeridas o sus instrucciones.\n"
-        "   - Si se requiere buscar información, usa las herramientas de Knowledge (@knowledge).\n\n"
+        "2. Para CADA subconsulta, revisa el Contexto (Tools, Knowledge, Skills) y decide qué herramientas llamar.\n"
+        "   - Puedes mezclar herramientas de diferentes tipos.\n"
+        "   - Si una Skill es relevante, observa sus 'tools' sugeridas o sus instrucciones.\n"
+        "   - Si se requiere buscar información, usa las herramientas de Knowledge (@knowledge).\n"
+        "   - IMPORTANTE: Si hay MULTIPLES Knowledge Bases relevantes, DEBES buscar en TODAS ellas para tener la respuesta completa.\n\n"
         
         "3. Genera el PLAN COMPLETO (todas las tool_calls necesarias) en un solo bloque.\n"
         "   - Respeta los esquemas de entrada (@tool input={...}).\n"

@@ -874,7 +874,7 @@ def build_graph_agent(
         kb_available = bool(kb_names)
         
         # 1. Preparar prompts
-        from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT
+        from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT, LOGIC_DEFINITIONS
         
         # Inyectar variables en el prompt
         # Nota: available_skills podríamos inyectarlo también si el prompt lo pidiera,
@@ -890,13 +890,11 @@ def build_graph_agent(
             available_skills_txt = "\n".join(s_list)
         
         # Renderizar prompt
-        # El prompt nuevo tiene {user_prompt}, {kb_available}, {kb_names}
-        # A veces user_prompt tiene llaves, así que cuidado con .format.
-        # Usaremos replace para ser seguros.
-        
+        # El prompt nuevo tiene {user_prompt}, {kb_available}, {kb_names} y {LOGIC_DEFINITIONS}
         sys_content = ANALYZER_SYSTEM_PROMPT.replace("{user_prompt}", user_prompt) \
                                           .replace("{kb_available}", str(kb_available)) \
-                                          .replace("{kb_names}", str(kb_names))
+                                          .replace("{kb_names}", str(kb_names)) \
+                                          .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
         
         if available_skills_txt:
             sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"
