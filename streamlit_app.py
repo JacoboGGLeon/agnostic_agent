@@ -24,12 +24,16 @@ st.set_page_config(
 # -----------------------------
 st.markdown("""
 <style>
-[data-testid="stHeader"] { display: none !important; }
-[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stHeader"] { 
+    /* display: none !important; */
+    background: transparent;
+    color: var(--text);
+}
+/* [data-testid="stToolbar"] { display: none !important; } */
 [data-testid="stDecoration"] { display: none !important; }
-#MainMenu { visibility: hidden !important; }
-footer { visibility: hidden !important; }
-.block-container { padding-top: 1rem !important; }
+/* #MainMenu { visibility: hidden !important; } */
+/* footer { visibility: hidden !important; } */
+.block-container { padding-top: 3rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -201,9 +205,9 @@ if "export_json" not in st.session_state:
 # Sidebar controls
 # -----------------------------
 with st.sidebar:
-    st.markdown("## 🧪 Chat Studio")
+    st.markdown("## Agnostic Agent · Chat Studio")
     agent_mode = st.selectbox(
-        "Policy mode",
+        "Agentic Policy Mode",
         ["tools_strict", "free_policies", "hybrid"],
         index=["tools_strict", "free_policies", "hybrid"].index(st.session_state.agent_mode),
     )
@@ -455,7 +459,6 @@ st.markdown(
     <div class="logo">🧪</div>
     <div>
       <div class="title">Agnostic Agent · Chat Studio</div>
-      <div class="subtitle">Feed limpio + Inspector dinámico (thinking/deep/dev)</div>
     </div>
   </div>
   <div class="badges">
@@ -485,7 +488,8 @@ with tab_online:
 
             if role == "user":
                 with st.chat_message("user"):
-                    st.markdown(f'<div class="bubble-user">{html.escape(msg.get("content",""))}</div>', unsafe_allow_html=True)
+                    # Use standard markdown for user messages to support rich text
+                    st.markdown(msg.get("content",""))
 
             elif role == "assistant":
                 out = msg.get("out") or {}
@@ -591,9 +595,26 @@ with tab_online:
                         card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
 
                     elif tab_key == "deep":
-                        body = deep_txt or "_(vacío)_"
-                        body_html = html.escape(body).replace("\n", "<br>")
-                        card_md("Vista profunda (deep_out / summary)", body_html, icon="🧠", hint="pipeline")
+                        # Render Deep/Summary with real Markdown support
+                        # We split the card HTML to inject the markdown in between
+                        st.markdown(
+                            """
+                            <div class="card">
+                              <div class="card-h">
+                                <div>🧠 Vista profunda (deep_out / summary)</div>
+                                <span class="hint">pipeline</span>
+                              </div>
+                              <div class="card-b">
+                            """, 
+                            unsafe_allow_html=True
+                        )
+                        
+                        if deep_txt:
+                            st.markdown(deep_txt)
+                        else:
+                            st.markdown("_(vacío)_")
+                            
+                        st.markdown("</div></div>", unsafe_allow_html=True)
 
                     elif tab_key == "dev":
                         render_tool_runs(tool_runs)
@@ -749,6 +770,9 @@ with tab_offline:
             # User request: Default to ALL ENABLED (True) to allow knowledge queries out-of-the-box
             st.session_state.tools_config = {name: True for name in TOOL_REGISTRY.keys()}
 
+        if "inspect_tool_name" not in st.session_state:
+             st.session_state.inspect_tool_name = None
+
         def _reset_agent():
             st.session_state.agent = None
             st.toast("Configuración de herramientas modificada. Agente reiniciado.", icon="🛠")
@@ -775,7 +799,6 @@ with tab_offline:
 
         # Render groups
         for group_name, tools_in_group in tool_groups.items():
-            # Filter tools that actually exist in registry
             valid_tools = [t for t in tools_in_group if t in TOOL_REGISTRY]
             if not valid_tools:
                 continue
@@ -784,15 +807,24 @@ with tab_offline:
             cols = st.columns(3)
             for i, tool_name in enumerate(valid_tools):
                 col = cols[i % 3]
-                is_active = st.session_state.tools_config.get(tool_name, False) # Default to False matches previous user request
+                is_active = st.session_state.tools_config.get(tool_name, True)
                 
-                new_state = col.toggle(
-                    label=tool_name, 
-                    value=is_active, 
-                    key=f"toggle_{tool_name}",
-                    on_change=_reset_agent
-                )
-                st.session_state.tools_config[tool_name] = new_state
+                # Split layout: Toggle (State) | Button (Inspect)
+                c_toggle, c_name = col.columns([0.25, 0.75])
+                
+                with c_toggle:
+                    new_state = st.toggle(
+                        label="On/Off", 
+                        value=is_active, 
+                        key=f"toggle_{tool_name}",
+                        on_change=_reset_agent,
+                        label_visibility="collapsed"
+                    )
+                    st.session_state.tools_config[tool_name] = new_state
+                
+                with c_name:
+                    if st.button(tool_name, key=f"btn_inspect_{tool_name}", use_container_width=True):
+                        st.session_state.inspect_tool_name = tool_name
             
             st.caption("") # Spacer
 
@@ -809,8 +841,26 @@ with tab_offline:
         
         # Select a tool to inspect
         tool_names = sorted(list(tools_map.keys()))
+        
+        # Determine index for selectbox based on session state
+        sb_index = 0
+        if st.session_state.inspect_tool_name in tool_names:
+            sb_index = tool_names.index(st.session_state.inspect_tool_name)
+
         if tool_names:
-            selected_tool_name = st.selectbox("Selecciona una herramienta para inspeccionar:", tool_names)
+            def _update_inspect_tool():
+                st.session_state.inspect_tool_name = st.session_state.sb_inspect_tool
+
+            selected_tool_name = st.selectbox(
+                "Selecciona una herramienta para inspeccionar:", 
+                tool_names,
+                index=sb_index,
+                key="sb_inspect_tool",
+                on_change=_update_inspect_tool
+            )
+            # Sync session state if changed manually via selectbox (though on_change handles it, 
+            # we ensure consistency if re-run happens elsewhere)
+            st.session_state.inspect_tool_name = selected_tool_name
             
             if selected_tool_name:
                 tool = tools_map[selected_tool_name]
