@@ -1534,7 +1534,13 @@ def build_graph_agent(
             "### RESPUESTA FINAL",
             user_answer,
         ])
-        user_out = user_answer
+        # ═══════════════════════════════════════════════════════════════════
+        # AGNOSTIC FIX: Strip <think> tags from user_out
+        # ═══════════════════════════════════════════════════════════════════
+        # El user_out debe ser limpio (sin <think>) para ser agnóstico:
+        # - Modelos con reasoning (Qwen3, DeepSeek) → strip <think>
+        # - Modelos sin reasoning (GPT-4, etc.) → no afecta
+        user_out = strip_think(user_answer)
 
         return {
             "messages": [final_ai],
@@ -1674,7 +1680,7 @@ def build_graph_agent(
         ["executor", "summarizer"],
     )
     builder.add_edge("executor", "catcher")
-    builder.add_edge("catcher", "summarizer")
+    builder.add_edge("catcher", "planner")  # ✅ Loop back to planner for multi-turn
     builder.add_edge("summarizer", "validator")
     builder.add_edge("validator", END)
 
