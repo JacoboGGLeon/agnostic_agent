@@ -964,12 +964,13 @@ def build_graph_agent(
         
         return {"analyzer": analyzer, "messages": [analyzer_msg]}
 
-    def _format_rich_context(skills_reg, tools_list, kb_list) -> str:
+    def _format_rich_context(skills_reg, tools_list, kb_list, exclude_skills=None) -> str:
         """
         Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas.
         Lee metadata real de los decoradores @agnostic_tool.
         args:
             kb_list: Lista de dicts [{'name': '...', 'description': '...'}, ...]
+            exclude_skills: Lista de nombres de skills a excluir (para no mostrarlas al Planner y evitar recursión)
         """
         lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
 
@@ -1034,6 +1035,10 @@ def build_graph_agent(
             all_skills = skills_reg.list_skills()
             if all_skills:
                 for s in all_skills:
+                    # Filtrar skills excluidas (ej: la skill activa para evitar recursión)
+                    if exclude_skills and s.name in exclude_skills:
+                        continue
+
                     # Incluimos tools/knowledge requeridos por la skill si existen
                     req_tools = s.tools or []
                     req_kb = s.knowledge or []
@@ -1089,10 +1094,13 @@ def build_graph_agent(
             active_kb_objects = [kb for kb in kb_selected if kb.get("name") in required_kb_names]
 
         # 2. Construir Contexto
+        # Pasamos active_skills como skills a EXCLUIR del contexto del Planner
+        # para que no intente llamarse a sí mismo recursivamente.
         rich_context_text = _format_rich_context(
             skill_registry, 
             active_tools, 
-            active_kb_objects
+            active_kb_objects,
+            exclude_skills=active_skills 
         )
         
         # 3. Preparar Prompt DAG
