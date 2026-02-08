@@ -18,9 +18,10 @@ NOTA:
   capabilities.py o logic.py). Aquí solo definimos textos y helpers ligeros.
 """
 
-
-from typing import Literal
-
+"""
+Prompts del Agnostic Agent (v0.2).
+"""
+from typing import Literal, Optional, List, Dict
 from langchain_core.messages import SystemMessage
 
 
@@ -53,6 +54,8 @@ objeto JSON que represente su intención de forma estructurada.
 La entrada que recibirás incluye, como mínimo:
 - user_prompt: texto completo del usuario.
 - memory_context: resúmenes y fragmentos de contexto previos (si existen).
+- kb_available: booleano indicando si hay bases de conocimiento disponibles.
+- kb_names: lista de nombres de bases de conocimiento disponibles.
 
 Usa las siguientes definiciones de lógica proposicional para estructurar tu análisis:
 {LOGIC_DEFINITIONS}
@@ -88,7 +91,12 @@ DEBES devolver UN ÚNICO objeto JSON con esta estructura EXACTA:
     ...
   ],
   "wants_tool_trace": true,
-  "language": "<idioma_dominante_ej_es_o_en>"
+  "language": "<idioma_dominante_ej_es_o_en>",
+  "selected_skills": [
+    "<nombre_del_skill_1>",
+    "<nombre_del_skill_2>",
+    ...
+  ]
 }
 
 Instrucciones:
@@ -122,13 +130,70 @@ Instrucciones:
    - "en" si escribe en inglés,
    - otro código ISO simple si detectas otro idioma.
 
-6) No añadas comentarios fuera del JSON. Devuelve SOLO el JSON.
+6) selected_skills (DETECCIÓN INTELIGENTE DE SKILLS):
+   
+   El sistema tiene los siguientes skills disponibles:
+   {AVAILABLE_SKILLS}
+   
+   Para cada skill, analiza si la pregunta del usuario requiere ese skill.
+   
+   **Reglas de detección**:
+   
+   - Si la pregunta requiere buscar información en documentos, papers, estudios,
+     bases de conocimiento, o cualquier fuente de información externa, Y hay
+     bases de conocimiento disponibles (kb_available=true), activa el skill
+     de investigación/búsqueda (ej: semantic_researcher).
+   
+   - Si la pregunta es de conocimiento general que NO requiere consultar
+     documentos específicos (ej: "¿cuánto es 2+2?", "¿qué es Python?"),
+     NO actives ningún skill (selected_skills=[]).
+   
+   - Si NO hay bases de conocimiento disponibles (kb_available=false),
+     NO actives skills de búsqueda.
+   
+   **Ejemplos de cuándo activar semantic_researcher**:
+   - "¿Qué dice el documento sobre X?"
+   - "Según el paper de Breiman..."
+   - "En el proyecto de ozono..."
+   - "¿Cuántas variables tenía el modelo?"
+   - "Compara los resultados del estudio..."
+   - "¿Qué menciona el autor sobre...?"
+   - Cualquier pregunta que requiera recuperar información de documentos
+   
+   **Ejemplos de cuándo NO activar skills**:
+   - "¿Cuánto es 2+2?"
+   - "¿Qué es machine learning?" (conocimiento general)
+   - "Explícame qué es una red neuronal" (sin referencia a documentos específicos)
+   
+   Si NO se requiere ningún skill, devuelve "selected_skills": []
+
+7) No añadas comentarios fuera del JSON. Devuelve SOLO el JSON.
 """.strip().replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
 
 
-def build_analyzer_system_message() -> SystemMessage:
-    """Devuelve el SystemMessage para el rol ANALYZER."""
-    return SystemMessage(content=ANALYZER_SYSTEM_PROMPT)
+def build_analyzer_system_message(
+    available_skills: Optional[List[Dict[str, str]]] = None
+) -> SystemMessage:
+    """
+    Devuelve el SystemMessage para el rol ANALYZER.
+    
+    Args:
+        available_skills: Lista de skills disponibles con sus descripciones
+            [{"name": "semantic_researcher", "description": "..."}, ...]
+    """
+    # Construir sección de skills disponibles
+    if available_skills:
+        skills_text = "\n".join([
+            f"   - **{s['name']}**: {s['description']}"
+            for s in available_skills
+        ])
+    else:
+        skills_text = "   (No hay skills disponibles)"
+    
+    # Inyectar en el prompt
+    prompt = ANALYZER_SYSTEM_PROMPT.replace("{AVAILABLE_SKILLS}", skills_text)
+    
+    return SystemMessage(content=prompt)
 
 
 # ─────────────────────────────────────────────

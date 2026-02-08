@@ -848,6 +848,12 @@ def build_graph_agent(
 
     # ANALYZER (rule-based inicial, pero ya guarda payload rico)
     def analyzer_node(state: State) -> Dict[str, Any]:
+        """
+        ANALYZER (LLM-based): Analiza la pregunta del usuario y detecta skills de forma inteligente.
+        
+        Reemplaza la heurística hardcodeada con un LLM que decide qué skills activar
+        basándose en el contexto semántico de la pregunta.
+        """
         messages = state.get("messages", [])
         user_messages = [m for m in messages if isinstance(m, HumanMessage)]
         last_user = user_messages[-1] if user_messages else None
@@ -855,81 +861,90 @@ def build_graph_agent(
 
         # Permitimos que el llamador ya haya rellenado user_prompt
         user_prompt = state.get("user_prompt") or user_text
+        kb_names = state.get("kb_names", [])
+        memory_context = state.get("memory_context", {})
 
-        # Input payload más rico
-        input_payload: Dict[str, Any] = {
-            "user_prompt": user_prompt,
-        }
-
-        # Detección de Skills (Improved)
-        selected_skill = None
+        # ═══════════════════════════════════════════════════════════════════
+        # LLM-BASED ANALYZER (Agnostic Skill Detection)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # 1. Preparar lista de skills disponibles
+        available_skills = []
         if skill_registry:
-            enabled_skills = skill_registry.list_skills()
+            for skill in skill_registry.list_skills():
+                available_skills.append({
+                    "name": skill.name,
+                    "description": skill.description
+                })
+        
+        # 2. Construir system message con skills inyectados
+        from agnostic_agent.prompts import build_analyzer_system_message
+        analyzer_sys_msg = build_analyzer_system_message(available_skills)
+        
+        # 3. Preparar input para el Analyzer LLM
+        analyzer_input = {
+            "user_prompt": user_prompt,
+            "memory_context": memory_context,
+            "kb_available": bool(kb_names),
+            "kb_names": kb_names
+        }
+        
+        analyzer_user_msg = HumanMessage(content=json.dumps(
+            analyzer_input, 
+            ensure_ascii=False, 
+            indent=2
+        ))
+        
+        # 4. Llamar al LLM Analyzer
+        selected_skills = []
+        subqueries = [user_prompt]
+        logic_form = "q1"
+        
+        try:
+            # Usar planner_llm para el Analyzer (mismo LLM)
+            analyzer_response = planner_llm.invoke([analyzer_sys_msg, analyzer_user_msg])
             
-            # 1. Check for explicit @mention (e.g. @semantic_researcher)
-            # or exact name match in text
-            for skill in enabled_skills:
-                sname = skill.name.lower()
-                sprompt = str(user_prompt).lower()
-                
-                # Direct match or @mention
-                if f"@{sname}" in sprompt or sname in sprompt:
-                    selected_skill = skill.name
-                    break
+            # Parsear JSON response
+            analyzer_json = json.loads(analyzer_response.content)
             
-            # 2. Key-phrase matching for common skills if not yet selected
-            if not selected_skill:
-                for skill in enabled_skills:
+            # Extraer campos
+            subqueries = analyzer_json.get("subqueries", [user_prompt])
+            logic_form = analyzer_json.get("logic_form", "q1")
+            selected_skills = analyzer_json.get("selected_skills", [])
+            
+            print(f"[ANALYZER] LLM detected skills: {selected_skills}")
+            
+        except Exception as e:
+            # Fallback: Si el LLM falla, usar heurística simple
+            print(f"[ANALYZER] LLM failed: {e}, using fallback")
+            
+            # Fallback: Si hay KB, activar semantic_researcher
+            if kb_names and skill_registry:
+                for skill in skill_registry.list_skills():
                     sname = skill.name.lower()
-                    sprompt = str(user_prompt).lower()
-                    
-                    # Heuristics for 'semantic_researcher'
-                    if "researcher" in sname or "investigador" in sname:
-                        # Triggers: investiga, busca, indaga, research, find info, que sabes de
-                        triggers = [
-                            "investiga", "busca", "indaga", "research", "find info", 
-                            "qué sabes de", "que sabes de", "dime sobre", "cuéntame de",
-                            "analiza", "información sobre", "datos de",
-                            "en el proyecto", "sobre el proyecto", # Contexto específico del usuario
-                            "según los documentos", "knowledge base"
-                        ]
-                        if any(t in sprompt for t in triggers):
-                            selected_skill = skill.name
-                            break
-                    
-                    # Generic fallback: if skill name is part of a "use X" command
-                    if f"use {sname}" in sprompt or f"usa {sname}" in sprompt:
-                        selected_skill = skill.name
+                    if "researcher" in sname or "investigador" in sname or "semantic" in sname:
+                        selected_skills = [skill.name]
+                        print(f"[ANALYZER] Fallback: Auto-activating '{skill.name}' (KB available)")
                         break
         
-        # Split y lógica básica (Placeholder hasta tener LLM Analyzer real si se desea)
-        # Aquí idealmente usaríamos un LLM con ANALYZER_SYSTEM_PROMPT para obtener
-        # la estructura lógica real definida en prompts.py.
-        # Por ahora, mantenemos la heurística simple pero preparamos el campo.
-        raw = str(user_prompt).replace("\n", " ")
-        subqueries: List[str] = []
-        for part in raw.split("."):
-            part = part.strip()
-            if part:
-                subqueries.append(part)
-        if not subqueries and user_prompt:
-            subqueries = [user_prompt]
-
-        # Generamos una lógica "dummy" usando los símbolos nuevos si es posible,
-        # o simple AND
+        # 5. Construir AnalyzerResult
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
-        propositional_logic = " ∧ ".join(subqueries_logic) if subqueries_logic else ""
-
+        
         analyzer: AnalyzerResult = {
-            "input_payload": input_payload,
-            "propositional_logic": propositional_logic,
+            "input_payload": {"user_prompt": user_prompt},
+            "propositional_logic": logic_form,
             "subqueries": subqueries,
             "subqueries_logic": subqueries_logic,
-            "selected_skill": selected_skill,
-            "active_skills": [selected_skill] if selected_skill else [],  # ✅ Multi-skill support
+            "selected_skill": selected_skills[0] if selected_skills else None,
+            "active_skills": selected_skills,
         }
-
-        return {"analyzer": analyzer}
+        
+        # 6. Mensaje interno del pipeline
+        analyzer_msg = AIMessage(
+            content=f"### ANALYZER\n\nSkills detectados: {selected_skills}\nSubqueries: {subqueries}",
+            additional_kwargs={"pipeline_internal": True, "node": "analyzer"}
+        )
+        return {"analyzer": analyzer, "messages": [analyzer_msg]}
 
     def _format_rich_context(skills_reg, tools_list, kb_names_list) -> str:
         """
