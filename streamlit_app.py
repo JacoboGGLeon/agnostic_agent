@@ -850,6 +850,19 @@ with tab_offline:
             
             st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
 
+            st.markdown("### 📚 Inventario de Conocimiento (En Base de Datos)")
+            try:
+                from agnostic_agent.knowledge.vector import get_ingested_files
+                inventory = get_ingested_files(DB_PATH)
+                if inventory:
+                    st.dataframe(inventory, use_container_width=True)
+                else:
+                    st.info("La base de datos está vacía o no tiene metadatos.")
+            except ImportError:
+                st.warning("No se pudo importar `get_ingested_files`. Reinicia el servidor.")
+            except Exception as e:
+                st.error(f"Error leyendo inventario: {e}")
+
             st.markdown("### 📜 Historial de Ingesta (Persistente)")
             
             history_file_path = os.path.join(DOCS_DIR, "knowledge_history.jsonl")

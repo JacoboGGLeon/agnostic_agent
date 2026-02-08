@@ -128,7 +128,12 @@ def semantic_search(
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
     """
-    Búsqueda semántica simple usando Qwen3-Embedding sobre una lista de textos.
+    Búsqueda semántica simple sobre una lista de textos EN MEMORIA.
+    
+    IMPORTANTE:
+    - Requiere 'documents' como lista de strings explícita.
+    - NO USAR para archivos CSV o rutas de archivo. Para CSV usa 'semantic_search_in_csv'.
+    - Úsalo solo si ya tienes textos en memoria que quieres reordenar/filtrar.
     """
     if isinstance(documents, str):
         docs = [documents]

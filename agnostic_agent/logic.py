@@ -1468,16 +1468,28 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 # ═══════════════════════════════════════════════════════════
                 # CAPTURAR REASONING del FINAL ANSWER (agnóstico)
                 # ═══════════════════════════════════════════════════════════
-                # Si el servidor soporta reasoning, lo capturamos aquí
+                
+                # 1. Intentar extrar <think> del contenido (Texto crudo)
+                import re
+                think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+                match = think_pattern.search(user_answer)
+                
                 reasoning_from_final = ""
-                if hasattr(hrm, 'additional_kwargs') and isinstance(hrm.additional_kwargs, dict):
-                    # Buscar reasoning_content, reasoning, o thoughts (agnóstico)
-                    reasoning_from_final = (
-                        hrm.additional_kwargs.get("reasoning_content") or 
-                        hrm.additional_kwargs.get("reasoning") or 
-                        hrm.additional_kwargs.get("thoughts") or 
-                        ""
-                    )
+                
+                if match:
+                    reasoning_from_final = match.group(1).strip()
+                    # Limpiamos el <think> del user_answer para que no salga en el chat limpio
+                    user_answer = think_pattern.sub("", user_answer).strip()
+                
+                # 2. Si no hay <think> en texto, buscar en metadatos del proveedor (DeepSeek/Azure)
+                if not reasoning_from_final:
+                    if hasattr(hrm, 'additional_kwargs') and isinstance(hrm.additional_kwargs, dict):
+                        reasoning_from_final = (
+                            hrm.additional_kwargs.get("reasoning_content") or 
+                            hrm.additional_kwargs.get("reasoning") or 
+                            hrm.additional_kwargs.get("thoughts") or 
+                            ""
+                        )
                 
                 # Si hay reasoning, crear un AIMessage dedicado para el Inspector
                 if reasoning_from_final and isinstance(reasoning_from_final, str) and reasoning_from_final.strip():

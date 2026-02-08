@@ -531,6 +531,34 @@ def get_kb_description_from_db(db_path: str) -> str:
         logger.error(f"Error reading KB description: {e}")
         return ""
 
+def get_ingested_files(db_path: str) -> List[Dict[str, Any]]:
+    """Returns a list of ingested files with metadata."""
+    if not os.path.exists(db_path):
+        return []
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute("SELECT source_path, description, ingested_at FROM files_meta ORDER BY ingested_at DESC").fetchall()
+        except sqlite3.OperationalError:
+            conn.close()
+            return []
+            
+        conn.close()
+        
+        files = []
+        for path, desc, ts in rows:
+            files.append({
+                "file": Path(path).name,
+                "description": desc,
+                "ingested_at": ts,
+                "path": path
+            })
+        return files
+    except Exception as e:
+        logger.error(f"Error listing ingested files: {e}")
+        return []
+
 def ingest_pdf_file(
     pdf_path: str, 
     db_path: str, 
