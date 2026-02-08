@@ -204,8 +204,8 @@ with st.sidebar:
     st.markdown("## 🧪 Chat Studio")
     agent_mode = st.selectbox(
         "Policy mode",
-        ["tools_strict", "free_policies"],
-        index=0 if st.session_state.agent_mode == "tools_strict" else 1,
+        ["tools_strict", "free_policies", "hybrid"],
+        index=["tools_strict", "free_policies", "hybrid"].index(st.session_state.agent_mode),
     )
 
     st.markdown("### 🧭 Inspector")
@@ -717,9 +717,20 @@ with tab_offline:
         try:
             from agnostic_agent.knowledge_offline import get_stats
             stats = get_stats(DB_PATH)
-            c1, c2 = st.columns(2)
-            c1.metric("Chunks Indexados", stats.get("chunks", 0))
-            c2.metric("Archivos Únicos", stats.get("files", 0))
+            
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Chunks / Vectores", f"{stats.get('vector_count', 0)}")
+            s2.metric("Archivos", stats.get("files", 0))
+            
+            # Format bytes to MB
+            sz = stats.get("size_bytes", 0)
+            sz_mb = f"{sz / (1024*1024):.2f} MB"
+            s3.metric("Tamaño en Disco", sz_mb)
+            
+            s4.metric("Dimensiones", stats.get("dim", 0))
+            
+            st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
+
         except ImportError:
             st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
         except Exception as e:
@@ -735,27 +746,55 @@ with tab_offline:
         
         # Initialize session state for tools config if not exists
         if "tools_config" not in st.session_state:
-            # User request: Default to ALL DISABLED so they can enable one by one
-            st.session_state.tools_config = {name: False for name in TOOL_REGISTRY.keys()}
+            # User request: Default to ALL ENABLED (True) to allow knowledge queries out-of-the-box
+            st.session_state.tools_config = {name: True for name in TOOL_REGISTRY.keys()}
 
         def _reset_agent():
             st.session_state.agent = None
             st.toast("Configuración de herramientas modificada. Agente reiniciado.", icon="🛠")
         
-        # --- Tool Toggles ---
+        # --- Tool Toggles (Grouped) ---
         st.markdown("#### Configuración")
-        cols = st.columns(3)
-        for i, tool_name in enumerate(TOOL_REGISTRY.keys()):
-            col = cols[i % 3]
-            is_active = st.session_state.tools_config.get(tool_name, True)
+        
+        # Define groups
+        tool_groups = {
+            "🛠 Básicas": ["to_upper", "word_count", "is_palindrome"],
+            "🧮 Matemáticas": ["eval_math_expression", "sum_numbers", "average_numbers"],
+            "🧠 RAG / Knowledge": ["search_knowledge_base", "semantic_search", "embed_texts", "rerank_qwen3"],
+            "📊 Contexto Tabular": ["semantic_search_in_csv", "embed_context_tables", "judge_row_with_context"],
+        }
+        
+        # Tools not in any group (fallback)
+        all_tools = set(TOOL_REGISTRY.keys())
+        grouped_tools = set()
+        for g_list in tool_groups.values():
+            grouped_tools.update(g_list)
+        others = list(all_tools - grouped_tools)
+        if others:
+            tool_groups["🔧 Otras"] = others
+
+        # Render groups
+        for group_name, tools_in_group in tool_groups.items():
+            # Filter tools that actually exist in registry
+            valid_tools = [t for t in tools_in_group if t in TOOL_REGISTRY]
+            if not valid_tools:
+                continue
+                
+            st.markdown(f"**{group_name}**")
+            cols = st.columns(3)
+            for i, tool_name in enumerate(valid_tools):
+                col = cols[i % 3]
+                is_active = st.session_state.tools_config.get(tool_name, False) # Default to False matches previous user request
+                
+                new_state = col.toggle(
+                    label=tool_name, 
+                    value=is_active, 
+                    key=f"toggle_{tool_name}",
+                    on_change=_reset_agent
+                )
+                st.session_state.tools_config[tool_name] = new_state
             
-            new_state = col.toggle(
-                label=tool_name, 
-                value=is_active, 
-                key=f"toggle_{tool_name}",
-                on_change=_reset_agent
-            )
-            st.session_state.tools_config[tool_name] = new_state
+            st.caption("") # Spacer
 
         st.divider()
 
@@ -769,7 +808,7 @@ with tab_offline:
         st.markdown("### 🔬 Inspector de Herramientas")
         
         # Select a tool to inspect
-        tool_names = list(tools_map.keys())
+        tool_names = sorted(list(tools_map.keys()))
         if tool_names:
             selected_tool_name = st.selectbox("Selecciona una herramienta para inspeccionar:", tool_names)
             
@@ -786,7 +825,10 @@ with tab_offline:
                     # Show Input Schema if pydantic args
                     st.markdown("**Esquema de Entrada (Args):**")
                     if tool.args_schema:
-                        st.json(tool.args_schema.schema())
+                        try:
+                            st.json(tool.args_schema.schema())
+                        except Exception as e:
+                            st.error(f"Error generando esquema: {e}")
                     else:
                         st.text("Sin esquema definido (str por defecto)")
 

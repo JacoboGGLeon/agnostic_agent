@@ -499,15 +499,31 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
 
 def get_stats(db_path: str) -> Dict[str, Any]:
     if not os.path.exists(db_path):
-        return {"chunks": 0, "files": 0}
+        return {"chunks": 0, "files": 0, "size_bytes": 0, "vector_count": 0, "dim": 0}
         
+    size_bytes = os.path.getsize(db_path)
+    
     conn = sqlite3.connect(db_path)
     try:
         n_chunks = conn.execute("SELECT COUNT(*) FROM chunks_meta").fetchone()[0]
         n_files = conn.execute("SELECT COUNT(DISTINCT source_path) FROM chunks_meta").fetchone()[0]
-        return {"chunks": n_chunks, "files": n_files}
-    except:
-        return {"chunks": 0, "files": 0}
+        
+        # Try to count vectors in virtual table
+        try:
+            n_vectors = conn.execute("SELECT count(*) FROM v_chunks").fetchone()[0]
+        except:
+            n_vectors = 0
+            
+        return {
+            "chunks": n_chunks, 
+            "files": n_files, 
+            "size_bytes": size_bytes,
+            "vector_count": n_vectors,
+            "dim": EMB_DIM
+        }
+    except Exception as e:
+        logger.error(f"Error getting stats: {e}")
+        return {"chunks": 0, "files": 0, "size_bytes": size_bytes, "vector_count": 0, "dim": 0}
     finally:
         conn.close()
 

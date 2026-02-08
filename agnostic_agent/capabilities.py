@@ -430,6 +430,19 @@ FREE_SYSTEM_TEXT = (
     "- Devuelve una respuesta final clara y útil.\n"
 )
 
+HYBRID_SYSTEM_TEXT = (
+    "Eres un asistente IA híbrido: experto conversacional y técnico a la vez.\n\n"
+    "TU FILOSOFÍA:\n"
+    "1. **Proactividad con Herramientas:** Si el usuario pide algo que requiere datos o cálculo (buscar en PDF, sumar, etc.), "
+    "   USA las tools de inmediato. No preguntes, actúa.\n"
+    "2. **Conversación Natural:** SIEMPRE finaliza tu ejecución con una respuesta en lenguaje natural útil y amable. "
+    "   No devuelvas solo el resultado crudo de la herramienta, explícalo.\n"
+    "3. **Charla:** Si el usuario solo quiere charlar o ser creativo, responde con naturalidad sin forzar herramientas.\n\n"
+    "INSTRUCCIONES CLAVE:\n"
+    "- Devuelves `tool_calls` cuando hay trabajo técnico que hacer.\n"
+    "- Cuando tengas el resultado de las tools, sintetízalo en una respuesta final clara (final_answer)."
+)
+
 
 @dataclass
 class PlannerConfig:
@@ -444,11 +457,11 @@ class PlannerConfig:
     # Qwen3-style reasoning
     enable_thinking: bool = _str_to_bool(os.getenv("PLANNER_ENABLE_THINKING", "true"))
 
-    # 4) Ajuste “policy prompt”: 2 modos a nivel prompt
-    policy_mode: Literal["tools_strict", "free_policies"] = os.getenv(
+    # 4) Ajuste “policy prompt”: 3 modos a nivel prompt
+    policy_mode: Literal["tools_strict", "free_policies", "hybrid"] = os.getenv(
         "PLANNER_POLICY_MODE",
         "tools_strict",
-    )  # "tools_strict" | "free_policies"
+    )  # "tools_strict" | "free_policies" | "hybrid"
 
     # Timeout para evitar httpx.ReadTimeout
     request_timeout: float = float(os.getenv("PLANNER_REQUEST_TIMEOUT", "120.0"))
@@ -484,6 +497,8 @@ def build_planner_system_message(config: Optional[PlannerConfig] = None) -> Syst
     cfg = config or PlannerConfig()
     if cfg.policy_mode == "free_policies":
         return SystemMessage(content=FREE_SYSTEM_TEXT)
+    elif cfg.policy_mode == "hybrid":
+        return SystemMessage(content=HYBRID_SYSTEM_TEXT)
     return SystemMessage(content=STRICT_SYSTEM_TEXT)
 
 def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
