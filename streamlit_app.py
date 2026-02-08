@@ -638,15 +638,12 @@ with tab_online:
                             card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
 
                         elif tab_key == "deep":
-                            # Render Deep/Summary with real Markdown support
-                            # We split the card HTML to inject the markdown in between
-                            st.markdown("### 🧠 Vista profunda (deep_out / summary)")
-                            st.caption("pipeline")
+                            # Render Deep/Summary with "Thinking" style (card_code)
+                            # User requested: "🧠 Pensamiento (thinking) reasoning_content" style
+                            # We can reuse card_code but change the title/icon
                             
-                            if deep_txt:
-                                st.markdown(deep_txt)
-                            else:
-                                st.markdown("_(vacío)_")
+                            content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
+                            card_code("Vista profunda (deep_out / summary)", content_to_show, icon="🧠", hint="pipeline")
 
                         elif tab_key == "dev":
                             render_tool_runs(tool_runs)
@@ -787,51 +784,53 @@ with tab_offline:
                         # JSONL file in same dir as docs
                         history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
                         log_ingestion_event(meta, history_file)
-                        
                 except Exception as e:
                     st.error(f"Excepción crítica: {e}")
 
+        # DB Stats moved inside Knowledge Manager Tab
+        st.divider()
+        st.markdown("### 📊 Estado de la Base de Datos")
+        try:
+            # FORCE RELOAD to ensure new functions are picked up
+            import sys
+            import importlib
+            import agnostic_agent.knowledge.vector
+            # importlib.reload(agnostic_agent.knowledge.vector) # Removed aggressive reload to avoid state issues
+            from agnostic_agent.knowledge.vector import get_stats, get_ingestion_history
+            
+            stats = get_stats(DB_PATH)
+            
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Chunks / Vectores", f"{stats.get('vector_count', 0)}")
+            s2.metric("Archivos", stats.get("files", 0))
+            
+            # Format bytes to MB
+            sz = stats.get("size_bytes", 0)
+            sz_mb = f"{sz / (1024*1024):.2f} MB"
+            s3.metric("Tamaño en Disco", sz_mb)
+            
+            s4.metric("Dimensiones", stats.get("dim", 0))
+            
+            st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
+            
+            st.markdown("#### 📜 Historial de Ingesta (Persistente)")
+            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+            history = get_ingestion_history(history_file)
+            
+            if history:
+                # Convert to dataframe for nicer display
+                st.dataframe(history, use_container_width=True)
+            else:
+                st.write("_(Sin historial previo)_")
+
+        except ImportError:
+            st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
+        except Exception as e:
+            st.warning(f"No se pudo leer la DB: {e}")
+
     st.divider()
     
-    # DB Stats
-    st.markdown("### 📊 Estado de la Base de Datos")
-    try:
-        # FORCE RELOAD to ensure new functions are picked up
-        import sys
-        import importlib
-        import agnostic_agent.knowledge.vector
-        importlib.reload(agnostic_agent.knowledge.vector)
-        from agnostic_agent.knowledge.vector import get_stats, get_ingestion_history
-        
-        stats = get_stats(DB_PATH)
-        
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Chunks / Vectores", f"{stats.get('vector_count', 0)}")
-        s2.metric("Archivos", stats.get("files", 0))
-        
-        # Format bytes to MB
-        sz = stats.get("size_bytes", 0)
-        sz_mb = f"{sz / (1024*1024):.2f} MB"
-        s3.metric("Tamaño en Disco", sz_mb)
-        
-        s4.metric("Dimensiones", stats.get("dim", 0))
-        
-        st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
-        
-        st.markdown("#### 📜 Historial de Ingesta (Persistente)")
-        history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
-        history = get_ingestion_history(history_file)
-        
-        if history:
-            # Convert to dataframe for nicer display
-            st.dataframe(history, use_container_width=True)
-        else:
-            st.write("_(Sin historial previo)_")
-
-    except ImportError:
-        st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
-    except Exception as e:
-        st.warning(f"No se pudo leer la DB: {e}")
+    # DB Stats block removed from here (moved to tab_km)
 
     # -------------------------------------------------------------------------
     # 🛠 Tools Manager Tab
@@ -906,9 +905,13 @@ with tab_offline:
 
         st.divider()
 
-        # Re-map tools for the inspector based on current config (or all if we want to inspect disabled ones too?)
-        # Let's inspect 'enabled' ones or just all from registry? 
-        # For consistency with the old logic:
+        # Re-map tools for the inspector
+        # Ensure we are using the global registry
+        from agnostic_agent.tools import TOOL_REGISTRY
+        
+        # Debug: check if registry has expected number of tools
+        # st.write(f"DEBUG: Registry has {len(TOOL_REGISTRY)} tools: {list(TOOL_REGISTRY.keys())}")
+        
         _tools_list = list(TOOL_REGISTRY.values()) # All available for inspection
         tools_map = {t.name: t for t in _tools_list}
 
