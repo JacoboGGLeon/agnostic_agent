@@ -1018,9 +1018,45 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             "llm_clean_out": llm_clean_out,
         }
 
+    # EXECUTOR HELPERS
+    def _resolve_dependency_arg(val: Any, results: Dict[str, Any]) -> Any:
+        """
+        Resuelve referencias tipo '$step_1.output' usando el diccionario de resultados previos.
+        Soporta anidación en listas y dicts.
+        """
+        if isinstance(val, str) and val.strip().startswith("$"):
+            ref = val.strip()[1:]  # quitar $
+            parts = ref.split(".")
+            step_id = parts[0]
+            
+            if step_id in results:
+                res = results[step_id]
+                # Si piden un campo específico (ej: $step_1.output.id)
+                if len(parts) > 1:
+                    field = parts[1]
+                    # 'output' es la keyword estándar para el resultado completo, 
+                    # pero si el resultado es un dict, permitimos acceso a subcampos
+                    if field == "output":
+                        return res
+                    if isinstance(res, dict):
+                        return res.get(field, val) # Fallback al literal si no existe
+                return res
+            # Si no encontramos el step_id, devolvemos el literal (posible fallo posterior)
+            return val
+            
+        if isinstance(val, list):
+            return [_resolve_dependency_arg(v, results) for v in val]
+        
+        if isinstance(val, dict):
+            return {k: _resolve_dependency_arg(v, results) for k, v in val.items()}
+            
+        return val
+
+
     # EXECUTOR
     def executor_node(state: State) -> Dict[str, Any]:
         messages = state["messages"]
+
         ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
         if not ai_msgs:
             print("[EXECUTOR] No AIMessage found in state.")
@@ -1043,6 +1079,10 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
         
         tool_msgs: List[ToolMessage] = []
         exec_steps: List[Dict[str, Any]] = []
+        
+        # Diccionario local de resultados para resolución de dependencias
+        # step_id -> result
+        local_results: Dict[str, Any] = {}
 
         for tc in tool_calls:
             # Soportar dict o objeto ToolCall
@@ -1052,10 +1092,15 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 t_id = tc.get("id")
             else:
                 name = getattr(tc, "name", "")
-                args = getattr(tc, "args", {}) or {}
+                args_raw = getattr(tc, "args", {}) or {}
                 t_id = getattr(tc, "id", "")
             
-            print(f"[EXECUTOR] Running tool: {name} with args: {args}")
+            # ─────────────────────────────────────────────
+            # RESOLUCIÓN DE VARIABLES (Ambient Context)
+            # ─────────────────────────────────────────────
+            args = _resolve_dependency_arg(args_raw, local_results)
+            
+            print(f"[EXECUTOR] Running tool: {name} with resolved args: {args}")
 
             try:
                 tool_obj = next(t for t in tools if t.name == name)
@@ -1064,6 +1109,10 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 observation = {"error": f"Tool '{name}' no encontrada."}
             except Exception as e:
                 observation = {"error": f"Excepción ejecutando tool '{name}': {e!r}"}
+
+            # Guardar resultado para pasos posteriores
+            if t_id:
+                local_results[t_id] = observation
 
             try:
                 payload = json.dumps(
