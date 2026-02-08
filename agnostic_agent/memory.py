@@ -11,7 +11,7 @@ Maneja:
      {
        "session_id": {
          "summary": "Resumen de lo hablado...",
-         "facts": ["Usuario se llama Juan", "Interesado en hipotecas"],
+         "facts": ["Hecho relevante 1", "Hecho relevante 2"],
          "last_turn": "..."
        }
      }
@@ -76,9 +76,7 @@ def write_memory(
     turns = mem.get("turns_count", 0)
     mem["turns_count"] = turns + 1
     
-    # Ejemplo: si el usuario dice "me llamo X", guardar en facts (mock)
-    # if "me llamo" in user_prompt.lower():
-    #     ...
+    # Ejemplo: si el usuario menciona un dato clave, se podría extraer y guardar en facts.
     
     update_session_memory(session_id, mem)
 

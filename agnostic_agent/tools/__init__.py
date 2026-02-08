@@ -47,7 +47,7 @@ embed_texts = semantic.embed_texts
 semantic_search = semantic.semantic_search
 semantic_search_in_csv = semantic.semantic_search_in_csv
 embed_context_tables = semantic.embed_context_tables
-rerank_qwen3 = semantic.rerank_qwen3
+rerank_docs = semantic.rerank_docs
 judge_row_with_context = semantic.judge_row_with_context
 search_knowledge_base = semantic.search_knowledge_base
 

@@ -27,17 +27,18 @@ from .agent import Agent
 from .communication import AgentInput, AgentOutput
 from .capabilities import (
     PlannerConfig,
-    QwenModelPaths,
+    LocalModelPaths,
     VllmConfig,
     VllmServers,
     VllmEndpoints,
-    prepare_qwen_models,
-    start_qwen_vllm_servers,
+    prepare_local_models,
+    start_local_vllm_servers,
 )
 from .tools import get_default_tools
 from .knowledge import KnowledgeBase, get_default_context
+from .skills import SkillRegistry, Skill
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Alias de compatibilidad con versiones anteriores (legacy)
 AgentSession = Agent  # type: ignore
@@ -51,16 +52,18 @@ __all__ = [
     "AgentOutput",
     # Configuración / modelos
     "PlannerConfig",
-    "QwenModelPaths",
+    "LocalModelPaths",
     "VllmConfig",
     "VllmServers",
     "VllmEndpoints",
-    "prepare_qwen_models",
-    "start_qwen_vllm_servers",
+    "prepare_local_models",
+    "start_local_vllm_servers",
     # Contexto / tools de alto nivel
     "KnowledgeBase",
     "get_default_tools",
     "get_default_context",
+    "SkillRegistry",
+    "Skill",
     # Meta
     "__version__",
 ]

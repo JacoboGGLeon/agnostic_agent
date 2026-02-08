@@ -6,9 +6,10 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
 from agnostic_agent.tools.decorators import tool
+from agnostic_agent.capabilities import DEFAULT_EMB_ID, DEFAULT_RERANK_ID, LocalModelPaths
 
 # ─────────────────────────────────────────────
-# QWEN3-EMBEDDING – Transformers local
+# EMBEDDING – Transformers local
 # ─────────────────────────────────────────────
 
 _EMB_STATE: Dict[str, Any] = {}
@@ -16,20 +17,19 @@ _EMB_STATE: Dict[str, Any] = {}
 
 def _ensure_embedding_loaded() -> None:
     """Carga Qwen3-Embedding una sola vez en memoria."""
-    global _EMB_STATE
     if _EMB_STATE:
         return
 
-    model_id = os.getenv("EMB_MODEL_ID", "Qwen/Qwen3-Embedding-0.6B")
+    model_id = os.getenv("EMB_MODEL_ID", DEFAULT_EMB_ID)
 
     # Permite forzar device vía env si quieres:
-    #   QWEN_EMB_DEVICE = "cuda" | "cpu"
-    forced_device = os.getenv("QWEN_EMB_DEVICE")
+    #   LOCAL_EMB_DEVICE = "cuda" | "cpu"
+    forced_device = os.getenv("LOCAL_EMB_DEVICE")
     if forced_device in ("cuda", "cpu"):
         device = forced_device
     else:
         use_cuda = (
-            os.getenv("QWEN_EMB_USE_CUDA", "0").lower() in ("1", "true", "yes")
+            os.getenv("LOCAL_EMB_USE_CUDA", "0").lower() in ("1", "true", "yes")
             and torch.cuda.is_available()
         )
         device = "cuda" if use_cuda else "cpu"
@@ -39,7 +39,7 @@ def _ensure_embedding_loaded() -> None:
     model.to(device)
     model.eval()
 
-    max_length = int(os.getenv("QWEN_EMB_MAX_LEN", "512"))
+    max_length = int(os.getenv("EMB_MAX_LEN", "512"))
 
     _EMB_STATE.update(
         {
@@ -87,7 +87,7 @@ def _embed_texts_core(inputs: List[str]) -> np.ndarray:
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "array", "items": {"type": "number"}}})
 def embed_texts(texts: List[str]) -> List[List[float]]:
     """
-    Devuelve embeddings Qwen3-Embedding para cada texto, usando Transformers local.
+    Devuelve embeddings para cada texto, usando Transformers local.
     """
     if isinstance(texts, str):
         inputs = [texts]
@@ -227,7 +227,7 @@ def semantic_search_in_csv(
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
     """
-    Búsqueda semántica sobre filas de un CSV usando Qwen3-Embedding.
+    Búsqueda semántica sobre filas de un CSV usando el modelo de embeddings local.
     """
     payload = _get_csv_embeddings(csv_path, text_columns)
     df: pd.DataFrame = payload["df"]
@@ -318,26 +318,26 @@ def embed_context_tables(
 
 
 # ─────────────────────────────────────────────
-# QWEN3-RERANKER – Transformers local
+# RERANKER – Transformers local
 # ─────────────────────────────────────────────
 
 _RERANK_STATE: Dict[str, Any] = {}
 
 
 def _ensure_reranker_loaded() -> None:
-    """Carga Qwen3-Reranker una sola vez en memoria."""
+    """Carga el Reranker una sola vez en memoria."""
     global _RERANK_STATE
     if _RERANK_STATE:
         return
 
-    model_id = os.getenv("RERANK_MODEL_ID", "Qwen/Qwen3-Reranker-0.6B")
+    model_id = os.getenv("RERANK_MODEL_ID", DEFAULT_RERANK_ID)
 
-    forced_device = os.getenv("QWEN_RERANK_DEVICE")
+    forced_device = os.getenv("LOCAL_RERANK_DEVICE")
     if forced_device in ("cuda", "cpu"):
         device = forced_device
     else:
         use_cuda = (
-            os.getenv("QWEN_RERANK_USE_CUDA", "0").lower() in ("1", "true", "yes")
+            os.getenv("LOCAL_RERANK_USE_CUDA", "0").lower() in ("1", "true", "yes")
             and torch.cuda.is_available()
         )
         device = "cuda" if use_cuda else "cpu"
@@ -347,7 +347,7 @@ def _ensure_reranker_loaded() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Importante: trust_remote_code=True para Qwen3-Reranker
+    # Importante: trust_remote_code=True si el modelo lo requiere (Qwen, etc.)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         trust_remote_code=True,
@@ -358,7 +358,7 @@ def _ensure_reranker_loaded() -> None:
     true_token_id = tokenizer("yes", add_special_tokens=False).input_ids[0]
     false_token_id = tokenizer("no", add_special_tokens=False).input_ids[0]
 
-    max_length = int(os.getenv("QWEN_RERANK_MAX_LEN", "1024"))
+    max_length = int(os.getenv("RERANK_MAX_LEN", "1024"))
 
     _RERANK_STATE.update(
         {
@@ -393,9 +393,9 @@ def _format_rerank_prompts(
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def rerank_qwen3(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
+def rerank_docs(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     """
-    Usa Qwen3-Reranker (local, vía Transformers) para ordenar documentos por relevancia.
+    Usa el Reranker local (vía Transformers) para ordenar documentos por relevancia.
     Soporta lista de strings O lista de objetos (dicts) retornados por search_knowledge_base.
     """
     _ensure_reranker_loaded()
@@ -436,7 +436,7 @@ def rerank_qwen3(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
         return []
 
     instruction = os.getenv(
-        "QWEN_RERANK_INSTRUCT",
+        "RERANK_INSTRUCT",
         "Given a web search query, rank documents by how well they answer the query.",
     )
 
@@ -497,14 +497,11 @@ def judge_row_with_context(
     param_hits = param_hits or []
     glossary_hits = glossary_hits or []
 
-    # Heurística para encontrar un identificador de contrato/fila
-    contract_id = (
-        row.get("numero_contrato")
-        or row.get("numero de contrato")
-        or row.get("num_contrato")
-        or row.get("contract_number")
-        or row.get("contract_id")
-        or row.get("id")
+    # Identificador genérico de fila, si existe
+    row_id = (
+        row.get("id")
+        or row.get("uuid")
+        or row.get("key")
     )
 
     has_context = bool(param_hits or glossary_hits)
@@ -533,7 +530,7 @@ def judge_row_with_context(
             )
 
     return {
-        "contract_id": contract_id,
+        "row_id": row_id,
         "judgement": judgement,
         "reasons": reasons,
         "row": row,
@@ -558,19 +555,10 @@ def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
     
     Returns relevant text chunks with source metadata.
     """
-    try:
-        from agnostic_agent.knowledge.vector import search_db
-    except ImportError:
-        # Fallback if already migrated or missing
-        try:
-             # Old location fallback
-             from agnostic_agent.knowledge_offline import search_db
-        except ImportError:
-             return [{"error": "Module knowledge not found."}]
-
+    from agnostic_agent.knowledge.vector import search_db
     # Default path used in streamlit_app.py
     # Ideally should be in a config/env, but this aligns with current implementation
-    db_path = os.path.join(os.getcwd(), "embeddings.db")
+    db_path = os.getenv("VECTOR_DB_PATH", os.path.join(os.getcwd(), "embeddings.db"))
     
     if not os.path.exists(db_path):
         return [{"warning": "No knowledge base found (embeddings.db). Please ingest documents via the Offline Manager tab."}]

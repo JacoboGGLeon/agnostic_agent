@@ -27,14 +27,16 @@ try:
 except ImportError:
     DocumentConverter = None
 
+from agnostic_agent.capabilities import DEFAULT_EMB_ID, LocalModelPaths
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-EMB_MODEL_REPO = "Qwen/Qwen3-Embedding-0.6B"
+EMB_MODEL_REPO = os.getenv("EMB_MODEL_ID", DEFAULT_EMB_ID)
 MODELS_CACHE_DIR = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-EMB_DIM = 1024
+EMB_DIM = 1024 # Context dependent, but keeping default for now
 
 
 # -----------------------------------------------------------------------------

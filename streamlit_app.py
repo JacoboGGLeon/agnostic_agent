@@ -937,7 +937,7 @@ with tab_offline:
         tool_groups = {
             "🛠 Básicas": ["to_upper", "word_count", "is_palindrome"],
             "🧮 Matemáticas": ["eval_math_expression", "sum_numbers", "average_numbers"],
-            "🧠 RAG / Knowledge": ["search_knowledge_base", "semantic_search", "embed_texts", "rerank_qwen3"],
+            "🧠 RAG / Knowledge": ["search_knowledge_base", "semantic_search", "embed_texts", "rerank_docs"],
             "📊 Contexto Tabular": ["semantic_search_in_csv", "embed_context_tables", "judge_row_with_context"],
         }
         

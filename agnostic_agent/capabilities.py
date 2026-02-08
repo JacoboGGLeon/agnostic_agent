@@ -7,7 +7,7 @@ Incluye:
 - Descarga de modelos Qwen3 (LLM / Embeddings / Reranker) desde Hugging Face.
 - Lanzamiento de servidores vLLM OpenAI-compatible (LLM / EMB / RERANK).
 - Configuración del planner (PlannerConfig) y construcción del LLM planner
-  (build_planner_llm + build_planner_system_message) sobre ChatQwenVllm.
+#   (build_planner_llm + build_planner_system_message) sobre ChatOpenAI (generic).
 
 NOTA:
 - Esta lógica es agnóstica del dominio; sólo gestiona modelos y servidores.
@@ -27,7 +27,9 @@ import pathlib
 
 from huggingface_hub import snapshot_download
 from langchain_core.messages import SystemMessage
-from langchain_qwq import ChatQwenVllm
+from langchain_qwq import ChatQwenVllm as ChatGenVllm
+# Note: langchain_qwq might be a specific driver. If we want true agnosticism we might want ChatOpenAI,
+# but sticking to the existing driver for now to avoid breaking changes, just wrapping it.
 
 
 # ─────────────────────────────────────────────
@@ -39,12 +41,16 @@ def _str_to_bool(x: str) -> bool:
 
 
 # ─────────────────────────────────────────────
-# Descarga de modelos Qwen3 (HF snapshot)
+# Descarga de modelos (HF snapshot)
 # ─────────────────────────────────────────────
 
+DEFAULT_LLM_ID = "Qwen/Qwen3-0.6B"
+DEFAULT_EMB_ID = "Qwen/Qwen3-Embedding-0.6B"
+DEFAULT_RERANK_ID = "Qwen/Qwen3-Reranker-0.6B"
+
 @dataclass
-class QwenModelPaths:
-    """Rutas locales a los modelos Qwen usados por el agente."""
+class LocalModelPaths:
+    """Rutas locales a los modelos usados por el agente."""
     llm_dir: str
     emb_dir: str
     rerank_dir: str
@@ -69,32 +75,32 @@ def ensure_model_downloaded(model_id: str, local_dir: pathlib.Path) -> str:
     return str(local_dir.resolve())
 
 
-def prepare_qwen_models(
+def prepare_local_models(
     llm_model_id: Optional[str] = None,
     emb_model_id: Optional[str] = None,
     rerank_model_id: Optional[str] = None,
     base_dir: str | os.PathLike = "LM_MODEL",
-) -> QwenModelPaths:
+) -> LocalModelPaths:
     """
-    Descarga (si es necesario) los modelos Qwen y devuelve sus rutas locales.
+    Descarga (si es necesario) los modelos y devuelve sus rutas locales.
 
     Si algún ID no se pasa, se lee de las variables de entorno o se usan defaults:
-    - LLM_MODEL_ID      (por defecto: Qwen/Qwen3-0.6B)
-    - EMB_MODEL_ID      (por defecto: Qwen/Qwen3-Embedding-0.6B)
-    - RERANK_MODEL_ID   (por defecto: Qwen/Qwen3-Reranker-0.6B)
+    - LLM_MODEL_ID
+    - EMB_MODEL_ID
+    - RERANK_MODEL_ID
     """
     base_dir_path = pathlib.Path(base_dir)
     base_dir_path.mkdir(parents=True, exist_ok=True)
 
-    llm_model_id = llm_model_id or os.getenv("LLM_MODEL_ID", "Qwen/Qwen3-0.6B")
-    emb_model_id = emb_model_id or os.getenv("EMB_MODEL_ID", "Qwen/Qwen3-Embedding-0.6B")
-    rerank_model_id = rerank_model_id or os.getenv("RERANK_MODEL_ID", "Qwen/Qwen3-Reranker-0.6B")
+    llm_model_id = llm_model_id or os.getenv("LLM_MODEL_ID", DEFAULT_LLM_ID)
+    emb_model_id = emb_model_id or os.getenv("EMB_MODEL_ID", DEFAULT_EMB_ID)
+    rerank_model_id = rerank_model_id or os.getenv("RERANK_MODEL_ID", DEFAULT_RERANK_ID)
 
-    llm_dir = ensure_model_downloaded(llm_model_id, base_dir_path / "Qwen3_LLM_MAIN")
-    emb_dir = ensure_model_downloaded(emb_model_id, base_dir_path / "Qwen3_Embedding_0.6B")
-    rerank_dir = ensure_model_downloaded(rerank_model_id, base_dir_path / "Qwen3_Reranker_0.6B")
+    llm_dir = ensure_model_downloaded(llm_model_id, base_dir_path / "LLM_MAIN")
+    emb_dir = ensure_model_downloaded(emb_model_id, base_dir_path / "Embedding")
+    rerank_dir = ensure_model_downloaded(rerank_model_id, base_dir_path / "Reranker")
 
-    return QwenModelPaths(llm_dir=llm_dir, emb_dir=emb_dir, rerank_dir=rerank_dir)
+    return LocalModelPaths(llm_dir=llm_dir, emb_dir=emb_dir, rerank_dir=rerank_dir)
 
 
 # ─────────────────────────────────────────────
@@ -256,8 +262,8 @@ def _launch_vllm_server(
     return proc, log_path
 
 
-def start_qwen_vllm_servers(
-    model_paths: QwenModelPaths,
+def start_local_vllm_servers(
+    model_paths: LocalModelPaths,
     config: Optional[VllmConfig] = None,
     set_env: bool = True,
 ) -> tuple[VllmEndpoints, VllmServers]:
@@ -270,7 +276,7 @@ def start_qwen_vllm_servers(
     """
     cfg = config or VllmConfig()
 
-    # LLM – flags alineados a Qwen3 + langchain-qwq
+    # LLM – flags alineados a vLLM + langchain driver
     llm_extra_flags: list[str] = [
         "--enable-auto-tool-choice",
         "--tool-call-parser",
@@ -388,7 +394,7 @@ def start_qwen_vllm_servers(
 
 
 # ─────────────────────────────────────────────
-# PlannerConfig + planner LLM (ChatQwenVllm)
+# PlannerConfig + planner LLM
 # ─────────────────────────────────────────────
 
 STRICT_SYSTEM_TEXT = (
@@ -453,7 +459,7 @@ class PlannerConfig:
     max_steps: int = int(os.getenv("PLANNER_MAX_STEPS", "16"))
     temperature: float = float(os.getenv("PLANNER_TEMPERATURE", "0.0"))
 
-    # Qwen3-style reasoning
+    # Reasoning
     enable_thinking: bool = _str_to_bool(os.getenv("PLANNER_ENABLE_THINKING", "true"))
 
     # Timeout para evitar httpx.ReadTimeout
@@ -483,7 +489,7 @@ def build_planner_system_message(
     cfg = config or PlannerConfig()
     return SystemMessage(content=cfg.system_text)
 
-def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
+def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatGenVllm:
     """
     Construye el LLM planner apuntando al endpoint vLLM (VLLM_API_BASE).
     No asume tools; se configuran fuera con .bind_tools().
@@ -494,7 +500,7 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
     if "VLLM_LLM_API_BASE" in os.environ and "VLLM_API_BASE" not in os.environ:
         os.environ["VLLM_API_BASE"] = os.environ["VLLM_LLM_API_BASE"]
 
-    return ChatQwenVllm(
+    return ChatGenVllm(
         model=cfg.model_name,
         temperature=cfg.temperature,
         enable_thinking=cfg.enable_thinking,

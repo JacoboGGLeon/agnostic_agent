@@ -35,7 +35,7 @@ from .skills import SkillRegistry  # ✅ registro de skills
 
 class Agent:
     """
-    Agente agnóstico sobre LangGraph + Qwen3.
+    Agente agnóstico sobre LangGraph + OpenAI-compatible LLM.
     ...
     """
 

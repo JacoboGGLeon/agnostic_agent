@@ -5,7 +5,7 @@ Lógica principal (grafo LangGraph) del Agnostic Deep Agent.
 
 Sub-grafos actuales:
 - ANALYZER  → descompone el prompt (rule-based sencillo por ahora).
-- PLANNER   → usa Planner LLM (Qwen3+vLLM) para generar tool_calls.
+- PLANNER   → usa Planner LLM (OpenAI-compatible) para generar tool_calls.
 - EXECUTOR  → ejecuta tools reales (LangChain tools).
 - CATCHER   → normaliza las salidas de tools a una lista de runs.
 - SUMMARIZER→ construye:
@@ -23,7 +23,7 @@ Notas:
     * con tablas de contexto (input B, p.ej. parametrías y
       diccionarios de abreviaturas/definiciones),
     * y, opcionalmente, documentos (OCR de contratos) vía tools
-      como semantic_search_in_csv + rerank_qwen3.
+      como semantic_search_in_csv + rerank_docs.
 """
 
 from dataclasses import dataclass
@@ -515,34 +515,9 @@ def _fmt_args(args: dict) -> str:
 def _fmt_output(tool_name: str, v: Any) -> str:
     if isinstance(v, bool):
         return "Sí" if v else "No"
-
-    # Embeddings → preview compacto
-    if tool_name == "embed_texts":
-        try:
-            preview = []
-            if isinstance(v, list):
-                for idx, vec in enumerate(v):
-                    if isinstance(vec, list):
-                        preview.append(
-                            {
-                                "index": idx,
-                                "dim": len(vec),
-                                "head_5": vec[:5],
-                            }
-                        )
-            return json.dumps(preview, ensure_ascii=False, indent=2)
-        except Exception:
-            return str(v)
-
-    # Reranker → lista JSON bonita
-    if tool_name == "rerank_qwen3":
-        try:
-            return json.dumps(v, ensure_ascii=False, indent=2)
-        except Exception:
-            return str(v)
-
-    # Tablas / dicts grandes → JSON bonito
-    if isinstance(v, (dict, list)):
+    
+    # Generic robust formatter for complex objects
+    if isinstance(v, (dict, list, tuple, set)):
         try:
             return json.dumps(v, ensure_ascii=False, indent=2, default=_json_default)
         except Exception:
@@ -569,239 +544,17 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
     for r in runs:
         arg_str = _fmt_args(r["args"])
         out_str = _fmt_output(r["name"], r["output"])
-
-        if r["name"] in (
-            "embed_texts",
-            "rerank_qwen3",
-            "embed_context_tables",
-            "semantic_search_in_csv",
-            "judge_row_with_context",
-        ):
-            partes.append(
-                f"- `{r['name']}({arg_str})`:\n\n```json\n{out_str}\n```"
-            )
+        
+        # Generic formatting: Code block for large outputs if needed
+        if len(out_str) > 100 or "\n" in out_str:
+             partes.append(f"- `{r['name']}({arg_str})`:\n```json\n{out_str}\n```")
         else:
-            partes.append(
-                f"- `{r['name']}({arg_str})` → **{out_str}**"
-            )
+             partes.append(f"- `{r['name']}({arg_str})` → **{out_str}**")
 
     return "\n".join(partes)
 
 
-def build_user_answer(user_text: str, runs: List[Dict[str, Any]]) -> str:
-    """
-    Construye la respuesta 1:1 en lenguaje natural para el modo USER,
-    usando EXCLUSIVAMENTE lo que viene en `runs` (tool-first, sin alucinaciones).
-
-    Nota: es agnóstico, pero tiene atajos para algunas tools típicas
-    (to_upper, is_palindrome, word_count, embed_texts, rerank_qwen3,
-     y las tools de contexto: embed_context_tables,
-     semantic_search_in_csv, judge_row_with_context).
-
-    Si no reconoce nada, devolvemos "" y el caller
-    hará fallback al resumen de herramientas.
-    """
-    if not runs:
-        return ""
-
-    sentences: List[str] = []
-
-    # 1) Reranker: priorizamos porque suele ser la "respuesta clave"
-    rr = next((r for r in runs if r.get("name") == "rerank_qwen3"), None)
-    if rr is not None:
-        out = rr.get("output")
-        args = rr.get("args", {}) or {}
-        docs = args.get("documents") or []
-
-        if isinstance(out, list) and out:
-            best = out[0]
-            idx = best.get("index", 0)
-            doc = best.get("document")
-            score = best.get("score")
-
-            # Si el documento no viene embebido, lo recuperamos de args.documents
-            if doc is None and isinstance(docs, list) and isinstance(idx, int) and 0 <= idx < len(docs):
-                doc = docs[idx]
-
-            idx_h = idx + 1 if isinstance(idx, int) else idx
-
-            if doc is not None:
-                if isinstance(score, (int, float)):
-                    sentences.append(
-                        f"El documento más relevante es el #{idx_h}: \"{doc}\" "
-                        f"(score ≈ {score:.3f})."
-                    )
-                else:
-                    sentences.append(
-                        f"El documento más relevante es el #{idx_h}: \"{doc}\"."
-                    )
-
-    # 2) to_upper
-    for r in runs:
-        if r.get("name") == "to_upper":
-            txt = r.get("args", {}).get("text")
-            out = r.get("output")
-            if txt is not None and out is not None:
-                sentences.append(f"He convertido \"{txt}\" a mayúsculas: **{out}**.")
-
-    # 3) is_palindrome
-    for r in runs:
-        if r.get("name") == "is_palindrome":
-            txt = r.get("args", {}).get("text")
-            val = r.get("output")
-            if txt:
-                if bool(val):
-                    sentences.append(f"\"{txt}\" es un palíndromo.")
-                else:
-                    sentences.append(f"\"{txt}\" no es un palíndromo.")
-
-    # 4) word_count
-    for r in runs:
-        if r.get("name") == "word_count":
-            txt = r.get("args", {}).get("text")
-            n = r.get("output")
-            if txt is not None and n is not None:
-                sentences.append(f"El texto \"{txt}\" tiene {n} palabras.")
-
-    # 5) embed_texts
-    emb = next((r for r in runs if r.get("name") == "embed_texts"), None)
-    if emb is not None:
-        vecs = emb.get("output")
-        n_vecs = len(vecs) if isinstance(vecs, list) else 0
-
-        dim: Optional[int] = None
-        if isinstance(vecs, list) and vecs:
-            v0 = vecs[0]
-            if isinstance(v0, list):  # lista cruda de floats
-                dim = len(v0)
-            elif isinstance(v0, dict) and "dim" in v0:
-                try:
-                    dim = int(v0["dim"])
-                except Exception:
-                    dim = None
-
-        if n_vecs and dim:
-            sentences.append(
-                f"He generado embeddings de dimensión {dim} para {n_vecs} texto(s)."
-            )
-        elif n_vecs:
-            sentences.append(
-                f"He generado embeddings para {n_vecs} texto(s)."
-            )
-
-    # 6) embed_context_tables (tablas de parametrías / abreviaturas)
-    for r in runs:
-        if r.get("name") == "embed_context_tables":
-            args = r.get("args", {}) or {}
-            tables = args.get("table_paths") or args.get("tables") or []
-            out = r.get("output")
-
-            n_tables = len(tables) if isinstance(tables, list) else 0
-
-            dim: Optional[int] = None
-            if isinstance(out, dict):
-                dim = out.get("embedding_dim") or out.get("dim")
-                try:
-                    if dim is not None:
-                        dim = int(dim)
-                except Exception:
-                    dim = None
-
-            if n_tables:
-                if dim:
-                    sentences.append(
-                        f"He generado embeddings de dimensión {dim} para {n_tables} tabla(s) de contexto "
-                        "(parametrías, diccionarios o definiciones)."
-                    )
-                else:
-                    sentences.append(
-                        f"He generado embeddings para {n_tables} tabla(s) de contexto "
-                        "(parametrías, diccionarios o definiciones)."
-                    )
-
-    # 7) semantic_search_in_csv (búsqueda semántica en tablas / OCR tabular)
-    for r in runs:
-        if r.get("name") == "semantic_search_in_csv":
-            args = r.get("args", {}) or {}
-            query = args.get("query")
-            csv_path = args.get("csv_path") or args.get("table_path")
-            out = r.get("output")
-
-            best_row = None
-            if isinstance(out, list) and out:
-                best_row = out[0]
-
-            if best_row is not None:
-                score = (
-                    best_row.get("score")
-                    if isinstance(best_row, dict)
-                    else None
-                )
-                row_preview = best_row.get("row") if isinstance(best_row, dict) else None
-                if isinstance(row_preview, dict):
-                    row_preview = json.dumps(row_preview, ensure_ascii=False)
-                if query and csv_path:
-                    if isinstance(score, (int, float)):
-                        sentences.append(
-                            f"En la tabla `{csv_path}` he encontrado una fila muy relevante para la consulta "
-                            f"\"{query}\" (score ≈ {score:.3f}). Fila ejemplo: {row_preview}."
-                        )
-                    else:
-                        sentences.append(
-                            f"En la tabla `{csv_path}` he encontrado una fila relevante para la consulta "
-                            f"\"{query}\". Fila ejemplo: {row_preview}."
-                        )
-
-    # 8) judge_row_with_context (juicio de una fila de atributos vs parametrías/diccionarios)
-    for r in runs:
-        if r.get("name") == "judge_row_with_context":
-            args = r.get("args", {}) or {}
-            out = r.get("output") or {}
-
-            contract_id = (
-                out.get("contract_id")
-                or out.get("row_id")
-                or out.get("id")
-                or args.get("contract_id")
-                or args.get("row_id")
-                or args.get("id")
-            )
-            judgement = (
-                out.get("judgement")
-                or out.get("verdict")
-                or out.get("decision")
-                or out.get("status")
-            )
-            reasons = out.get("reasons") or out.get("rule_hits") or out.get("details")
-
-            if isinstance(reasons, list):
-                reasons_str = "; ".join(map(str, reasons[:3]))
-            else:
-                reasons_str = str(reasons) if reasons is not None else ""
-
-            if contract_id is not None and judgement is not None:
-                sent = (
-                    f"He evaluado la fila/contrato '{contract_id}' aplicando las tablas de parametrías "
-                    f"y diccionarios de contexto. El juicio es: **{judgement}**."
-                )
-                if reasons_str:
-                    sent += f" Motivos principales: {reasons_str}."
-                sentences.append(sent)
-            elif judgement is not None:
-                sent = (
-                    f"He evaluado la fila de atributos con las tablas de contexto; "
-                    f"el juicio global es: **{judgement}**."
-                )
-                if reasons_str:
-                    sent += f" Motivos principales: {reasons_str}."
-                sentences.append(sent)
-
-    if not sentences:
-        # Fallback: si por lo que sea no pudimos mapear nada,
-        # devolvemos cadena vacía y el caller decidirá usar el resumen de tools.
-        return ""
-
-    return " ".join(sentences)
+# build_user_answer REMOVED (Legacy hardcoded function)
 
 
 # ─────────────────────────────────────────────
@@ -929,21 +682,21 @@ def build_graph_agent(
             logic_form = data.get("logic_form", "q1")
             selected_skills = data.get("selected_skills", [])
             
-            # --- FALLBACK ROBUSTO ---
+            # --- FALLBACK AGNOSTICO ---
             # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),
-            # forzamos 'semantic_researcher' para evitar que el Planner alucine sin herramientas.
+            # NO forzamos nada. Dejamos que el Planner decida usar 'search_knowledge_base' si lo necesita.
             if not selected_skills and kb_available:
-                print("[ANALYZER] ⚠️ Model returned no skills but KBs are available. Forcing 'semantic_researcher'.")
-                selected_skills = ["semantic_researcher"]
+                print("[ANALYZER] ℹ️ Model returned no skills but KBs are available. Delegating decision to Planner.")
             # ------------------------
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
         except Exception as e:
             print(f"[ANALYZER] Error parsing JSON: {e}. Content: {getattr(response, 'content', '')[:100]}...")
-            # Fallback simple: si hay KB, activar researcher
+            # Fallback simple: lista vacía
             if kb_available:
-                 selected_skills = ["semantic_researcher"]
+                 print(f"[ANALYZER] Error fallback: leaving skills empty.")
+                 selected_skills = []
         
         # 4. Construir resultado
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
@@ -1748,25 +1501,6 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 "Inconsistencia: el SUMMARIZER dice que no hubo tools, "
                 "pero tool_runs no está vacío."
             )
-
-        # Heurística: prompt tabular sin tools
-        if runs == [] and user_prompt:
-            if any(tok in user_prompt.lower() for tok in ["tabla", "table", "fila", "row", "columna", "column"]):
-                all_covered = False
-                reasons.append(
-                    "El usuario menciona estructuras tabulares pero no se invocaron herramientas; "
-                    "puede faltar cálculo determinista sobre tablas/diccionarios."
-                )
-
-        # Heurística adicional: caso de contratos sin juicio explícito
-        if "contrato" in user_prompt.lower() or "contract" in user_prompt.lower():
-            has_judge = any(r.get("name") == "judge_row_with_context" for r in runs)
-            if not has_judge:
-                all_covered = False
-                reasons.append(
-                    "El usuario menciona contratos pero no se detectó ninguna ejecución "
-                    "de `judge_row_with_context`; podría faltar el juicio fila+contexto."
-                )
 
         if not reasons and all_covered:
             reasons.append("No se detectaron problemas obvios de cobertura.")
