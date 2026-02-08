@@ -1465,6 +1465,16 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             # Ya no chequeamos cfg.policy_mode == "hybrid" porque es el único modo.
             
             # Sintetizar con LLM (usando planner_llm)
+            
+            # Recuperar instrucciones de skills activas para el Summarizer
+            skill_gen_instructions = ""
+            if analyzer and analyzer.get("active_skills"):
+                if skill_registry:
+                    for s_name in analyzer["active_skills"]:
+                        skill = skill_registry.get_skill(s_name)
+                        if skill:
+                            skill_gen_instructions += f"\n\n--- INSTRUCCIONES ESPECÍFICAS ({s_name}) ---\n{skill.instructions}"
+
             hybrid_sys = (
                 "Eres un asistente que responde preguntas basándose ESTRICTAMENTE en la información provista "
                 "por las herramientas (Contexto).\n"
@@ -1475,6 +1485,10 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 "- Citas: Si es posible, menciona la fuente (ej: 'según el documento X...').\n"
                 "- Responde en el mismo idioma del usuario."
             )
+            
+            if skill_gen_instructions:
+                hybrid_sys += skill_gen_instructions
+
             
             # Refuerzo para latencia
             if cfg and not cfg.enable_thinking:
