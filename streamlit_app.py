@@ -229,29 +229,30 @@ with st.sidebar:
         show_deep_tab = st.checkbox("🧠 Deep", value=True)
         show_dev_tab = st.checkbox("🔍 Dev", value=True)
 
-    st.markdown("### ℹ️ Session Info")
-    st.caption(f"Mensajes: {len(st.session_state.messages)}")
-    
-    if st.button("🗑️ Limpiar todo", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.agent = None
-        st.session_state.selected_msg_id = None
-        st.toast("Chat reiniciado.", icon="🧹")
-        st.rerun()
+    # Session Info in Expander to save space
+    with st.expander("ℹ️ Session Info & Actions", expanded=False):
+        st.caption(f"Mensajes: {len(st.session_state.messages)}")
+        
+        if st.button("🗑️ Limpiar todo", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.agent = None
+            st.session_state.selected_msg_id = None
+            st.toast("Chat reiniciado.", icon="🧹")
+            st.rerun()
 
-    if st.button("⬇️ Export transcript", use_container_width=True):
-        export = {"agent_mode": st.session_state.agent_mode, "messages": st.session_state.messages}
-        st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
-        st.toast("Transcript listo.", icon="⬇️")
+        if st.button("⬇️ Export transcript", use_container_width=True):
+            export = {"agent_mode": st.session_state.agent_mode, "messages": st.session_state.messages}
+            st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
+            st.toast("Transcript listo.", icon="⬇️")
 
-    if isinstance(st.session_state.export_json, str):
-        st.download_button(
-            "Descargar JSON",
-            data=st.session_state.export_json,
-            file_name="transcript.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        if isinstance(st.session_state.export_json, str):
+            st.download_button(
+                "Descargar JSON",
+                data=st.session_state.export_json,
+                file_name="transcript.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
 # Mode change => reset agent (history stays)
 if st.session_state.agent_mode != agent_mode:
@@ -530,13 +531,19 @@ with tab_online:
                         "output": tr.get("output", "")
                     }
                     st.session_state["tool_logs"].append(log_entry)
-                # ---------------------------------------------
-
+              elif role == "assistant":
+                out = msg.get("out") or {}
+                content = msg.get("content") or ""
+                # Try to get mode from 'out', fallback to session state if current run, else '?'
+                used_mode = out.get("agent_mode", "")
+                
+                badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
+                
                 with st.chat_message("assistant"):
                     # Pretty answer only
                     card_md(
-                        title="Respuesta",
-                        body_md=html.escape(answer or "_(sin respuesta)_").replace("\n", "<br>"),
+                        title=f"Respuesta {badge_html}",
+                        body_md=html.escape(content or "_(sin respuesta)_").replace("\n", "<br>"),
                         icon="👤",
                         hint=f"id={msg.get('id')}",
                     )
@@ -652,7 +659,15 @@ with tab_online:
 
     if prompt:
         uid = next_id()
-        st.session_state.messages.append({"id": uid, "role": "user", "content": prompt, "out": None})
+        # Prepare message payload
+        # Start with empty 'out' but include the current mode for badge display
+        msg_payload = {
+            "id": uid, 
+            "role": "user", 
+            "content": prompt, 
+            "out": {"agent_mode": st.session_state.agent_mode} 
+        }
+        st.session_state.messages.append(msg_payload)
 
         agent = get_or_init_agent(st.session_state.agent_mode)
         try:
@@ -769,7 +784,13 @@ with tab_offline:
         # DB Stats
         st.markdown("### 📊 Estado de la Base de Datos")
         try:
+            # FORCE RELOAD to ensure new functions are picked up
+            import sys
+            import importlib
+            import agnostic_agent.knowledge_offline
+            importlib.reload(agnostic_agent.knowledge_offline)
             from agnostic_agent.knowledge_offline import get_stats, get_ingestion_history
+            
             stats = get_stats(DB_PATH)
             
             s1, s2, s3, s4 = st.columns(4)

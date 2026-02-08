@@ -401,7 +401,7 @@ STRICT_SYSTEM_TEXT = (
     "INSTRUCCIONES (agnósticas de dominio):\n"
     "1) Usa SIEMPRE herramientas cuando exista alguna relevante.\n"
     "2) Devuelves únicamente tool_calls (llamadas a herramientas), "
-    "   nunca una respuesta final en lenguaje natural.\n"
+    "   never a final answer in natural language.\n"
     "3) Si la instrucción tiene varias acciones (por ejemplo: "
     "   'primero A, luego B, al final C'), planifica todas las tools "
     "   necesarias respetando ese orden.\n"

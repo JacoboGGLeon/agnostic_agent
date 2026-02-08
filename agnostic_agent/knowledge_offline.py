@@ -567,3 +567,48 @@ def ingest_pdf_file(pdf_path: str, db_path: str, k_neighbors: int = 1) -> Dict[s
         "chunks": len(chunks),
         "file": Path(pdf_path).name
     }
+
+# -----------------------------
+# Persistence / History Log
+# -----------------------------
+def log_ingestion_event(metadata: Dict[str, Any], history_path: str) -> None:
+    """
+    Log an ingestion event to a JSONL file.
+    """
+    import datetime
+    import json
+    
+    # Add timestamp if not present
+    if "timestamp" not in metadata:
+        metadata["timestamp"] = datetime.datetime.now().isoformat()
+        
+    try:
+        with open(history_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(metadata) + "\n")
+    except Exception as e:
+        logger.error(f"Error writing to history log: {e}")
+
+def get_ingestion_history(history_path: str) -> List[Dict[str, Any]]:
+    """
+    Read ingestion history from JSONL file.
+    Returns list of dicts, newest first.
+    """
+    import json
+    
+    if not os.path.exists(history_path):
+        return []
+        
+    history = []
+    try:
+        with open(history_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        history.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except Exception as e:
+        logger.error(f"Error reading history log: {e}")
+        return []
+        
+    return list(reversed(history))
