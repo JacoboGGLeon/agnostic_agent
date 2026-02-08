@@ -1126,8 +1126,10 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
                         "name": t_name,
                         "args": t_args,
                         "id": t_id,
-                        "type": "tool_call" # LangChain compatibility
+                        "type": "tool_call" # Explicit type for LangChain
                     })
+            
+            print(f"[PLANNER] DAG generado con {len(tool_calls)} pasos. Tools: {[t['name'] for t in tool_calls]}")
             
             print(f"[PLANNER] DAG generado con {len(tool_calls)} pasos.")
             
@@ -1185,19 +1187,39 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
         messages = state["messages"]
         ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
         if not ai_msgs:
+            print("[EXECUTOR] No AIMessage found in state.")
             return {"messages": [], "executor_steps": []}
 
         ai_plan = ai_msgs[-1]
-        tool_calls = extract_tool_calls(ai_plan)
+        
+        # 1. Intentar sacar tool_calls explícitos (LangChain attr)
+        tool_calls = getattr(ai_plan, "tool_calls", None)
+        
+        # 2. Fallback a extractor manual
         if not tool_calls:
+             tool_calls = extract_tool_calls(ai_plan)
+             
+        if not tool_calls:
+            print("[EXECUTOR] No tool calls found involved in message. Skipping.")
             return {"messages": [], "executor_steps": []}
 
+        print(f"[EXECUTOR] Executing {len(tool_calls)} tools...")
+        
         tool_msgs: List[ToolMessage] = []
-        exec_steps: List[ExecutorStep] = []
+        exec_steps: List[Dict[str, Any]] = []
 
         for tc in tool_calls:
-            name = tc["name"]
-            args = tc.get("args", {}) or {}
+            # Soportar dict o objeto ToolCall
+            if isinstance(tc, dict):
+                name = tc.get("name")
+                args = tc.get("args", {}) or {}
+                t_id = tc.get("id")
+            else:
+                name = getattr(tc, "name", "")
+                args = getattr(tc, "args", {}) or {}
+                t_id = getattr(tc, "id", "")
+            
+            print(f"[EXECUTOR] Running tool: {name} with args: {args}")
 
             try:
                 tool_obj = next(t for t in tools if t.name == name)
@@ -1219,22 +1241,19 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
                     ensure_ascii=False,
                 )
 
-            tool_call_id = tc["id"]
-
             tool_msgs.append(
                 ToolMessage(
                     content=payload,
-                    tool_call_id=tool_call_id,
+                    tool_call_id=t_id,
+                    name=name
                 )
             )
-
-            exec_steps.append(
-                ExecutorStep(
-                    tool_call_id=tool_call_id,
-                    tool_name=name,
-                    args=args,
-                )
-            )
+            
+            exec_steps.append({
+                "tool_name": name,
+                "args": args,
+                "tool_call_id": t_id
+            })
 
         return {
             "messages": tool_msgs,
@@ -1658,7 +1677,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
             "user_out": final_answer if isinstance(final_answer, str) and final_answer.strip() else state.get("user_out"),
         }
 
-    # Router
+    # Router (Updated Debug)
     def route_from_planner(state: State) -> str:
         messages = state["messages"]
         ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
@@ -1666,8 +1685,21 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
             return "summarizer"
 
         last_ai = ai_msgs[-1]
-        if extract_tool_calls(last_ai):
+        
+        # Check explicit tool_calls first (LangChain standard)
+        tc = getattr(last_ai, "tool_calls", None)
+        if tc and isinstance(tc, list) and len(tc) > 0:
+            print(f"[ROUTER] Going to EXECUTOR. Found {len(tc)} tool_calls.")
             return "executor"
+            
+        # Fallback to current extractor
+        extracted = extract_tool_calls(last_ai)
+        if extracted:
+            print(f"[ROUTER] Going to EXECUTOR. Extracted {len(extracted)} tool_calls.")
+            return "executor"
+            
+        print("[ROUTER] No tool calls found. Going to SUMMARIZER.")
+        print(f"[ROUTER DEBUG] Content start: {last_ai.content[:50]}...")
         return "summarizer"
 
     # Build graph
