@@ -393,10 +393,16 @@ def _format_rerank_prompts(
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def rerank_qwen3(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
+def rerank_qwen3(query: str, documents: List[Any], instruction: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Usa Qwen3-Reranker (local, vía Transformers) para ordenar documentos por relevancia.
     Soporta lista de strings O lista de objetos (dicts) retornados por search_knowledge_base.
+    
+    Args:
+        query: La consulta del usuario.
+        documents: Lista de textos o diccionarios con metadatos.
+        instruction: Instrucción opcional para el reranker (ej: "Rankea por precisión técnica"). 
+                     Si es None, usa el default de "Juez de Relevancia".
     """
     _ensure_reranker_loaded()
     state = _RERANK_STATE
@@ -435,10 +441,11 @@ def rerank_qwen3(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     if not docs_text:
         return []
 
-    instruction = os.getenv(
-        "QWEN_RERANK_INSTRUCT",
-        "Given a web search query, rank documents by how well they answer the query.",
-    )
+    if not instruction:
+        instruction = os.getenv(
+            "QWEN_RERANK_INSTRUCT",
+            "Given a web search query, rank documents by how well they answer the query.",
+        )
 
     prompts = _format_rerank_prompts(query, docs_text, instruction)
 
