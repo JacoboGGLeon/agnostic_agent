@@ -1370,6 +1370,9 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
 
         runs = state.get("tool_runs", []) or []
 
+        # Extraer analyzer al inicio para tener scope en todo el nodo
+        analyzer = state.get("analyzer") or {}
+
         # 2) Parche SUMMARIZER (regla de oro):
         # Si NO hay tools (runs vacío) y el último AI NO tiene tool_calls,
         # user_out debe ser la salida directa del LLM (limpia de <think>).
@@ -1399,7 +1402,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
             # --- Reconstrucción de metadatos (para simplificar, reusemos lógica) ---
-            analyzer = state.get("analyzer") or {}
+            # analyzer ya está definido arriba
             subqs = analyzer.get("subqueries") or []
             logic = analyzer.get("propositional_logic") or ""
             input_payload = analyzer.get("input_payload") or {}
