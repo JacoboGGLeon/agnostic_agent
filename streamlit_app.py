@@ -563,86 +563,85 @@ with tab_online:
             st.info("Inspector oculto. Actívalo en la barra lateral.")
             st.markdown("</div>", unsafe_allow_html=True)
         else:
+            a_msgs = assistant_messages()
+            if not a_msgs:
+                st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                ids = [m["id"] for m in a_msgs]
 
-        a_msgs = assistant_messages()
-        if not a_msgs:
-            st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            ids = [m["id"] for m in a_msgs]
+                def label(mid: int) -> str:
+                    m = find_message_by_id(mid) or {}
+                    out = m.get("out") or {}
+                    text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
+                    text = (text[:60] + "…") if len(text) > 60 else text
+                    return f"id={mid} · {text or '(sin texto)'}"
 
-            def label(mid: int) -> str:
-                m = find_message_by_id(mid) or {}
+                if st.session_state.selected_msg_id not in ids:
+                    st.session_state.selected_msg_id = ids[-1]
+
+                sel = st.selectbox(
+                    "Mensaje seleccionado",
+                    options=ids,
+                    index=ids.index(st.session_state.selected_msg_id),
+                    format_func=label,
+                    key="inspector_selectbox",
+                )
+                st.session_state.selected_msg_id = sel
+
+                m = find_message_by_id(st.session_state.selected_msg_id) or {}
                 out = m.get("out") or {}
-                text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
-                text = (text[:60] + "…") if len(text) > 60 else text
-                return f"id={mid} · {text or '(sin texto)'}"
+                raw_state = get_raw_state(out)
 
-            if st.session_state.selected_msg_id not in ids:
-                st.session_state.selected_msg_id = ids[-1]
+                thinking = extract_thinking(raw_state)
+                deep_txt = extract_summary_deep(raw_state, as_text(out.get("deep_out")))
+                tool_runs = extract_tool_runs(out, raw_state)
 
-            sel = st.selectbox(
-                "Mensaje seleccionado",
-                options=ids,
-                index=ids.index(st.session_state.selected_msg_id),
-                format_func=label,
-                key="inspector_selectbox",
-            )
-            st.session_state.selected_msg_id = sel
+                tab_specs: List[Tuple[str, str]] = []
+                if show_thinking_tab:
+                    tab_specs.append(("🧠 Thinking", "thinking"))
+                if show_deep_tab:
+                    tab_specs.append(("🧠 Deep", "deep"))
+                if show_dev_tab:
+                    tab_specs.append(("🔍 Dev", "dev"))
 
-            m = find_message_by_id(st.session_state.selected_msg_id) or {}
-            out = m.get("out") or {}
-            raw_state = get_raw_state(out)
+                tabs = st.tabs([t[0] for t in tab_specs])
 
-            thinking = extract_thinking(raw_state)
-            deep_txt = extract_summary_deep(raw_state, as_text(out.get("deep_out")))
-            tool_runs = extract_tool_runs(out, raw_state)
+                for (tab_title, tab_key), tab in zip(tab_specs, tabs):
+                    with tab:
+                        if tab_key == "thinking":
+                            card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
 
-            tab_specs: List[Tuple[str, str]] = []
-            if show_thinking_tab:
-                tab_specs.append(("🧠 Thinking", "thinking"))
-            if show_deep_tab:
-                tab_specs.append(("🧠 Deep", "deep"))
-            if show_dev_tab:
-                tab_specs.append(("🔍 Dev", "dev"))
-
-            tabs = st.tabs([t[0] for t in tab_specs])
-
-            for (tab_title, tab_key), tab in zip(tab_specs, tabs):
-                with tab:
-                    if tab_key == "thinking":
-                        card_code("Pensamiento (thinking)", thinking, icon="🧠", hint="reasoning_content")
-
-                    elif tab_key == "deep":
-                        # Render Deep/Summary with real Markdown support
-                        # We split the card HTML to inject the markdown in between
-                        st.markdown(
-                            """
-                            <div class="card">
-                              <div class="card-h">
-                                <div>🧠 Vista profunda (deep_out / summary)</div>
-                                <span class="hint">pipeline</span>
-                              </div>
-                              <div class="card-b">
-                            """, 
-                            unsafe_allow_html=True
-                        )
-                        
-                        if deep_txt:
-                            st.markdown(deep_txt)
-                        else:
-                            st.markdown("_(vacío)_")
+                        elif tab_key == "deep":
+                            # Render Deep/Summary with real Markdown support
+                            # We split the card HTML to inject the markdown in between
+                            st.markdown(
+                                """
+                                <div class="card">
+                                  <div class="card-h">
+                                    <div>🧠 Vista profunda (deep_out / summary)</div>
+                                    <span class="hint">pipeline</span>
+                                  </div>
+                                  <div class="card-b">
+                                """, 
+                                unsafe_allow_html=True
+                            )
                             
-                        st.markdown("</div></div>", unsafe_allow_html=True)
-
-                    elif tab_key == "dev":
-                        render_tool_runs(tool_runs)
-
-                        with st.expander("🧬 raw_state (debug)", expanded=False):
-                            if isinstance(raw_state, dict) and raw_state:
-                                st.json(raw_state)
+                            if deep_txt:
+                                st.markdown(deep_txt)
                             else:
-                                st.markdown("_(sin raw_state)_")
+                                st.markdown("_(vacío)_")
+                                
+                            st.markdown("</div></div>", unsafe_allow_html=True)
+
+                        elif tab_key == "dev":
+                            render_tool_runs(tool_runs)
+
+                            with st.expander("🧬 raw_state (debug)", expanded=False):
+                                if isinstance(raw_state, dict) and raw_state:
+                                    st.json(raw_state)
+                                else:
+                                    st.markdown("_(sin raw_state)_")
 
             st.markdown("</div>", unsafe_allow_html=True)
 
