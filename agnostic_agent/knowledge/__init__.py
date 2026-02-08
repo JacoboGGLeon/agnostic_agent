@@ -154,4 +154,3 @@ def select_knowledge_bases(
 
     name_set = set(knowledge_names)
     return [knowledge for knowledge in knowledge_list if knowledge.name in name_set]
-```
