@@ -228,7 +228,7 @@ with st.sidebar:
         width=140,
     )
     st.markdown("### Agentic Lab · Settings")
-    st.caption("Un framework de agentes de BBVA")
+    # st.caption("Un framework de agentes de BBVA")
 
     st.markdown("#### 🧭 Inspector")
     show_inspector = st.toggle("Activar Inspector", value=True)
@@ -528,8 +528,7 @@ st.markdown(
   <div class="brand">
     <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
     <div>
-      <div class="title">Agentic Lab</div>
-      <div class="subtitle">Un framework de agentes de BBVA</div>
+      <div class="title">Agentic Lab · Studio</div>
     </div>
   </div>
   <div class="badges">
