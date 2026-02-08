@@ -109,6 +109,12 @@ Salida OBLIGATORIA: UN ÚNICO OBJETO JSON (sin markdown):
   ]
 }
 Si no se necesitan herramientas, devuelve {"dag": []}.
+
+IMPORTANTE:
+- NO generes pasos duplicados exactos (misma tool, mismos argumentos).
+- Si necesitas verificar, usa una query diferente o un enfoque distinto.
+- Sé eficiente.
+
 """.strip()
 
 

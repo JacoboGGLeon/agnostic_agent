@@ -1183,6 +1183,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             # Conjunto de nombres de tools permitidas
             allowed_tool_names = {t.name for t in active_tools} if active_tools else None
             
+            seen_calls = set()
             for step in dag_steps:
                 t_name = step.get("tool")
                 t_args = step.get("args", {})
@@ -1195,6 +1196,15 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                         print(f"[PLANNER] ⛔ Tool '{t_name}' BLOCKED. Not in active skill tools: {allowed_tool_names}")
                         continue
                         
+                    # DEDUPLICATION CHECK
+                    t_args_str = json.dumps(t_args, sort_keys=True)
+                    dedup_key = (t_name, t_args_str)
+                    
+                    if dedup_key in seen_calls:
+                        print(f"[PLANNER] ⚠️ Duplicate tool call detected: {t_name} args={t_args}. Skipping.")
+                        continue
+                    seen_calls.add(dedup_key)
+
                     tool_calls.append({
                         "name": t_name,
                         "args": t_args,
