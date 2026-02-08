@@ -416,6 +416,42 @@ No añadas nada fuera del JSON. Devuelve SOLO el JSON.
 """.strip()
 
 
-def build_memory_write_system_message() -> SystemMessage:
-    """Devuelve el SystemMessage para el rol MEMORY_WRITE."""
-    return SystemMessage(content=MEMORY_WRITE_SYSTEM_PROMPT)
+
+# ─────────────────────────────────────────────
+# PLANNER – Rich Context & Subqueries
+# ─────────────────────────────────────────────
+
+def build_planner_rich_system_message(
+    rich_context_text: str,
+    subqueries: list[str],
+    skill_instructions: str = ""
+) -> SystemMessage:
+    """
+    Construye el SystemMessage para el PLANNER v2 (Rich Context).
+    """
+    import json
+    
+    system_content = (
+        "Eres el PLANNER (Planificador) del Agnostic Agent.\n"
+        "Tu objetivo es generar UN PLAN de ejecución (lista de tool_calls) para resolver "
+        "las peticiones del usuario, basándote en el CONTEXTO disponible.\n\n"
+        
+        f"{rich_context_text}\n\n"
+        
+        "== INSTRUCCIONES DE PLANIFICACIÓN ==\n"
+        "1. Analiza las siguientes SUBCONSULTAS (detectadas por el Analyzer):\n"
+        f"{json.dumps(subqueries, indent=2, ensure_ascii=False)}\n\n"
+        
+        "2. Para CADA subconsulta, revisa el Contexto (Tools, Knowledge, Skills) y decide qué herramientas llamar.\n"
+        "   - Puedes mezclar herramientas de diferentes tipos.\n"
+        "   - Si una Skill es relevante, observa sus 'tools' sugeridas o sus instrucciones.\n"
+        "   - Si se requiere buscar información, usa las herramientas de Knowledge (@knowledge).\n\n"
+        
+        "3. Genera el PLAN COMPLETO (todas las tool_calls necesarias) en un solo bloque.\n"
+        "   - Respeta los esquemas de entrada (@tool input={...}).\n"
+        "   - Si no necesitas herramientas, responde vacío (el sistema pasará la pregunta al modelo directo).\n"
+        
+        f"{skill_instructions}"
+    )
+
+    return SystemMessage(content=system_content)

@@ -860,13 +860,46 @@ def build_graph_agent(
             "user_prompt": user_prompt,
         }
 
-        # Detección de Skills (simple keyword match por ahora)
+        # Detección de Skills (Improved)
         selected_skill = None
         if skill_registry:
-            for skill in skill_registry.list_skills():
-                if skill.name.lower() in str(user_prompt).lower():
+            enabled_skills = skill_registry.list_skills()
+            
+            # 1. Check for explicit @mention (e.g. @semantic_researcher)
+            # or exact name match in text
+            for skill in enabled_skills:
+                sname = skill.name.lower()
+                sprompt = str(user_prompt).lower()
+                
+                # Direct match or @mention
+                if f"@{sname}" in sprompt or sname in sprompt:
                     selected_skill = skill.name
                     break
+            
+            # 2. Key-phrase matching for common skills if not yet selected
+            if not selected_skill:
+                for skill in enabled_skills:
+                    sname = skill.name.lower()
+                    sprompt = str(user_prompt).lower()
+                    
+                    # Heuristics for 'semantic_researcher'
+                    if "researcher" in sname or "investigador" in sname:
+                        # Triggers: investiga, busca, indaga, research, find info, que sabes de
+                        triggers = [
+                            "investiga", "busca", "indaga", "research", "find info", 
+                            "qué sabes de", "que sabes de", "dime sobre", "cuéntame de",
+                            "analiza", "información sobre", "datos de",
+                            "en el proyecto", "sobre el proyecto", # Contexto específico del usuario
+                            "según los documentos", "knowledge base"
+                        ]
+                        if any(t in sprompt for t in triggers):
+                            selected_skill = skill.name
+                            break
+                    
+                    # Generic fallback: if skill name is part of a "use X" command
+                    if f"use {sname}" in sprompt or f"usa {sname}" in sprompt:
+                        selected_skill = skill.name
+                        break
         
         # Split y lógica básica (Placeholder hasta tener LLM Analyzer real si se desea)
         # Aquí idealmente usaríamos un LLM con ANALYZER_SYSTEM_PROMPT para obtener
@@ -896,42 +929,73 @@ def build_graph_agent(
 
         return {"analyzer": analyzer}
 
-    def _format_unified_registry(skills_reg, tools_list, kb_names_list) -> str:
-        """Helper para construir el Menú de Capacidades Unificado."""
-        lines = ["== CAPABILITIES REGISTRY ==", ""]
-        
+    def _format_rich_context(skills_reg, tools_list, kb_names_list) -> str:
+        """
+        Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas.
+        Lee metadata real de los decoradores @agnostic_tool.
+        """
+        lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
+
         # 1. TOOLS
-        lines.append("[TOOLS] allow you to perform specific actions:")
+        lines.append("### 🛠 TOOLS (Funciones ejecutables)")
         if tools_list:
             for t in tools_list:
-                # Intenta sacar descripción de docstring o atributo
-                desc = getattr(t, "description", str(t))
                 name = getattr(t, "name", "tool")
-                lines.append(f"- {name}: {desc}")
+                desc = getattr(t, "description", str(t))
+                
+                # Leer metadata del decorador @agnostic_tool si existe
+                metadata = getattr(t.func if hasattr(t, 'func') else t, '_agnostic_metadata', None)
+                
+                if metadata:
+                    mode = metadata.get('mode', 'public')
+                    input_schema = metadata.get('input_schema')
+                    output_schema = metadata.get('output_schema', {})
+                else:
+                    mode = 'public'
+                    output_schema = {}
+                    # Intentar extraer esquema JSON de args_schema como fallback
+                    input_schema = None
+                    if hasattr(t, "args_schema") and t.args_schema:
+                        try:
+                            input_schema = t.args_schema.schema_json()
+                        except Exception:
+                            input_schema = str(t.args_schema)
+                
+                # Formatear como @tool decorator
+                input_str = json.dumps(input_schema) if input_schema else "Any"
+                output_str = json.dumps(output_schema) if output_schema else "{}"
+                
+                lines.append(
+                    f"@tool {{str={name}, input={input_str}, output={output_str}, mode={mode}}}"
+                )
+                lines.append(f"  Description: {desc}")
         else:
             lines.append("(No tools available)")
         lines.append("")
 
         # 2. KNOWLEDGE
-        lines.append("[KNOWLEDGE] allows you to query specific data sources:")
+        lines.append("### 📚 KNOWLEDGE (Bases de Datos / Archivos)")
         if kb_names_list:
             for kb in kb_names_list:
-                # Aquí solo tenemos nombres strings en state['kb_names'].
-                # Idealmente tendríamos objetos. Por compatibilidad, listamos nombres.
-                # Si tuviéramos registry de KB aquí, podríamos dar más detalle.
-                lines.append(f"- {kb} (Knowledge Base)")
+                # Asumimos type=vector por defecto para KBs ingestadas, o mixto
+                lines.append(f"@knowledge {{str={kb}, type={{vector, tabular}}, mode=public}}")
         else:
             lines.append("(No knowledge bases active)")
         lines.append("")
 
         # 3. SKILLS
-        lines.append("[SKILLS] are high-level recipes/workflows:")
+        lines.append("### 🧩 SKILLS (Recetas / Workflows)")
         if skills_reg:
             all_skills = skills_reg.list_skills()
             if all_skills:
                 for s in all_skills:
-                    lines.append(f"- {s.name}: {s.description}")
-                    # Opcional: incluir instrucciones resumidas o full si son pocas
+                    # Incluimos tools/knowledge requeridos por la skill si existen
+                    req_tools = s.tools or []
+                    req_kb = s.knowledge or []
+                    lines.append(
+                        f"@skill {{str={s.name}, mode=public, description='{s.description}', "
+                        f"tools={req_tools}, knowledge={req_kb}}}"
+                    )
             else:
                 lines.append("(No skills loaded)")
         else:
@@ -939,7 +1003,7 @@ def build_graph_agent(
         
         return "\n".join(lines)
 
-    # PLANNER (ve memoria y KB names como contextos)
+    # PLANNER
     def planner_node(state: State) -> Dict[str, Any]:
         msgs: List[AnyMessage] = state["messages"]
 
@@ -949,44 +1013,32 @@ def build_graph_agent(
         
         mem_str = _format_memory_context(mem_ctx)
 
-        # Recuperar skill seleccionada (active)
+        # Recuperar skill activada y subqueries del Analyzer
         analyzer = state.get("analyzer") or {}
         selected_skill_name = analyzer.get("selected_skill")
+        subqueries = analyzer.get("subqueries") or []
         
-        # CONSTRUIR REGISTRO UNIFICADO
-        # Necesitamos la lista de herramientas, que viene en 'tools' (arg de build_graph_agent)
-        # y el registry de skills.
-        unified_registry_text = _format_unified_registry(skill_registry, tools, kb_names)
+        # CONSTRUIR REGISTRO "RICO"
+        rich_context_text = _format_rich_context(skill_registry, tools, kb_names)
 
-        # Instrucción de Skill Activada
+        # Instrucción de Skill Activada (sigue siendo útil si hay una explícita)
         skill_instructions = ""
         if selected_skill_name and skill_registry:
             skill = skill_registry.get_skill(selected_skill_name)
             if skill:
                  skill_instructions = (
-                     f"\n\n🚨 SKILL ACTIVADA: {skill.name.upper()}\n"
-                     f"Descripción: {skill.description}\n"
-                     "Instrucciones/Receta a seguir:\n"
-                     f"{skill.instructions}\n"
-                     "Sigue ESTRICTAMENTE estos pasos para resolver la tarea.\n"
-                     "Usa las Tools y Knowledge del Registry que mejor se adapten a esta receta."
+                     f"\n\n🚨 SKILL PRIORITARIA DETECTADA: {skill.name.upper()}\n"
+                     f"Receta sugerida: {skill.instructions}\n"
                  )
 
-        # Construir system message dinámico
-        # Base Prompt + Unified Registry + Skill Activada
+        # Construir SYSTEM MESSAGE usando prompts.py
+        from agnostic_agent.prompts import build_planner_rich_system_message
         
-        # Nota: 'base_system_msg' viene de PlannerConfig. Lo usaremos como intro.
-        # Pero queremos forzar nuestro formato unificado.
-        # Así que combinamos:
-        
-        system_content = (
-            f"{base_system_msg.content}\n\n"
-            f"{unified_registry_text}\n\n"
-            "Tu tarea es 'amarrar' la petición del usuario con las capacidades de arriba.\n"
-            f"{skill_instructions}"
+        current_sys_msg = build_planner_rich_system_message(
+            rich_context_text=rich_context_text,
+            subqueries=subqueries,
+            skill_instructions=skill_instructions
         )
-
-        current_sys_msg = SystemMessage(content=system_content)
 
         extra_system_messages: List[SystemMessage] = []
         if mem_str:

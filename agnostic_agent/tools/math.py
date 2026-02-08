@@ -2,7 +2,7 @@ from typing import List, Any
 import ast
 import operator as _op
 import numbers
-from langchain_core.tools import tool
+from agnostic_agent.tools.decorators import tool
 
 # ─────────────────────────────────────────────
 # TOOLS matemáticas (evaluadas en Python)
@@ -42,7 +42,7 @@ def _eval_ast(node: ast.AST) -> float:
     raise ValueError(f"Nodo de AST no permitido: {type(node).__name__}")
 
 
-@tool
+@tool(mode="public", output_schema={"type": "number"})
 def eval_math_expression(expression: str) -> float:
     """
     Evalúa una expresión matemática sencilla usando Python de forma segura.
@@ -98,7 +98,7 @@ def _coerce_to_float(x: Any) -> float:
     raise ValueError(f"No se pudo interpretar {x!r} como número.")
 
 
-@tool
+@tool(mode="public", output_schema={"type": "number"})
 def sum_numbers(numbers: List[Any]) -> float:
     """
     Devuelve la suma de una lista de números.
@@ -119,7 +119,7 @@ def sum_numbers(numbers: List[Any]) -> float:
     return float(sum(vals))
 
 
-@tool
+@tool(mode="public", output_schema={"type": "number"})
 def average_numbers(numbers: List[Any]) -> float:
     """
     Devuelve la media aritmética de una lista de números.

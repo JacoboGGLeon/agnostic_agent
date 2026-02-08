@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
-from langchain_core.tools import tool
+from agnostic_agent.tools.decorators import tool
 
 # ─────────────────────────────────────────────
 # QWEN3-EMBEDDING – Transformers local
@@ -84,7 +84,7 @@ def _embed_texts_core(inputs: List[str]) -> np.ndarray:
     return emb.cpu().numpy()
 
 
-@tool
+@tool(mode="public", output_schema={"type": "array", "items": {"type": "array", "items": {"type": "number"}}})
 def embed_texts(texts: List[str]) -> List[List[float]]:
     """
     Devuelve embeddings Qwen3-Embedding para cada texto, usando Transformers local.
@@ -214,7 +214,7 @@ def _get_csv_embeddings(
     return payload
 
 
-@tool
+@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
 def semantic_search_in_csv(
     query: str,
     csv_path: str,
@@ -387,7 +387,7 @@ def _format_rerank_prompts(
     return prompts
 
 
-@tool
+@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
 def rerank_qwen3(query: str, documents: List[str]) -> List[Dict[str, Any]]:
     """
     Usa Qwen3-Reranker (local, vía Transformers) para ordenar documentos por relevancia.
@@ -512,13 +512,18 @@ def judge_row_with_context(
 # KNOWLEDGE BASE SEARCH (Offline / Local DB)
 # ─────────────────────────────────────────────
 
-@tool
+@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
 def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
     """
-    Busca información relevante en la base de datos de conocimiento local (PDFs procesados).
-    Retorna fragmentos de texto (chunks) con su contexto y metadatos fuente.
+    Primary tool for finding information about specific projects, documents, history, definitions, or any data not in your general training.
     
-    Útil para responder preguntas basadas en documentos ingestados previamente.
+    Use this tool whenever the user asks about:
+    - "El proyecto..." (The project...)
+    - "El documento..." (The document...)
+    - Specific facts, metrics, or methods described in uploaded files.
+    - "Búsqueda en base de conocimiento" (Knowledge Base Search).
+    
+    Returns relevant text chunks with source metadata.
     """
     try:
         from agnostic_agent.knowledge.vector import search_db
