@@ -358,6 +358,14 @@ def init_db(db_path: str):
             source_path TEXT
         );
     """)
+    
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS files_meta (
+            source_path TEXT PRIMARY KEY,
+            description TEXT,
+            ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
     conn.commit()
     conn.close()
 
@@ -490,10 +498,44 @@ def get_stats(db_path: str) -> Dict[str, Any]:
 # Main Facade
 # -----------------------------------------------------------------------------
 
+def get_kb_description_from_db(db_path: str) -> str:
+    """Returns a summary description of the KB based on ingested files."""
+    if not os.path.exists(db_path):
+        return ""
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        # Check if table exists first to avoid error on old DBs
+        try:
+            rows = conn.execute("SELECT source_path, description FROM files_meta").fetchall()
+        except sqlite3.OperationalError:
+            # Table might not exist yet
+            conn.close()
+            return ""
+            
+        conn.close()
+        
+        if not rows:
+            return ""
+        
+        lines = []
+        for path, desc in rows:
+            fname = Path(path).name
+            if desc and desc.strip():
+                lines.append(f"- {fname}: {desc}")
+            else:
+                lines.append(f"- {fname}")
+        
+        return "Contenido Ingestado:\n" + "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error reading KB description: {e}")
+        return ""
+
 def ingest_pdf_file(
     pdf_path: str, 
     db_path: str, 
     k_neighbors: int = 1,
+    description: Optional[str] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> Dict[str, Any]:
     """High-level function to ingest a PDF."""
@@ -533,6 +575,16 @@ def ingest_pdf_file(
     try:
         init_db(db_path) 
         upsert_chunks(db_path, chunks, embeddings)
+        
+        # 4.1 Update file metadata
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            INSERT OR REPLACE INTO files_meta (source_path, description)
+            VALUES (?, ?)
+        """, (str(pdf_path), description or ""))
+        conn.commit()
+        conn.close()
+        
     except Exception as e:
         return {"error": f"Database insertion failed: {e}"}
     

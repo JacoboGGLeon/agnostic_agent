@@ -16,6 +16,7 @@ class KnowledgeBase:
     name: str                # ID único (ej. "PARAM_TABLE", "FAOSTAT_DB")
     kind: str                # Tipo (ej. "table", "sqlite", "sqlite-vec", "generic")
     config: Dict[str, Any]   # Configuración específica (path, connection_string, etc.)
+    description: Optional[str] = None # Descripción semántica para el Planner
 
 
 # ─────────────────────────────────────────────

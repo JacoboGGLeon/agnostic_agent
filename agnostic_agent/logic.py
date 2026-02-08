@@ -929,6 +929,14 @@ def build_graph_agent(
             logic_form = data.get("logic_form", "q1")
             selected_skills = data.get("selected_skills", [])
             
+            # --- FALLBACK ROBUSTO ---
+            # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),
+            # forzamos 'semantic_researcher' para evitar que el Planner alucine sin herramientas.
+            if not selected_skills and kb_available:
+                print("[ANALYZER] ⚠️ Model returned no skills but KBs are available. Forcing 'semantic_researcher'.")
+                selected_skills = ["semantic_researcher"]
+            # ------------------------
+            
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
         except Exception as e:
@@ -956,10 +964,12 @@ def build_graph_agent(
         
         return {"analyzer": analyzer, "messages": [analyzer_msg]}
 
-    def _format_rich_context(skills_reg, tools_list, kb_names_list) -> str:
+    def _format_rich_context(skills_reg, tools_list, kb_list) -> str:
         """
         Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas.
         Lee metadata real de los decoradores @agnostic_tool.
+        args:
+            kb_list: Lista de dicts [{'name': '...', 'description': '...'}, ...]
         """
         lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
 
@@ -1002,10 +1012,18 @@ def build_graph_agent(
 
         # 2. KNOWLEDGE
         lines.append("### 📚 KNOWLEDGE (Bases de Datos / Archivos)")
-        if kb_names_list:
-            for kb in kb_names_list:
-                # Asumimos type=vector por defecto para KBs ingestadas, o mixto
-                lines.append(f"@knowledge {{str={kb}, type={{vector, tabular}}, mode=public}}")
+        if kb_list:
+            for kb in kb_list:
+                # kb puede ser string (legacy) o dict
+                if isinstance(kb, str):
+                    kb_name = kb
+                    kb_desc = ""
+                else:
+                    kb_name = kb.get("name", "unknown")
+                    kb_desc = kb.get("description", "")
+                
+                desc_part = f", description='{kb_desc}'" if kb_desc else ""
+                lines.append(f"@knowledge {{str={kb_name}, type={{vector, tabular}}, mode=public{desc_part}}}")
         else:
             lines.append("(No knowledge bases active)")
         lines.append("")
@@ -1039,6 +1057,10 @@ def build_graph_agent(
         
         # Contextos
         kb_names = state.get("kb_names") or []
+        # RECUPERAR OBJETOS KB COMPLETOS (para tener description)
+        # agent.py inyecta "kb_selected" como lista de dicts
+        kb_selected = state.get("kb_selected") or []
+        
         analyzer = state.get("analyzer") or {}
         active_skills = analyzer.get("active_skills") or []
         subqs = analyzer.get("subqueries") or []
@@ -1061,15 +1083,16 @@ def build_graph_agent(
         if skill_mode and required_tool_names:
             active_tools = [t for t in tools if t.name in required_tool_names]
             
-        active_kb_names = kb_names
+        # Filtrar KBs activas (objetos)
+        active_kb_objects = kb_selected
         if skill_mode and required_kb_names and "*" not in required_kb_names:
-            active_kb_names = [kb for kb in kb_names if kb in required_kb_names]
+            active_kb_objects = [kb for kb in kb_selected if kb.get("name") in required_kb_names]
 
         # 2. Construir Contexto
         rich_context_text = _format_rich_context(
             skill_registry, 
             active_tools, 
-            active_kb_names
+            active_kb_objects
         )
         
         # 3. Preparar Prompt DAG

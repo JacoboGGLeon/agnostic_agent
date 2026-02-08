@@ -766,6 +766,7 @@ with tab_offline:
 
         # File uploader
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
+        file_description = st.text_input("Descripción (Opcional)", placeholder="Ej: Manual de Operaciones 2024 - Capítulos 1-5")
         
         # DB path configuration (env vars with local defaults)
         DB_PATH = os.getenv("AGNOSTIC_DB_PATH", os.path.join(os.getcwd(), "embeddings.db"))
@@ -792,7 +793,12 @@ with tab_offline:
 
                 # with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
                 try:
-                    res = ingest_pdf_file(save_path, DB_PATH, progress_callback=_streamlit_progress_cb)
+                    res = ingest_pdf_file(
+                        save_path, 
+                        DB_PATH, 
+                        description=file_description,
+                        progress_callback=_streamlit_progress_cb
+                    )
                     if "error" in res:
                         st.error(f"Error: {res['error']}")
                         st.info("Nota: Si 'Docling' o 'PyMuPDF' no están instalados, no se podrá extraer texto.")
@@ -807,9 +813,10 @@ with tab_offline:
                         # Construct metadata
                         meta = {
                             "file": uploaded_file.name,
-                            "chunks": res.get("chunks_inserted", 0),
+                            "chunks": res.get("chunks", 0),
                             "db_path": DB_PATH,
-                            "status": "success"
+                            "status": "success",
+                            "description": file_description,
                         }
                         # JSONL file in same dir as docs
                         history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
@@ -842,21 +849,28 @@ with tab_offline:
             s4.metric("Dimensiones", stats.get("dim", 0))
             
             st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
-            
-            st.markdown("#### 📜 Historial de Ingesta (Persistente)")
-            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
-            history = get_ingestion_history(history_file)
-            
-            if history:
-                # Convert to dataframe for nicer display
-                st.dataframe(history, use_container_width=True)
-            else:
-                st.write("_(Sin historial previo)_")
 
-        except ImportError:
-            st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
+            st.markdown("### 📜 Historial de Ingesta (Persistente)")
+            
+            history_file_path = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+            
+            c1, c2 = st.columns([0.8, 0.2])
+            with c2:
+                if st.button("🗑️ Limpiar Historial", key="clear_hist", use_container_width=True):
+                    if os.path.exists(history_file_path):
+                        os.remove(history_file_path)
+                        st.toast("Historial eliminado.", icon="🗑️")
+                        st.rerun()
+            
+            hist = get_ingestion_history(history_file_path)
+            if hist:
+                st.dataframe(hist, use_container_width=True)
+            else:
+                st.caption("_(Sin historial)_")
+                
         except Exception as e:
-            st.warning(f"No se pudo leer la DB: {e}")
+            st.error(f"Error cargando estadísticas: {e}")
+
 
     st.divider()
     
