@@ -1039,7 +1039,7 @@ def build_graph_agent(
         kb_names = state.get("kb_names") or []
         analyzer = state.get("analyzer") or {}
         active_skills = analyzer.get("active_skills") or []
-        subqueries = analyzer.get("subqueries") or []
+        subqs = analyzer.get("subqueries") or []
         
         # 1. Filtrado de Tools/KBs (Skill Logic)
         skill_mode = len(active_skills) > 0
@@ -1079,7 +1079,7 @@ def build_graph_agent(
         
         # Crear mensaje de usuario con los inputs estructurados
         planner_input = {
-            "subqueries": subqueries,
+            "subqueries": subqs,
             "context_summary": "Ver System Prompt para definitions.",
             "available_tools_names": [t.name for t in active_tools],
             "available_kb_names": active_kb_names
@@ -1090,7 +1090,7 @@ CONTEXTO DISPONIBLE:
 {rich_context_text}
 
 TAREA:
-Genera el DAG para resolver: {json.dumps(subqueries, ensure_ascii=False)}
+Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
 """)
         
         sys_msg = SystemMessage(content=sys_content)
