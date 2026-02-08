@@ -436,6 +436,12 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     results = []
     for r in rows:
         row_id, dist = r
+        
+        # Convert L2 distance to Cosine Similarity (assuming normalized vectors)
+        # d^2 = 2(1 - sim) => sim = 1 - d^2/2
+        # Clamp to 0-1 range just in case
+        sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
+        
         meta_row = conn.execute("""
             SELECT chunk_id, element_id, page, md, neighbors, source_path
             FROM chunks_meta
@@ -444,7 +450,8 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         
         if meta_row:
             results.append({
-                "score": dist,
+                "score": sim, # Return Similarity
+                "distance": dist, # Keep raw distance just in case
                 "chunk_id": meta_row[0],
                 "element_id": meta_row[1],
                 "page": meta_row[2],
