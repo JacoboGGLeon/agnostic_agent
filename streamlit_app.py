@@ -1006,7 +1006,7 @@ with tab_offline:
 
                     with st.expander(f"Ver receta: {skill.name}"):
                         st.markdown(f"**Tools requeridas:** `{skill.tools}`")
-                        st.markdown(f"**KBs requeridas:** `{skill.kbs}`")
+                        st.markdown(f"**Knowledge requerida:** `{skill.knowledge}`")
                         st.markdown("---")
                         st.markdown(skill.instructions)
                         if skill.file_path:
