@@ -18,16 +18,33 @@ NOTA:
   capabilities.py o logic.py). Aquí solo definimos textos y helpers ligeros.
 """
 
+
 from typing import Literal
 
 from langchain_core.messages import SystemMessage
 
 
+# -------------------------------------------------------------------------
+# LÓGICA PROPOSICIONAL (Definiciones formales)
+# -------------------------------------------------------------------------
+LOGIC_DEFINITIONS = """
+{
+  "p": { "nombre": "proposición atómica", "rol": "enunciado simple con valor de verdad" },
+  "¬": { "nombre": "negación", "lectura": ["no p"], "semantica": "invierte valor de verdad" },
+  "∧": { "nombre": "conjunción", "lectura": ["p y q"], "semantica": "verdad solo si ambos verdaderos" },
+  "∨": { "nombre": "disyunción", "lectura": ["p o q"], "semantica": "verdad si al menos uno es verdadero" },
+  "⊕": { "nombre": "XOR", "lectura": ["o p o q, pero no ambos"], "semantica": "verdad si distintos" },
+  "→": { "nombre": "implicación", "lectura": ["si p entonces q"], "semantica": "falso solo si p=V y q=F" },
+  "↔": { "nombre": "bicondicional", "lectura": ["p si y solo si q"], "semantica": "verdad si p y q iguales" }
+}
+"""
+
 # ─────────────────────────────────────────────
 # ANALYZER – de texto libre a AnalyzerIntent
 # ─────────────────────────────────────────────
 
-ANALYZER_SYSTEM_PROMPT: str = """
+
+ANALYZER_SYSTEM_PROMPT: str = f"""
 Eres el ANALYZER de un agente de IA de propósito general.
 
 Tu trabajo es LEER con cuidado la petición del usuario y devolver un
@@ -37,6 +54,8 @@ La entrada que recibirás incluye, como mínimo:
 - user_prompt: texto completo del usuario.
 - memory_context: resúmenes y fragmentos de contexto previos (si existen).
 
+Usa las siguientes definiciones de lógica proposicional para estructurar tu análisis:
+{LOGIC_DEFINITIONS}
 Y el sistema puede disponer además de:
 - knowledge_bases: descriptores de BDs/tablas/KBs disponibles
   (por ejemplo, tablas SQL, vectores, diccionarios de negocio).

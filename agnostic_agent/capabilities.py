@@ -452,54 +452,34 @@ class PlannerConfig:
     max_retries: int = int(os.getenv("PLANNER_MAX_RETRIES", "1"))
     max_steps: int = int(os.getenv("PLANNER_MAX_STEPS", "16"))
     temperature: float = float(os.getenv("PLANNER_TEMPERATURE", "0.0"))
-    policy_mode: str = os.getenv("PLANNER_POLICY_MODE", "tools_strict")
 
     # Qwen3-style reasoning
     enable_thinking: bool = _str_to_bool(os.getenv("PLANNER_ENABLE_THINKING", "true"))
-
-    # 4) Ajuste “policy prompt”: 3 modos a nivel prompt
-    policy_mode: Literal["tools_strict", "free_policies", "hybrid"] = os.getenv(
-        "PLANNER_POLICY_MODE",
-        "tools_strict",
-    )  # "tools_strict" | "free_policies" | "hybrid"
 
     # Timeout para evitar httpx.ReadTimeout
     request_timeout: float = float(os.getenv("PLANNER_REQUEST_TIMEOUT", "120.0"))
 
     # Prompt base del planner (agnóstico de dominio)
+    # Se complementa con el Unified Registry injected en logic.py
     system_text: str = (
-        "Eres el PLANNER de un agente de IA con acceso opcional a herramientas (tools).\n"
-        "Tu trabajo es LEER con cuidado la petición completa del usuario, "
-        "descomponerla en subtareas cuando sea necesario y decidir si debes "
-        "hacer UNA o VARIAS llamadas a herramientas.\n\n"
-        "Dispones de un conjunto de herramientas (tools). Para cada tool "
-        "conoces su nombre, su descripción y sus parámetros.\n\n"
-        "INSTRUCCIONES (agnósticas de dominio):\n"
-        "1) Si una tool es necesaria para operar sobre datos externos (DB, archivos, web, "
-        "embeddings, búsqueda, parsing, etc.), úsala.\n"
-        "2) Si la instrucción tiene varias acciones (por ejemplo: "
-        "   'primero A, luego B, al final C'), planifica todas las tools "
-        "   necesarias respetando ese orden.\n"
-        "3) Si la entrada menciona varios ítems (varios textos, documentos, "
-        "   números, entidades, etc.), considera cubrir CADA ítem relevante.\n"
-        "4) Sé explícito y coherente en los argumentos de cada tool_call; "
-        "   respeta nombres y tipos de parámetros.\n"
-        "5) Si una acción requiere varios pasos (por ejemplo: transformar un "
-        "   dato y luego consultarlo en otra herramienta), divide el trabajo "
-        "   en varias tool_calls encadenadas.\n"
-        "6) No supongas un dominio específico (texto, matemáticas, APIs, "
-        "   bases de datos…); decide qué herramientas usar únicamente por su "
-        "   descripción.\n"
+        "Eres el PLANNER de un agente de IA con acceso a un Registro de Capacidades Unificado.\n"
+        "Tu trabajo es LEER con cuidado la petición del usuario y orquestar una solución usando "
+        "las Tools, Knowledge y Skills disponibles.\n\n"
+        "INSTRUCCIONES GENERALES:\n"
+        "1) Si una Skill aplica (ver descripción), ÚSALA prioridad máxima.\n"
+        "2) Si el usuario pide datos específicos, busca en Knowledge Bases.\n"
+        "3) Si necesitas transformar datos (cálculos, formato), usa Tools.\n"
+        "4) Sé explícito en los argumentos de cada tool_call.\n"
+        "5) No asumas valores que no tienes; busca o pregunta.\n"
     )
 
 
-def build_planner_system_message(config: Optional[PlannerConfig] = None) -> SystemMessage:
+def build_planner_system_message(
+    config: Optional[PlannerConfig] = None,
+) -> SystemMessage:
+    """Devuelve el SystemMessage base para el Planner (Agnóstico)."""
     cfg = config or PlannerConfig()
-    if cfg.policy_mode == "free_policies":
-        return SystemMessage(content=FREE_SYSTEM_TEXT)
-    elif cfg.policy_mode == "hybrid":
-        return SystemMessage(content=HYBRID_SYSTEM_TEXT)
-    return SystemMessage(content=STRICT_SYSTEM_TEXT)
+    return SystemMessage(content=cfg.system_text)
 
 def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
     """

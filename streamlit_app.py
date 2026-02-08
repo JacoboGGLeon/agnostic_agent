@@ -1016,6 +1016,27 @@ with tab_offline:
         else:
             st.error("No se ha cargado el registro de skills (Agent no inicializado o sin registry).")
 
+    # --------------------------------------------------------------------------
+    # 4. Agent Config
+    # --------------------------------------------------------------------------
+    st.sidebar.markdown("### ⚙️ Agent Config")
+
+    # Eliminamos el selector de Policy Mode. Ahora es "Unified/Hybrid".
+    # (Simplemente no mostramos nada o ponemos un badge informativo)
+    st.sidebar.info("Modo Unificado Activo (Hybrid + Skills)")
+
+    planner_model_name = st.sidebar.text_input("Planner Model", value="qwen2.5-14b-instruct")
+    temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+
+    # ... (resto de configs)
+    
+    config = PlannerConfig(
+        model_name=planner_model_name,
+        temperature=temperature,
+        max_steps=16,
+        # policy_mode ya no existe o no se usa
+    )
+
     # -------------------------------------------------------------------------
     # 📜 Logs de Ejecución Tab
     # -------------------------------------------------------------------------

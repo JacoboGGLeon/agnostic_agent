@@ -855,26 +855,23 @@ def build_graph_agent(
         # Permitimos que el llamador ya haya rellenado user_prompt
         user_prompt = state.get("user_prompt") or user_text
 
-        # Input payload más rico: aquí podríamos meter referencias a tablas/JSON.
+        # Input payload más rico
         input_payload: Dict[str, Any] = {
             "user_prompt": user_prompt,
         }
 
-        # Detección de Skills (simple keyword match por ahora, o semántico si tuviéramos)
+        # Detección de Skills (simple keyword match por ahora)
         selected_skill = None
         if skill_registry:
-            # Buscamos si el nombre de alguna skill está en el prompt, 
-            # o si el prompt "activa" la skill. 
-            # Por simplicidad v1: chequeamos si descripcion o nombre matchean keywords.
-            # O mejor: Le pasamos la info al Planner más adelante.
-            # Pero el plan dice: Analyzer selects.
             for skill in skill_registry.list_skills():
-                # Heurística muy básica: si el nombre de la skill está en el prompt
                 if skill.name.lower() in str(user_prompt).lower():
                     selected_skill = skill.name
                     break
         
-        # Split sencillo multi-sentencia: puntos y saltos de línea
+        # Split y lógica básica (Placeholder hasta tener LLM Analyzer real si se desea)
+        # Aquí idealmente usaríamos un LLM con ANALYZER_SYSTEM_PROMPT para obtener
+        # la estructura lógica real definida en prompts.py.
+        # Por ahora, mantenemos la heurística simple pero preparamos el campo.
         raw = str(user_prompt).replace("\n", " ")
         subqueries: List[str] = []
         for part in raw.split("."):
@@ -884,6 +881,8 @@ def build_graph_agent(
         if not subqueries and user_prompt:
             subqueries = [user_prompt]
 
+        # Generamos una lógica "dummy" usando los símbolos nuevos si es posible,
+        # o simple AND
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
         propositional_logic = " ∧ ".join(subqueries_logic) if subqueries_logic else ""
 
@@ -897,6 +896,49 @@ def build_graph_agent(
 
         return {"analyzer": analyzer}
 
+    def _format_unified_registry(skills_reg, tools_list, kb_names_list) -> str:
+        """Helper para construir el Menú de Capacidades Unificado."""
+        lines = ["== CAPABILITIES REGISTRY ==", ""]
+        
+        # 1. TOOLS
+        lines.append("[TOOLS] allow you to perform specific actions:")
+        if tools_list:
+            for t in tools_list:
+                # Intenta sacar descripción de docstring o atributo
+                desc = getattr(t, "description", str(t))
+                name = getattr(t, "name", "tool")
+                lines.append(f"- {name}: {desc}")
+        else:
+            lines.append("(No tools available)")
+        lines.append("")
+
+        # 2. KNOWLEDGE
+        lines.append("[KNOWLEDGE] allows you to query specific data sources:")
+        if kb_names_list:
+            for kb in kb_names_list:
+                # Aquí solo tenemos nombres strings en state['kb_names'].
+                # Idealmente tendríamos objetos. Por compatibilidad, listamos nombres.
+                # Si tuviéramos registry de KB aquí, podríamos dar más detalle.
+                lines.append(f"- {kb} (Knowledge Base)")
+        else:
+            lines.append("(No knowledge bases active)")
+        lines.append("")
+
+        # 3. SKILLS
+        lines.append("[SKILLS] are high-level recipes/workflows:")
+        if skills_reg:
+            all_skills = skills_reg.list_skills()
+            if all_skills:
+                for s in all_skills:
+                    lines.append(f"- {s.name}: {s.description}")
+                    # Opcional: incluir instrucciones resumidas o full si son pocas
+            else:
+                lines.append("(No skills loaded)")
+        else:
+            lines.append("(Skill Registry not available)")
+        
+        return "\n".join(lines)
+
     # PLANNER (ve memoria y KB names como contextos)
     def planner_node(state: State) -> Dict[str, Any]:
         msgs: List[AnyMessage] = state["messages"]
@@ -904,14 +946,19 @@ def build_graph_agent(
         # Contextos adicionales
         mem_ctx = state.get("memory_context")
         kb_names = state.get("kb_names") or []
-
+        
         mem_str = _format_memory_context(mem_ctx)
-        kb_str = _format_kb_hint(kb_names)
 
-        # Recuperar skill seleccionada
+        # Recuperar skill seleccionada (active)
         analyzer = state.get("analyzer") or {}
         selected_skill_name = analyzer.get("selected_skill")
         
+        # CONSTRUIR REGISTRO UNIFICADO
+        # Necesitamos la lista de herramientas, que viene en 'tools' (arg de build_graph_agent)
+        # y el registry de skills.
+        unified_registry_text = _format_unified_registry(skill_registry, tools, kb_names)
+
+        # Instrucción de Skill Activada
         skill_instructions = ""
         if selected_skill_name and skill_registry:
             skill = skill_registry.get_skill(selected_skill_name)
@@ -921,42 +968,44 @@ def build_graph_agent(
                      f"Descripción: {skill.description}\n"
                      "Instrucciones/Receta a seguir:\n"
                      f"{skill.instructions}\n"
-                     "Sigue ESTRICTAMENTE estos pasos para resolver la tarea."
+                     "Sigue ESTRICTAMENTE estos pasos para resolver la tarea.\n"
+                     "Usa las Tools y Knowledge del Registry que mejor se adapten a esta receta."
                  )
 
         # Construir system message dinámico
-        # (copiamos el base y le adjuntamos la skill instruction si existe)
-        current_sys_msg = SystemMessage(content=base_system_msg.content + skill_instructions)
+        # Base Prompt + Unified Registry + Skill Activada
+        
+        # Nota: 'base_system_msg' viene de PlannerConfig. Lo usaremos como intro.
+        # Pero queremos forzar nuestro formato unificado.
+        # Así que combinamos:
+        
+        system_content = (
+            f"{base_system_msg.content}\n\n"
+            f"{unified_registry_text}\n\n"
+            "Tu tarea es 'amarrar' la petición del usuario con las capacidades de arriba.\n"
+            f"{skill_instructions}"
+        )
+
+        current_sys_msg = SystemMessage(content=system_content)
 
         extra_system_messages: List[SystemMessage] = []
         if mem_str:
             extra_system_messages.append(
                 SystemMessage(
                     content=(
-                        "Contexto de memoria para esta sesión "
-                        "(puede contener preferencias, interacciones previas o notas):\n"
+                        "Contexto de memoria para esta sesión:\n"
                         f"{mem_str}"
                     )
                 )
             )
-        if kb_str:
-            extra_system_messages.append(SystemMessage(content=kb_str))
 
         ai_msg: AIMessage = call_planner_with_retry(
             planner_llm=planner_llm,
             system_message=current_sys_msg,
             user_or_history_messages=msgs,
             planner_config=cfg,
-            extra_system_messages=extra_system_messages,
+            tools=tools
         )
-
-        # 5) Invariante: guardamos raw/clean del LLM (sirve para modo sin tools)
-        llm_raw_out = _coerce_content_str(getattr(ai_msg, "content", ""))
-        llm_clean_out = strip_think(llm_raw_out)
-
-        tool_calls = extract_tool_calls(ai_msg)
-        analyzer = state.get("analyzer") or {}
-        subqs: List[str] = analyzer.get("subqueries") or []
 
         if not subqs:
             user_messages = [m for m in msgs if isinstance(m, HumanMessage)]
@@ -1102,6 +1151,7 @@ def build_graph_agent(
         # Si NO hay tools (runs vacío) y el último AI NO tiene tool_calls,
         # user_out debe ser la salida directa del LLM (limpia de <think>).
         if not runs:
+            # (Código modo sin tools, se mantiene igual)
             last_ai = find_last_assistant_real(messages)
             last_ai_has_tools = bool(extract_tool_calls(last_ai)) if last_ai else False
 
@@ -1109,7 +1159,6 @@ def build_graph_agent(
             llm_clean = state.get("llm_clean_out") or strip_think(llm_raw)
 
             if last_ai_has_tools:
-                # Caso raro: se planearon tools pero no hay runs (falló executor/catcher).
                 user_answer = (
                     "Se planificaron llamadas a herramientas, pero no se obtuvo ninguna salida. "
                     "Revisa EXECUTOR/CATCHER o el registro de tools."
@@ -1118,7 +1167,8 @@ def build_graph_agent(
                 user_answer = llm_clean or "¿Qué te gustaría hacer?"
 
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
-
+            
+            # --- Reconstrucción de metadatos (para simplificar, reusemos lógica) ---
             analyzer = state.get("analyzer") or {}
             subqs = analyzer.get("subqueries") or []
             logic = analyzer.get("propositional_logic") or ""
@@ -1166,8 +1216,6 @@ def build_graph_agent(
                 executor_text = "No se ejecutó ninguna herramienta para esta consulta."
 
             catcher_text = "Catcher no encontró resultados de tools (runs vacío)."
-
-            # summarizer_text para DEV/DEEP: en modo sin tools, dejamos constancia
             summarizer_text = "No se invocaron herramientas. Respuesta directa del modelo (passthrough)."
 
             summary_dict: SummaryDict = SummaryDict(
@@ -1179,133 +1227,106 @@ def build_graph_agent(
                 final_answer=user_answer,
             )
 
-            sections = [
-                "## Resumen del pipeline",
-                "### ANALYZER",
-                analyzer_text,
-                "### PLANNER",
-                planner_text,
-                "### EXECUTOR",
-                executor_text,
-                "### CATCHER",
-                catcher_text,
-                "### SUMMARIZER (basado en herramientas)",
-                tools_summary_text,
-                "### RESPUESTA FINAL (modo usuario)",
-                user_answer,
-            ]
-            answer_markdown = "\n\n".join(sections)
-
-            final_ai = AIMessage(
-                content=answer_markdown,
-                additional_kwargs={"pipeline_internal": True, "node": "summarizer"},
+        else:
+            # SÍ HAY TOOLS (runs > 0)
+            tools_summary_text = summarize_tool_runs(user_prompt, runs)
+            
+            # --- HYBRID/PROACTIVE MODE (Always) ---
+            # Ya no chequeamos cfg.policy_mode == "hybrid" porque es el único modo.
+            
+            # Sintetizar con LLM (usando planner_llm)
+            hybrid_sys = (
+                "Eres un asistente que responde preguntas basándose ESTRICTAMENTE en la información provista "
+                "por las herramientas (Contexto).\n"
+                "Tu objetivo es transformar los datos crudos de las herramientas en una respuesta natural, "
+                "fluida y útil para el usuario.\n"
+                "- NO agregues información externa que no esté en el contexto.\n"
+                "- SI el contexto está vacío o no es relevante, indícalo.\n"
+                "- Citas: Si es posible, menciona la fuente (ej: 'según el documento X...').\n"
+                "- Responde en el mismo idioma del usuario."
             )
-
-            dev_out = answer_markdown
-            deep_out = "\n\n".join([
-                "## Resumen deep del pipeline",
-                "### ANALYZER",
-                analyzer_text,
-                "### PLANNER",
-                planner_text,
-                "### EXECUTOR",
-                executor_text,
-                "### CATCHER",
-                catcher_text,
-                "### SUMMARIZER",
-                summarizer_text,
-                "### RESPUESTA FINAL",
-                user_answer,
-            ])
-            user_out = user_answer
-
-            return {
-                "messages": [final_ai],
-                "summary": summary_dict,
-                "pipeline_summary": summary_dict,
-                "dev_out": dev_out,
-                "deep_out": deep_out,
-                "user_out": user_out,
-            }
-
-        tools_summary_text = summarize_tool_runs(user_prompt, runs)
-
-        analyzer = state.get("analyzer") or {}
-        subqs = analyzer.get("subqueries") or []
-        logic = analyzer.get("propositional_logic") or ""
-        input_payload = analyzer.get("input_payload") or {}
-
-        if analyzer:
-            analyzer_text_lines = [
-                f"Input payload: {input_payload!r}",
-                f"Lógica proposicional: {logic or '(no construida)'}",
-                f"Subconsultas ({len(subqs)}):",
-            ]
-            for s in subqs:
-                analyzer_text_lines.append(f"- {s}")
-            analyzer_text = "\n".join(analyzer_text_lines)
-        else:
-            analyzer_text = "No se ejecutó ANALYZER o no dejó estado."
-
-        planner_trajs = state.get("planner_trajs", []) or []
-        if planner_trajs:
-            pl_lines: List[str] = []
-            for i, tr in enumerate(planner_trajs, start=1):
-                pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
-                desc = tr.get("description")
-                if desc:
-                    pl_lines.append(desc)
-            planner_text = "\n".join(pl_lines)
-        else:
-            planner_text = (
-                "No se construyó un plan de herramientas; probablemente se respondió "
-                "directamente (o no hubo tool_calls)."
+            hybrid_user_msg = (
+                f"Pregunta del usuario: {user_prompt}\n\n"
+                f"Información de Herramientas (Contexto):\n{tools_summary_text}\n\n"
+                "Respuesta:"
             )
+            try:
+                # Usamos planner_llm para sintetizar
+                hrm = planner_llm.invoke([
+                    SystemMessage(content=hybrid_sys), 
+                    HumanMessage(content=hybrid_user_msg)
+                ])
+                user_answer = hrm.content
+            except Exception as e:
+                user_answer = f"(Error en síntesis híbrida: {e})\n\nResumen crudo:\n{tools_summary_text}"
 
-        executor_steps = state.get("executor_steps", []) or []
-        if executor_steps:
-            ex_lines: List[str] = [
-                f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
-            ]
-            for step in executor_steps:
-                ex_lines.append(
-                    f"- tool_call_id={step['tool_call_id']}, "
-                    f"name={step['tool_name']}, args={step['args']!r}"
-                )
-            executor_text = "\n".join(ex_lines)
-        else:
-            executor_text = "No se ejecutó ninguna herramienta para esta consulta."
+            # --- Reconstrucción de metadatos (Analyzer, Planner, Executor, Catcher) ---
+            analyzer = state.get("analyzer") or {}
+            subqs = analyzer.get("subqueries") or []
+            logic = analyzer.get("propositional_logic") or ""
+            input_payload = analyzer.get("input_payload") or {}
+            
+            # (Copia de lógica de metadatos para consistencia)
+            if analyzer:
+                analyzer_text_lines = [
+                    f"Input payload: {input_payload!r}",
+                    f"Lógica proposicional: {logic or '(no construida)'}",
+                    f"Subconsultas ({len(subqs)}):",
+                ]
+                for s in subqs:
+                    analyzer_text_lines.append(f"- {s}")
+                analyzer_text = "\n".join(analyzer_text_lines)
+            else:
+                analyzer_text = "No se ejecutó ANALYZER o no dejó estado."
 
-        if runs:
-            ca_lines: List[str] = [
-                f"Catcher recopiló {len(runs)} resultados de tools."
-            ]
-            for r in runs:
-                ca_lines.append(
-                    f"- {r['name']}({r['args']!r}) → output tipo {type(r['output']).__name__}"
-                )
-            catcher_text = "\n".join(ca_lines)
-        else:
-            catcher_text = "Catcher no encontró resultados de tools (runs vacío)."
+            planner_trajs = state.get("planner_trajs", []) or []
+            if planner_trajs:
+                pl_lines: List[str] = []
+                for i, tr in enumerate(planner_trajs, start=1):
+                    pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
+                    desc = tr.get("description")
+                    if desc:
+                        pl_lines.append(desc)
+                planner_text = "\n".join(pl_lines)
+            else:
+                planner_text = "No se construyó un plan de herramientas."
 
-        # Resumen tool-based (para DEV/DEEP)
-        summarizer_text = tools_summary_text
+            executor_steps = state.get("executor_steps", []) or []
+            if executor_steps:
+                ex_lines_list: List[str] = [
+                    f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
+                ]
+                for step in executor_steps:
+                    ex_lines_list.append(
+                        f"- tool_call_id={step['tool_call_id']}, "
+                        f"name={step['tool_name']}, args={step['args']!r}"
+                    )
+                executor_text = "\n".join(ex_lines_list)
+            else:
+                executor_text = "No se ejecutó ninguna herramienta para esta consulta."
 
-        # Respuesta 1:1 en lenguaje natural para USER (tool-first)
-        user_answer = build_user_answer(user_prompt, runs)
-        if not user_answer:
-            # Fallback conservador: si por lo que sea no pudimos mapear nada,
-            # devolvemos el resumen de herramientas como antes.
-            user_answer = tools_summary_text
+            if runs:
+                ca_lines_list: List[str] = [
+                    f"Catcher recopiló {len(runs)} resultados de tools."
+                ]
+                for r in runs:
+                    ca_lines_list.append(
+                        f"- {r['name']}({r['args']!r}) → output tipo {type(r['output']).__name__}"
+                    )
+                catcher_text = "\n".join(ca_lines_list)
+            else:
+                catcher_text = "Catcher no encontró resultados de tools (runs vacío)."
 
-        summary_dict: SummaryDict = SummaryDict(
-            analyzer=analyzer_text,
-            planner=planner_text,
-            executor=executor_text,
-            catcher=catcher_text,
-            summarizer=summarizer_text,
-            final_answer=user_answer,
-        )
+            summarizer_text = tools_summary_text
+
+            summary_dict: SummaryDict = SummaryDict(
+                analyzer=analyzer_text,
+                planner=planner_text,
+                executor=executor_text,
+                catcher=catcher_text,
+                summarizer=summarizer_text,
+                final_answer=user_answer,
+            )
 
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
         sections = [
