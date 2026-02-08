@@ -1171,6 +1171,10 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             
             # 6. Convertir DAG a Tool Calls lineales
             # Asumimos que la lista 'dag' ya viene ordenada topológicamente o secuencialmente
+            
+            # Conjunto de nombres de tools permitidas
+            allowed_tool_names = {t.name for t in active_tools} if active_tools else None
+            
             for step in dag_steps:
                 t_name = step.get("tool")
                 t_args = step.get("args", {})
@@ -1178,6 +1182,11 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 
                 # Validar existencias
                 if t_name:
+                    # STRICT SKILL CHECK: Si estamos en modo skill, SOLO permitir tools activas
+                    if skill_mode and allowed_tool_names and t_name not in allowed_tool_names:
+                        print(f"[PLANNER] ⛔ Tool '{t_name}' BLOCKED. Not in active skill tools: {allowed_tool_names}")
+                        continue
+                        
                     tool_calls.append({
                         "name": t_name,
                         "args": t_args,
