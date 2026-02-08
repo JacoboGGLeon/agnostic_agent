@@ -147,22 +147,29 @@ section[data-testid="stSidebar"]{
   color: rgba(255,255,255,.92);
 }
 
-/* Right-align assistant messages (best effort assumption: alternating user/ai) */
+/* Agent/Assistant bubble (Right aligned, Orange/Standard) */
 div[data-testid="stChatMessage"]:nth-child(even) {
     flex-direction: row-reverse;
-    background-color: rgba(255,255,255,0.02);
+    background-color: rgba(255,255,255,0.05); /* Slight highlight */
 }
-div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
+div[data-testid="stChatMessage"]:nth-child(even) .stMarkdown {
     text-align: right;
 }
 
-/* User bubble */
+/* User bubble (Left aligned, Purpleish as requested) */
+div[data-testid="stChatMessage"]:nth-child(odd) {
+    flex-direction: row;
+    background-color: transparent; 
+}
+
+/* Custom bubble styling for User */
 .bubble-user{
   padding: 10px 12px;
   border-radius: 16px;
-  border: 1px solid rgba(0,161,224,.45);
-  background: linear-gradient(180deg, rgba(0,161,224,.22), rgba(255,255,255,.05));
-  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  border: 1px solid rgba(138, 43, 226, 0.45); /* Purple border */
+  background: linear-gradient(180deg, rgba(138, 43, 226, 0.15), rgba(255,255,255,.02));
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  color: #E2D1F9;
 }
 
 /* Inspector wrapper */
@@ -171,8 +178,8 @@ div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
   border: 1px solid var(--border);
   background: rgba(255,255,255,.05);
   box-shadow: var(--shadow);
-  box-shadow: var(--shadow);
   padding: 12px;
+  margin-top: 0px !important; /* Remove top margin/container effect */
 }
 .inspector-box{
   border-radius: var(--r);
@@ -184,6 +191,11 @@ div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
 }
 .inspector h3{ margin: 0 0 6px 0; }
 
+/* Remove empty containers if any */
+div[data-testid="stVerticalBlock"] > div:has(> .element-container:empty) {
+    display: none;
+}
+
 /* Expanders */
 [data-testid="stExpander"]{
   border-radius: var(--r);
@@ -194,8 +206,8 @@ div[data-testid="stChatMessage"]:nth-child(even) div[data-testid="stMarkdown"] {
 
 /* Chat spacing */
 [data-testid="stChatMessage"]{
-  padding-top: 0.25rem;
-  padding-bottom: 0.25rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }
 </style>
 """,
@@ -558,8 +570,16 @@ with tab_online:
 
             if role == "user":
                 with st.chat_message("user"):
-                    # Use standard markdown for user messages to support rich text
-                    st.markdown(msg.get("content",""))
+                    # Use custom styling for user
+                    content = msg.get("content", "")
+                    st.markdown(
+                        f"""
+                        <div class="bubble-user">
+                          {html.escape(content)}
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
 
             elif role == "assistant":
                 out = msg.get("out") or {}
