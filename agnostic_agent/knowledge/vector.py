@@ -285,14 +285,9 @@ def _mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) ->
     return torch.nn.functional.normalize(summed / counts, dim=1)
 
 @torch.inference_mode()
-def embed_texts(texts: List[str], batch_size: int = 8, instruction: str = "") -> np.ndarray:
+def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
     if not texts:
         return np.zeros((0, EMB_DIM), dtype="float32")
-
-    # Apply instruction if present
-    if instruction:
-        # Qwen-Embedding instruction format is typically just prepended
-        texts = [f"{instruction}{t}" for t in texts]
 
     use_vllm = os.getenv("USE_VLLM_EMBEDDING", "0") == "1"
     
@@ -328,12 +323,6 @@ def embed_texts(texts: List[str], batch_size: int = 8, instruction: str = "") ->
         ).to(model.device)
         
         out = model(**inputs)
-        # Attention: Qwen3-Embedding usually uses last token hidden state or weighted mean. 
-        # The original code used mean pooling. We keep it consistent unless we want to change it.
-        # But wait, Qwen-Embedding often uses EOS token pooling? 
-        # Let's stick to the existing mean pooling for now to avoid regression, 
-        # unless I see evidence that Qwen3 specifically needs different pooling.
-        
         vecs = _mean_pool(out.last_hidden_state, inputs["attention_mask"])
         all_vecs.append(vecs.float().cpu().numpy())
     
@@ -419,8 +408,7 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     if not os.path.exists(db_path):
         return []
 
-    instruction = "Represent this query for retrieving relevant documents: "
-    q_vec = embed_texts([query], instruction=instruction)[0]
+    q_vec = embed_texts([query])[0]
     q_blob = _pack_f32(q_vec)
 
     import sqlite_vec
