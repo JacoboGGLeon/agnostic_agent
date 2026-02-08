@@ -1103,14 +1103,25 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}
             response = planner_llm.invoke([sys_msg, user_msg])
             llm_raw_out = response.content
             
-            # 5. Parseo DAG JSON
-            content = llm_raw_out
-            if "```" in content:
-                import re
-                content = re.sub(r"```json\s*", "", content)
-                content = re.sub(r"```\s*", "", content)
+            # 5. Parseo DAG JSON (Wait! Clean thinking first)
+            # Primero quitamos el <think>...</think> para no confundir al json.loads
+            content_cleaned = strip_think(llm_raw_out).strip()
             
-            dag_data = json.loads(content.strip())
+            # Ahora buscamos el bloque json
+            if "```" in content_cleaned:
+                import re
+                # Quitamos ```json ... y ```
+                content_cleaned = re.sub(r"```json\s*", "", content_cleaned)
+                content_cleaned = re.sub(r"```\s*", "", content_cleaned)
+            
+            # Fallback: a veces queda texto antes/después, buscamos el primer { y último }
+            start_brace = content_cleaned.find("{")
+            end_brace = content_cleaned.rfind("}")
+            if start_brace != -1 and end_brace != -1:
+                content_cleaned = content_cleaned[start_brace : end_brace + 1]
+            
+            print(f"[PLANNER DEBUG] Content to parse: {content_cleaned[:100]}...")
+            dag_data = json.loads(content_cleaned)
             dag_steps = dag_data.get("dag", [])
             
             # 6. Convertir DAG a Tool Calls lineales
