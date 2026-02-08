@@ -58,6 +58,7 @@ class AnalyzerResult(TypedDict, total=False):
     subqueries_logic: List[str]
     selected_skill: Optional[str]  # ✅ Skill seleccionado por nombre (legacy)
     active_skills: List[str]  # ✅ Lista de skills activas (multi-skill support)
+    active_tools_names: List[str] # ✅ Nombres de tools disponibles (contexto)
 
 
 class PlannerTrajectory(TypedDict, total=False):
@@ -625,6 +626,12 @@ def build_graph_agent(
         user_prompt = state.get("user_prompt") or user_text
         kb_names = state.get("kb_names", [])
         kb_available = bool(kb_names)
+
+        # INPUT: active_tools (simulamos recepción para cumplir contrato)
+        # En esta arquitectura, las tools están en el scope global 'tools' inyectado al builder
+        # pero para ser explícitos en el input, las recuperamos del contexto si es posible
+        # o simplemente usamos la lista global disponible en el closure.
+        active_tools_input = tools # Global scope from closure
         
         # 1. Preparar prompts
         from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT, LOGIC_DEFINITIONS
@@ -708,6 +715,7 @@ def build_graph_agent(
             "subqueries_logic": subqueries_logic,
             "selected_skill": selected_skills[0] if selected_skills else None,
             "active_skills": selected_skills,
+            "active_tools_names": [t.name for t in active_tools_input], # OUTPUT explícito
         }
         
         analyzer_msg = AIMessage(
@@ -819,11 +827,13 @@ def build_graph_agent(
         # agent.py inyecta "kb_selected" como lista de dicts
         kb_selected = state.get("kb_selected") or []
         
-        analyzer = state.get("analyzer") or {}
-        active_skills = analyzer.get("active_skills") or []
+        # INPUT REFINEMENT: Planner solo debe depender de subqueries y rich_context
+        
+        # 1. INPUT: subqueries (Extraído explícitamente del output del Analyzer)
         subqs = analyzer.get("subqueries") or []
         
-        # 1. Filtrado de Tools/KBs (Skill Logic)
+        # 1.1 Filtrado de Tools/KBs (Skill Logic) para construir el contexto
+        skill_mode = len(active_skills) > 0
         skill_mode = len(active_skills) > 0
         required_tool_names = set()
         required_kb_names = set()
