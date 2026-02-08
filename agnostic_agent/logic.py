@@ -723,7 +723,13 @@ def build_graph_agent(
             additional_kwargs={"pipeline_internal": True, "node": "analyzer"}
         )
         
-        return {"analyzer": analyzer, "messages": [analyzer_msg]}
+        # INTERNAL STATE: Skills activas para que el Planner filtre tools
+        # (No forma parte del contrato oficial AnalyzerResult, pero es necesario para el filtrado)
+        return {
+            "analyzer": analyzer,
+            "_active_skills_internal": selected_skills,
+            "messages": [analyzer_msg]
+        }
 
     def _format_rich_context(skills_reg, tools_list, kb_list, exclude_skills=None) -> str:
         """
@@ -732,17 +738,9 @@ def build_graph_agent(
         Compliance con Requerimientos:
         - Skills: Lista de skills activas y expansion a ellas (cómo usar tools sobre knowledge).
         - Tools: Definiciones (JSON schema) y docstrings (input, descripcion, output).
-          DEBEN ser estrictamente las que proporcionan las skills.
         - Knowledge: Descripciones literales de la database.
         """
         lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
-
-        # 0. Preparar universo de herramientas permitidas por las skills
-        allowed_tool_names_from_skills = set()
-        all_skills_list = skills_reg.list_skills() if skills_reg else []
-        for s in all_skills_list:
-            if s.tools:
-                allowed_tool_names_from_skills.update(s.tools)
 
         # 1. SKILLS (Expansión y Guía)
         lines.append("### 🧩 SKILLS (Estrategias Activas)")
@@ -775,13 +773,9 @@ def build_graph_agent(
         lines.append("")
 
         # 2. TOOLS (Schema + Docstring completo)
-        # Solo mostramos las herramientas que pertenecen a alguna skill
         lines.append("### 🛠 TOOLS (Funciones ejecutables)")
-        
-        effective_tools = [t for t in tools_list if getattr(t, "name", "") in allowed_tool_names_from_skills]
-        
-        if effective_tools:
-            for t in effective_tools:
+        if tools_list:
+            for t in tools_list:
                 name = getattr(t, "name", "tool")
                 desc = getattr(t, "description", str(t)) # Docstring principal / Descripción
                 
@@ -849,27 +843,44 @@ def build_graph_agent(
         # 1. INPUT: subqueries (Extraído explícitamente del output del Analyzer)
         subqs = analyzer.get("subqueries") or []
         
-        # 1.1 Contexto Estricto (Tools procedentes de Skills)
-        # El usuario dicta: "las tools desplegadas... son las que proporcionan las skills"
-        all_skills_in_reg = skill_registry.list_skills() if skill_registry else []
-        allowed_tool_names = set()
-        for s in all_skills_in_reg:
-            if s.tools:
-                allowed_tool_names.update(s.tools)
+        # 1.1 FILTRADO ESTRICTO DE TOOLS POR SKILLS
+        # Las skills activas están en _active_skills_internal (no en AnalyzerResult oficial)
+        active_skills = state.get("_active_skills_internal") or []
+        skill_mode = len(active_skills) > 0
         
-        active_tools = [t for t in tools if t.name in allowed_tool_names]
-        skill_mode = len(all_skills_in_reg) > 0 # Si hay skills, estamos en modo skill-centric
+        # Si hay skills activas, SOLO mostramos las tools que ellas declaran
+        required_tool_names = set()
+        required_kb_names = set()
         
-        # Filtrar KBs activas (objetos) - Esto sí viene del estado global activado por el usuario
-        active_kb_objects = kb_selected
+        if skill_mode and skill_registry:
+            for skill_name in active_skills:
+                skill = skill_registry.get_skill(skill_name)
+                if skill:
+                    if skill.tools:
+                        required_tool_names.update(skill.tools)
+                    if skill.knowledge:
+                        required_kb_names.update(skill.knowledge)
+        
+        # Filtrado estricto: Si hay skills, SOLO las tools de esas skills
+        if skill_mode and required_tool_names:
+            active_tools = [t for t in tools if t.name in required_tool_names]
+        else:
+            # Sin skills: modo genérico, todas las tools disponibles
+            active_tools = tools
+        
+        # Filtrar KBs activas
+        if skill_mode and required_kb_names and "*" not in required_kb_names:
+            active_kb_objects = [kb for kb in kb_selected if kb.get("name") in required_kb_names]
+        else:
+            active_kb_objects = kb_selected
 
         # 2. Construir Contexto
-        # Pasamos exclude_skills=None para mostrar todas
+        # Pasamos active_skills para excluirlas del contexto (evitar recursión)
         rich_context_text = _format_rich_context(
             skill_registry, 
-            active_tools, # Ya filtradas arriba
+            active_tools, 
             active_kb_objects,
-            exclude_skills=None 
+            exclude_skills=active_skills if skill_mode else None
         )
         
         # 3. Preparar Prompt DAG
