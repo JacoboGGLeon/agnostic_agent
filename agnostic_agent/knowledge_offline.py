@@ -504,6 +504,16 @@ def get_stats(db_path: str) -> Dict[str, Any]:
     size_bytes = os.path.getsize(db_path)
     
     conn = sqlite3.connect(db_path)
+    
+    # Load sqlite-vec extension for v_chunks query
+    try:
+        import sqlite_vec
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+    except Exception as e:
+        logger.warning(f"Could not load sqlite-vec in get_stats: {e}")
+
     try:
         n_chunks = conn.execute("SELECT COUNT(*) FROM chunks_meta").fetchone()[0]
         n_files = conn.execute("SELECT COUNT(DISTINCT source_path) FROM chunks_meta").fetchone()[0]

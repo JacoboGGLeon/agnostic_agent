@@ -708,7 +708,7 @@ with tab_offline:
         agent.tools = get_default_tools(enabled_tools)
         agent.tools_map = {t.name: t for t in agent.tools}
     # Create sub-tabs
-    tab_km, tab_tm = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager"])
+    tab_km, tab_tm, tab_logs = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager", "📜 Logs de Ejecución"])
 
     # -------------------------------------------------------------------------
     # 📚 Knowledge Manager Tab
@@ -966,29 +966,43 @@ with tab_offline:
                             Proc -> Out [label="return"];
                         }}
                     ''')
-        else:
+        if not tool_names:
             st.warning("No hay herramientas registradas.")
 
-        st.divider()
-        
-        # --- Real-time Logs Visualization ---
+    # -------------------------------------------------------------------------
+    # 📜 Logs de Ejecución Tab
+    # -------------------------------------------------------------------------
+    with tab_logs:
         st.markdown("### 📜 Logs de Ejecución (Tiempo Real)")
         
         if "tool_logs" not in st.session_state:
             st.session_state["tool_logs"] = []
             
-        if st.session_state["tool_logs"]:
-            if st.button("Limpiar Logs", key="clear_logs"):
-                 st.session_state["tool_logs"] = []
-                 st.rerun()
+        logs = st.session_state["tool_logs"]
+        
+        if logs:
+            c_clear, c_spacer = st.columns([0.2, 0.8])
+            with c_clear:
+                if st.button("🗑️ Limpiar Logs", key="clear_logs_tab"):
+                     st.session_state["tool_logs"] = []
+                     st.rerun()
 
-            for log_entry in reversed(st.session_state["tool_logs"][-10:]): # Show last 10
-                with st.chat_message("tool", avatar="🛠"):
-                    st.markdown(f"**{log_entry['timestamp']}** - `{log_entry['tool']}`")
-                    with st.expander("Ver detalles"):
-                        st.markdown("**Input:**")
-                        st.code(str(log_entry['input']))
-                        st.markdown("**Output:**")
-                        st.code(str(log_entry['output']))
+            # Reverse to show newest first
+            for i, log_entry in enumerate(reversed(logs)):
+                # Unique key for expander
+                ts = log_entry.get('timestamp', '?')
+                tname = log_entry.get('tool', 'unknown')
+                
+                with st.expander(f"⏰ {ts} | 🛠 {tname}", expanded=(i==0)):
+                    st.markdown("**Input:**")
+                    st.code(json.dumps(log_entry.get('input',{}), indent=2, ensure_ascii=False), language="json")
+                    
+                    st.markdown("**Output:**")
+                    out_val = log_entry.get('output', '')
+                    if isinstance(out_val, (dict, list)):
+                        st.code(json.dumps(out_val, indent=2, ensure_ascii=False), language="json")
+                    else:
+                        st.code(str(out_val))
         else:
-            st.caption("No hay logs de ejecución recientes.")
+            st.info("No hay logs de ejecución recientes.")
+
