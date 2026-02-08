@@ -373,11 +373,34 @@ def get_raw_state(out: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
+    """
+    Extrae el 'reasoning_content' del FINAL ANSWER (síntesis final),
+    no del Planner. Esto muestra el pensamiento del LLM al generar
+    la respuesta final basándose en los resultados de las herramientas.
+    
+    Agnóstico: funciona con o sin reasoning habilitado en el servidor.
+    """
     if not isinstance(raw_state, dict):
         return ""
     msgs = raw_state.get("messages")
     if not isinstance(msgs, list):
         return ""
+    
+    # Buscar PRIMERO el reasoning del final answer (prioridad)
+    for m in reversed(msgs):
+        if not isinstance(m, dict):
+            continue
+        if m.get("type") != "ai":
+            continue
+        ak = m.get("additional_kwargs") or {}
+        if isinstance(ak, dict):
+            # Si tiene la marca final_answer_thinking, es el que queremos
+            if ak.get("final_answer_thinking"):
+                thinking = ak.get("reasoning_content") or ak.get("reasoning") or ak.get("thoughts") or ""
+                return thinking.strip() if isinstance(thinking, str) else ""
+    
+    # Fallback: si no hay final_answer_thinking, buscar cualquier reasoning
+    # (para compatibilidad con versiones anteriores)
     for m in reversed(msgs):
         if not isinstance(m, dict):
             continue
@@ -385,9 +408,11 @@ def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
             continue
         ak = m.get("additional_kwargs") or {}
         if isinstance(ak, dict) and ak.get("pipeline_internal"):
-            continue
+            continue  # Ignorar mensajes internos del pipeline
         thinking = ak.get("reasoning_content") or ak.get("reasoning") or ak.get("thoughts") or ""
-        return thinking.strip() if isinstance(thinking, str) else ""
+        if thinking and isinstance(thinking, str) and thinking.strip():
+            return thinking.strip()
+    
     return ""
 
 def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str) -> str:

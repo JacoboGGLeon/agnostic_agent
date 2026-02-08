@@ -1380,6 +1380,34 @@ def build_graph_agent(
                     HumanMessage(content=hybrid_user_msg)
                 ])
                 user_answer = hrm.content
+                
+                # ═══════════════════════════════════════════════════════════
+                # CAPTURAR REASONING del FINAL ANSWER (agnóstico)
+                # ═══════════════════════════════════════════════════════════
+                # Si el servidor soporta reasoning, lo capturamos aquí
+                reasoning_from_final = ""
+                if hasattr(hrm, 'additional_kwargs') and isinstance(hrm.additional_kwargs, dict):
+                    # Buscar reasoning_content, reasoning, o thoughts (agnóstico)
+                    reasoning_from_final = (
+                        hrm.additional_kwargs.get("reasoning_content") or 
+                        hrm.additional_kwargs.get("reasoning") or 
+                        hrm.additional_kwargs.get("thoughts") or 
+                        ""
+                    )
+                
+                # Si hay reasoning, crear un AIMessage dedicado para el Inspector
+                if reasoning_from_final and isinstance(reasoning_from_final, str) and reasoning_from_final.strip():
+                    # Mensaje con el reasoning para que el Inspector lo muestre
+                    thinking_msg = AIMessage(
+                        content="",  # Contenido vacío, solo queremos el reasoning
+                        additional_kwargs={
+                            "reasoning_content": reasoning_from_final.strip(),
+                            "final_answer_thinking": True,  # Marca para identificarlo
+                        }
+                    )
+                    # Agregar al state para que el Inspector lo capture
+                    state.setdefault("messages", []).append(thinking_msg)
+                    
             except Exception as e:
                 user_answer = f"(Error en síntesis híbrida: {e})\n\nResumen crudo:\n{tools_summary_text}"
 
