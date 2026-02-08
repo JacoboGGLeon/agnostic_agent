@@ -94,7 +94,11 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
 1. **No ejecutas**: Solo planificas.
 2. **Eficiencia**: Usa el MÍNIMO de pasos necesarios.
 3. **No Redundancia**: No verifiques información con una segunda llamada idéntica salvo que sea crítico.
-4. **Resiliencia**: Si una tool puede fallar, estructura el plan para manejarlo (aunque el DAG es estático, piensa en dependencias lógicas).
+4. **Resiliencia**: Si una tool puede fallar, estructura el plan para manejarlo.
+5. **ANTI-ALUCINACIÓN (CRÍTICO)**: 
+   - JAMÁS inventes valores para argumentos de funciones (ej: no uses números aleatorios en `average_numbers`).
+   - Si necesitas un dato que no está en el input, DEBES buscarlo primero (ej: `semantic_search`) y usar su output como input (`$step_1.output`).
+   - Si no puedes resolver una dependencia, NO llames a la herramienta.
 
 ### ENTRADA
 - subqueries: Lista de problemas a resolver.
@@ -106,14 +110,8 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
     {
       "step_id": "step_1",
       "tool": "nombre_exacto_tool",
-      "args": {"arg_name": "valor"},
+      "args": {"arg_name": "valor_literal_o_variable"},
       "depends_on": [] 
-    },
-    {
-      "step_id": "step_2",
-      "tool": "otra_tool",
-      "args": {"input": "$step_1.output"},
-      "depends_on": ["step_1"]
     }
   ]
 }
@@ -121,9 +119,9 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
 ### INSTRUCCIONES ESPECÍFICAS
 1. Analiza cada subquery.
 2. Selecciona la herramienta adecuada del contexto.
-3. Define los argumentos.
-4. Establece dependencias (`depends_on`) si un paso requiere el output de otro.
-5. Si no se requieren herramientas, devuelve `{"dag": []}`.
+3. Define los argumentos (SOLO literales del prompt del usuario o referencias `$step_id.output`).
+4. Establece dependencias.
+5. Si no hay herramientas útiles, devuelve `{"dag": []}` y deja que el modelo responda con su conocimiento general.
 """.strip()
 
 

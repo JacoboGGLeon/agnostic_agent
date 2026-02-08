@@ -122,18 +122,17 @@ def _cosine_sim_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 @tool
-def semantic_search(
+def semantic_search_in_memory(
     query: str,
     documents: List[str],
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
     """
-    Búsqueda semántica simple sobre una lista de textos EN MEMORIA.
+    Búsqueda semántica simple LIGERA sobre una lista de textos PEQUEÑA que ya tienes en memoria.
     
-    IMPORTANTE:
-    - Requiere 'documents' como lista de strings explícita.
-    - NO USAR para archivos CSV o rutas de archivo. Para CSV usa 'semantic_search_in_csv'.
-    - Úsalo solo si ya tienes textos en memoria que quieres reordenar/filtrar.
+    CRÍTICO:
+    - NO USAR para buscar en bases de conocimiento o RAG (usa 'search_knowledge_base' para eso).
+    - Requiere 'documents' como lista de strings explícita que tú mismo proporcionas.
     """
     if isinstance(documents, str):
         docs = [documents]
