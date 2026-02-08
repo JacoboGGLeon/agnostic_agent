@@ -56,9 +56,7 @@ class AnalyzerResult(TypedDict, total=False):
     propositional_logic: str
     subqueries: List[str]
     subqueries_logic: List[str]
-    selected_skill: Optional[str]  # ✅ Skill seleccionado por nombre (legacy)
-    active_skills: List[str]  # ✅ Lista de skills activas (multi-skill support)
-    active_tools_names: List[str] # ✅ Nombres de tools disponibles (contexto)
+    # Removed: selected_skill, active_skills, active_tools_names per strict user requirement
 
 
 class PlannerTrajectory(TypedDict, total=False):
@@ -623,9 +621,10 @@ def build_graph_agent(
         last_user = user_messages[-1] if user_messages else None
         user_text = last_user.content if isinstance(last_user, HumanMessage) else ""
 
+        # 📥 INPUTS:
+        # user_prompt: Tu pregunta original (el texto que escribes en el chat).
+        
         user_prompt = state.get("user_prompt") or user_text
-        kb_names = state.get("kb_names", [])
-        kb_available = bool(kb_names)
 
         # INPUT: active_tools (simulamos recepción para cumplir contrato)
         # En esta arquitectura, las tools están en el scope global 'tools' inyectado al builder
@@ -708,14 +707,15 @@ def build_graph_agent(
         # 4. Construir resultado
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
         
+        # 📤 OUTPUTS:
+        # subqueries: La pregunta descompuesta en pasos lógicos.
+        # propositional_logic: La relación entre las subconsultas.
+        
         analyzer: AnalyzerResult = {
             "input_payload": {"user_prompt": user_prompt},
             "propositional_logic": logic_form,
             "subqueries": subqueries,
             "subqueries_logic": subqueries_logic,
-            "selected_skill": selected_skills[0] if selected_skills else None,
-            "active_skills": selected_skills,
-            "active_tools_names": [t.name for t in active_tools_input], # OUTPUT explícito
         }
         
         analyzer_msg = AIMessage(
@@ -727,22 +727,65 @@ def build_graph_agent(
 
     def _format_rich_context(skills_reg, tools_list, kb_list, exclude_skills=None) -> str:
         """
-        Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas.
-        Lee metadata real de los decoradores @agnostic_tool.
-        args:
-            kb_list: Lista de dicts [{'name': '...', 'description': '...'}, ...]
-            exclude_skills: Lista de nombres de skills a excluir (para no mostrarlas al Planner y evitar recursión)
+        Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas detallados.
+        
+        Compliance con Requerimientos:
+        - Skills: Lista de skills activas y expansion a ellas (cómo usar tools sobre knowledge).
+        - Tools: Definiciones (JSON schema) y docstrings (input, descripcion, output).
+          DEBEN ser estrictamente las que proporcionan las skills.
+        - Knowledge: Descripciones literales de la database.
         """
         lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
 
-        # 1. TOOLS
+        # 0. Preparar universo de herramientas permitidas por las skills
+        allowed_tool_names_from_skills = set()
+        all_skills_list = skills_reg.list_skills() if skills_reg else []
+        for s in all_skills_list:
+            if s.tools:
+                allowed_tool_names_from_skills.update(s.tools)
+
+        # 1. SKILLS (Expansión y Guía)
+        lines.append("### 🧩 SKILLS (Estrategias Activas)")
+        if skills_reg:
+            all_skills = skills_reg.list_skills()
+            if all_skills:
+                for s in all_skills:
+                    if exclude_skills and s.name in exclude_skills:
+                        continue
+                    
+                    # Expansión: Cómo usar tools sobre knowledges
+                    knowledge_hint = ""
+                    if s.knowledge:
+                        knowledge_hint = f" -> Opera sobre Knowledge: {s.knowledge}"
+                    
+                    tools_hint = ""
+                    if s.tools:
+                        tools_hint = f" -> Orquesta Tools: {s.tools}"
+
+                    lines.append(
+                        f"@skill {{name={s.name}}}"
+                    )
+                    lines.append(f"  Description: {s.description}")
+                    lines.append(f"  Expansion: {tools_hint}{knowledge_hint}")
+                    lines.append("")
+            else:
+                lines.append("(No skills loaded)")
+        else:
+            lines.append("(Skill Registry not available)")
+        lines.append("")
+
+        # 2. TOOLS (Schema + Docstring completo)
+        # Solo mostramos las herramientas que pertenecen a alguna skill
         lines.append("### 🛠 TOOLS (Funciones ejecutables)")
-        if tools_list:
-            for t in tools_list:
+        
+        effective_tools = [t for t in tools_list if getattr(t, "name", "") in allowed_tool_names_from_skills]
+        
+        if effective_tools:
+            for t in effective_tools:
                 name = getattr(t, "name", "tool")
-                desc = getattr(t, "description", str(t))
+                desc = getattr(t, "description", str(t)) # Docstring principal / Descripción
                 
-                # Leer metadata del decorador @agnostic_tool si existe
+                # Metadata extendida
                 metadata = getattr(t.func if hasattr(t, 'func') else t, '_agnostic_metadata', None)
                 
                 if metadata:
@@ -752,7 +795,6 @@ def build_graph_agent(
                 else:
                     mode = 'public'
                     output_schema = {}
-                    # Intentar extraer esquema JSON de args_schema como fallback
                     input_schema = None
                     if hasattr(t, "args_schema") and t.args_schema:
                         try:
@@ -760,57 +802,31 @@ def build_graph_agent(
                         except Exception:
                             input_schema = str(t.args_schema)
                 
-                # Formatear como @tool decorator
                 input_str = json.dumps(input_schema) if input_schema else "Any"
                 output_str = json.dumps(output_schema) if output_schema else "{}"
                 
-                lines.append(
-                    f"@tool {{str={name}, input={input_str}, output={output_str}, mode={mode}}}"
-                )
-                lines.append(f"  Description: {desc}")
+                lines.append(f"@tool {{name={name}, mode={mode}}}")
+                lines.append(f"  Description/WhatItDoes: {desc}")
+                lines.append(f"  Input Schema: {input_str}")
+                lines.append(f"  Output Schema: {output_str}")
+                lines.append("")
         else:
             lines.append("(No tools available)")
         lines.append("")
 
-        # 2. KNOWLEDGE
-        lines.append("### 📚 KNOWLEDGE (Bases de Datos / Archivos)")
+        # 3. KNOWLEDGE (Descripciones Literales)
+        lines.append("### 📚 KNOWLEDGE (Bases de Datos)")
         if kb_list:
             for kb in kb_list:
-                # kb puede ser string (legacy) o dict
-                if isinstance(kb, str):
-                    kb_name = kb
-                    kb_desc = ""
-                else:
-                    kb_name = kb.get("name", "unknown")
-                    kb_desc = kb.get("description", "")
+                # kb es un dict que viene de la base de datos (agent.py)
+                kb_name = kb.get("name", "unknown")
+                kb_desc = kb.get("description", "Sin descripción")
                 
-                desc_part = f", description='{kb_desc}'" if kb_desc else ""
-                lines.append(f"@knowledge {{str={kb_name}, type={{vector, tabular}}, mode=public{desc_part}}}")
+                lines.append(f"@knowledge {{name={kb_name}}}")
+                lines.append(f"  Description: {kb_desc}") # Literal de la DB
+                lines.append("")
         else:
             lines.append("(No knowledge bases active)")
-        lines.append("")
-
-        # 3. SKILLS
-        lines.append("### 🧩 SKILLS (Recetas / Workflows)")
-        if skills_reg:
-            all_skills = skills_reg.list_skills()
-            if all_skills:
-                for s in all_skills:
-                    # Filtrar skills excluidas (ej: la skill activa para evitar recursión)
-                    if exclude_skills and s.name in exclude_skills:
-                        continue
-
-                    # Incluimos tools/knowledge requeridos por la skill si existen
-                    req_tools = s.tools or []
-                    req_kb = s.knowledge or []
-                    lines.append(
-                        f"@skill {{str={s.name}, mode=public, description='{s.description}', "
-                        f"tools={req_tools}, knowledge={req_kb}}}"
-                    )
-            else:
-                lines.append("(No skills loaded)")
-        else:
-            lines.append("(Skill Registry not available)")
         
         return "\n".join(lines)
 
@@ -833,39 +849,27 @@ def build_graph_agent(
         # 1. INPUT: subqueries (Extraído explícitamente del output del Analyzer)
         subqs = analyzer.get("subqueries") or []
         
-        # 1.1 Filtrado de Tools/KBs (Skill Logic) para construir el contexto
-        active_skills = analyzer.get("active_skills") or []
-        skill_mode = len(active_skills) > 0
-        skill_mode = len(active_skills) > 0
-        required_tool_names = set()
-        required_kb_names = set()
+        # 1.1 Contexto Estricto (Tools procedentes de Skills)
+        # El usuario dicta: "las tools desplegadas... son las que proporcionan las skills"
+        all_skills_in_reg = skill_registry.list_skills() if skill_registry else []
+        allowed_tool_names = set()
+        for s in all_skills_in_reg:
+            if s.tools:
+                allowed_tool_names.update(s.tools)
         
-        if skill_mode and skill_registry:
-            for skill_name in active_skills:
-                skill = skill_registry.get_skill(skill_name)
-                if skill:
-                    if skill.tools:
-                        required_tool_names.update(skill.tools)
-                    if skill.knowledge:
-                        required_kb_names.update(skill.knowledge)
-
-        active_tools = tools
-        if skill_mode and required_tool_names:
-            active_tools = [t for t in tools if t.name in required_tool_names]
-            
-        # Filtrar KBs activas (objetos)
+        active_tools = [t for t in tools if t.name in allowed_tool_names]
+        skill_mode = len(all_skills_in_reg) > 0 # Si hay skills, estamos en modo skill-centric
+        
+        # Filtrar KBs activas (objetos) - Esto sí viene del estado global activado por el usuario
         active_kb_objects = kb_selected
-        if skill_mode and required_kb_names and "*" not in required_kb_names:
-            active_kb_objects = [kb for kb in kb_selected if kb.get("name") in required_kb_names]
 
         # 2. Construir Contexto
-        # Pasamos active_skills como skills a EXCLUIR del contexto del Planner
-        # para que no intente llamarse a sí mismo recursivamente.
+        # Pasamos exclude_skills=None para mostrar todas
         rich_context_text = _format_rich_context(
             skill_registry, 
-            active_tools, 
+            active_tools, # Ya filtradas arriba
             active_kb_objects,
-            exclude_skills=active_skills 
+            exclude_skills=None 
         )
         
         # 3. Preparar Prompt DAG
