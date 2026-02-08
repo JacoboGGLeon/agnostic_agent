@@ -23,18 +23,18 @@ def build_kb_from_paths(
     Crea objetos KnowledgeBase al vuelo a partir de una lista de archivos.
     Útil para context_files inyectados en runtime.
     """
-    kb_list = []
+    knowledge_list = []
     for idx, path in enumerate(file_paths):
         name = f"{role_prefix.upper()}_{idx}"
         cfg = {"path": path}
-        kb_list.append(
+        knowledge_list.append(
             KnowledgeBase(
                 name=name,
                 kind=kind,
                 config=cfg,
             )
         )
-    return kb_list
+    return knowledge_list
 
 
 def build_kb_from_setup(setup_cfg: Dict[str, Any]) -> List[KnowledgeBase]:
@@ -42,20 +42,20 @@ def build_kb_from_setup(setup_cfg: Dict[str, Any]) -> List[KnowledgeBase]:
     Construye una lista de KnowledgeBase a partir de la sección `knowledge_bases`
     de setup.yaml.
     """
-    kb_section = setup_cfg.get("knowledge_bases") or []
-    kb_list: List[KnowledgeBase] = []
+    knowledge_section = setup_cfg.get("knowledge_bases") or []
+    knowledge_list: List[KnowledgeBase] = []
 
     # Normalizamos a lista de dicts
-    if isinstance(kb_section, dict):
+    if isinstance(knowledge_section, dict):
         items: List[Dict[str, Any]] = []
-        for name, cfg in kb_section.items():
+        for name, cfg in knowledge_section.items():
             if not isinstance(cfg, dict):
                 continue
             item = dict(cfg)
             item.setdefault("name", name)
             items.append(item)
-    elif isinstance(kb_section, list):
-        items = [x for x in kb_section if isinstance(x, dict)]
+    elif isinstance(knowledge_section, list):
+        items = [x for x in knowledge_section if isinstance(x, dict)]
     else:
         items = []
 
@@ -82,7 +82,7 @@ def build_kb_from_setup(setup_cfg: Dict[str, Any]) -> List[KnowledgeBase]:
                     except ImportError:
                         pass
         
-        kb_list.append(
+        knowledge_list.append(
             KnowledgeBase(
                 name=str(name),
                 kind=str(kind),
@@ -91,7 +91,7 @@ def build_kb_from_setup(setup_cfg: Dict[str, Any]) -> List[KnowledgeBase]:
             )
         )
 
-    return kb_list
+    return knowledge_list
 
 
 def get_default_context(
@@ -141,16 +141,17 @@ def get_default_context(
     return []
 
 
-def get_kb_by_names(
-    kb_names: List[str],
-    all_kb: Optional[List[KnowledgeBase]] = None,
+def select_knowledge_bases(
+    knowledge_names: List[str],
+    all_knowledge: Optional[List[KnowledgeBase]] = None,
 ) -> List[KnowledgeBase]:
     """
-    Devuelve las KnowledgeBase cuyo name esté en kb_names.
+    Devuelve las KnowledgeBase cuyo name esté en knowledge_names.
     """
-    kb_list = all_kb if all_kb is not None else get_default_context()
-    if not kb_names:
-        return kb_list
+    knowledge_list = all_knowledge if all_knowledge is not None else get_default_context()
+    if not knowledge_names:
+        return knowledge_list
 
-    name_set = set(kb_names)
-    return [kb for kb in kb_list if kb.name in name_set]
+    name_set = set(knowledge_names)
+    return [knowledge for knowledge in knowledge_list if knowledge.name in name_set]
+```

@@ -16,7 +16,7 @@ Sub-grafos actuales:
 Notas:
 - Este módulo sigue usando TypedDict; todavía no está cableado
   a los modelos Pydantic de `schemas.py`.
-- Ya integra memoria y kb_names en el planner, y deja
+- Ya integra memoria y knowledge_names en el planner, y deja
   dev_out / deep_out / user_out en el estado.
 - Está pensado para casos donde el agente cruza:
     * una tabla de atributos (input A, p.ej. filas de contratos),
@@ -95,7 +95,7 @@ class State(TypedDict, total=False):
     - tool_runs: lista de runs normalizados (CATCHER).
     - summary / pipeline_summary: SummaryDict de todo el pipeline.
     - validator: ValidatorResult simple (cobertura / razonamiento).
-    - user_prompt / session_id / kb_names / memory_context:
+    - user_prompt / session_id / knowledge_names / memory_context:
         metadatos que llegan desde Agent (o el llamador).
     - dev_out / deep_out / user_out:
         vistas finales que el Agent puede usar directamente.
@@ -115,7 +115,7 @@ class State(TypedDict, total=False):
     # Metadatos / contexto
     user_prompt: Optional[str]
     session_id: Optional[str]
-    kb_names: List[str]
+    knowledge_names: List[str]
     memory_context: Optional[Dict[str, Any]]
 
     # Vistas finales (pueden ser rellenadas por SUMMARIZER)
@@ -579,12 +579,12 @@ def _format_memory_context(mem: Any) -> str:
         return str(mem)
 
 
-def _format_kb_hint(kb_names: List[str]) -> str:
-    if not kb_names:
+def _format_knowledge_hint(knowledge_names: List[str]) -> str:
+    if not knowledge_names:
         return ""
     return (
         "KBs disponibles para esta sesión:\n"
-        + "\n".join(f"- {name}" for name in kb_names)
+        + "\n".join(f"- {name}" for name in knowledge_names)
         + "\n\nPuedes decidir llamar a herramientas que lean o crucen estas KBs "
           "si es necesario (por ejemplo, comparar filas de una tabla con una tabla "
           "de parámetros / reglas de calidad y emitir una tabla de juicios)."
@@ -632,6 +632,10 @@ def build_graph_agent(
         # o simplemente usamos la lista global disponible en el closure.
         active_tools_input = tools # Global scope from closure
         
+        # Knowledge bases disponibles
+        knowledge_names = state.get("knowledge_names", [])
+        knowledge_available = bool(knowledge_names)
+        
         # 1. Preparar prompts
         from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT, LOGIC_DEFINITIONS
         
@@ -649,10 +653,10 @@ def build_graph_agent(
             available_skills_txt = "\n".join(s_list)
         
         # Renderizar prompt
-        # El prompt nuevo tiene {user_prompt}, {kb_available}, {kb_names} y {LOGIC_DEFINITIONS}
+        # El prompt nuevo tiene {user_prompt}, {knowledge_available}, {knowledge_names} y {LOGIC_DEFINITIONS}
         sys_content = ANALYZER_SYSTEM_PROMPT.replace("{user_prompt}", user_prompt) \
-                                          .replace("{kb_available}", str(kb_available)) \
-                                          .replace("{kb_names}", str(kb_names)) \
+                                          .replace("{knowledge_available}", str(knowledge_available)) \
+                                          .replace("{knowledge_names}", str(knowledge_names)) \
                                           .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
         
         if available_skills_txt:
@@ -691,8 +695,8 @@ def build_graph_agent(
             # --- FALLBACK AGNOSTICO ---
             # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),
             # NO forzamos nada. Dejamos que el Planner decida usar 'search_knowledge_base' si lo necesita.
-            if not selected_skills and kb_available:
-                print("[ANALYZER] ℹ️ Model returned no skills but KBs are available. Delegating decision to Planner.")
+            if not selected_skills and knowledge_available:
+                print("[ANALYZER] ℹ️ Model returned no skills but Knowledge Bases are available. Delegating decision to Planner.")
             # ------------------------
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
@@ -700,7 +704,7 @@ def build_graph_agent(
         except Exception as e:
             print(f"[ANALYZER] Error parsing JSON: {e}. Content: {getattr(response, 'content', '')[:100]}...")
             # Fallback simple: lista vacía
-            if kb_available:
+            if knowledge_available:
                  print(f"[ANALYZER] Error fallback: leaving skills empty.")
                  selected_skills = []
         
@@ -731,7 +735,7 @@ def build_graph_agent(
             "messages": [analyzer_msg]
         }
 
-    def _format_rich_context(skills_reg, tools_list, kb_list, exclude_skills=None) -> str:
+    def _format_rich_context(skills_reg, tools_list, knowledge_list, exclude_skills=None) -> str:
         """
         Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas detallados.
         
@@ -810,14 +814,14 @@ def build_graph_agent(
 
         # 3. KNOWLEDGE (Descripciones Literales)
         lines.append("### 📚 KNOWLEDGE (Bases de Datos)")
-        if kb_list:
-            for kb in kb_list:
-                # kb es un dict que viene de la base de datos (agent.py)
-                kb_name = kb.get("name", "unknown")
-                kb_desc = kb.get("description", "Sin descripción")
+        if knowledge_list:
+            for knowledge in knowledge_list:
+                # knowledge es un dict que viene de la base de datos (agent.py)
+                knowledge_name = knowledge.get("name", "unknown")
+                knowledge_desc = knowledge.get("description", "Sin descripción")
                 
-                lines.append(f"@knowledge {{name={kb_name}}}")
-                lines.append(f"  Description: {kb_desc}") # Literal de la DB
+                lines.append(f"@knowledge {{name={knowledge_name}}}")
+                lines.append(f"  Description: {knowledge_desc}") # Literal de la DB
                 lines.append("")
         else:
             lines.append("(No knowledge bases active)")
@@ -832,10 +836,10 @@ def build_graph_agent(
         msgs: List[AnyMessage] = state["messages"]
         
         # Contextos
-        kb_names = state.get("kb_names") or []
-        # RECUPERAR OBJETOS KB COMPLETOS (para tener description)
-        # agent.py inyecta "kb_selected" como lista de dicts
-        kb_selected = state.get("kb_selected") or []
+        knowledge_names = state.get("knowledge_names") or []
+        # RECUPERAR OBJETOS KNOWLEDGE COMPLETOS (para tener description)
+        # agent.py inyecta "knowledge_selected" como lista de dicts
+        knowledge_selected = state.get("knowledge_selected") or []
         
         # INPUT REFINEMENT: Planner solo debe depender de subqueries y rich_context
         
@@ -850,7 +854,7 @@ def build_graph_agent(
         
         # Si hay skills activas, SOLO mostramos las tools que ellas declaran
         required_tool_names = set()
-        required_kb_names = set()
+        required_knowledge_names = set()
         
         if skill_mode and skill_registry:
             for skill_name in active_skills:
@@ -859,7 +863,7 @@ def build_graph_agent(
                     if skill.tools:
                         required_tool_names.update(skill.tools)
                     if skill.knowledge:
-                        required_kb_names.update(skill.knowledge)
+                        required_knowledge_names.update(skill.knowledge)
         
         # Filtrado estricto: Si hay skills, SOLO las tools de esas skills
         if skill_mode and required_tool_names:
@@ -868,18 +872,18 @@ def build_graph_agent(
             # Sin skills: modo genérico, todas las tools disponibles
             active_tools = tools
         
-        # Filtrar KBs activas
-        if skill_mode and required_kb_names and "*" not in required_kb_names:
-            active_kb_objects = [kb for kb in kb_selected if kb.get("name") in required_kb_names]
+        # Filtrar Knowledge activas
+        if skill_mode and required_knowledge_names and "*" not in required_knowledge_names:
+            active_knowledge_objects = [knowledge for knowledge in knowledge_selected if knowledge.get("name") in required_knowledge_names]
         else:
-            active_kb_objects = kb_selected
+            active_knowledge_objects = knowledge_selected
 
         # 2. Construir Contexto
         # Pasamos active_skills para excluirlas del contexto (evitar recursión)
         rich_context_text = _format_rich_context(
             skill_registry, 
             active_tools, 
-            active_kb_objects,
+            active_knowledge_objects,
             exclude_skills=active_skills if skill_mode else None
         )
         

@@ -56,7 +56,7 @@ TU OBJETIVO:
 ### ENTRADA
 - user_prompt: "{user_prompt}"
 - memory_context: Contexto previo de la conversación.
-- kb_available: {kb_available} (Booleano - indica si hay Base de Conocimiento)
+- knowledge_available: {knowledge_available} (Booleano - indica si hay Base de Conocimiento)
 - available_skills: {AVAILABLE_SKILLS} (Lista de skills registradas)
 
 ### DEFINICIONES DE LÓGICA (Referencia)
@@ -266,7 +266,7 @@ Desarrolladores haciendo debugging o auditoría.
 | ...     | ...  | ...            | ...        | ...       | ...     |
 
 ### 💾 STATE SNAPSHOT
-- **Variables Clave**: `kb_selected`, `flags`, `context_cfg`.
+- **Variables Clave**: `knowledge_selected`, `flags`, `context_cfg`.
 - **Integridad**: Notas sobre posibles inconsistencias de estado.
 
 ### INSTRUCCIONES

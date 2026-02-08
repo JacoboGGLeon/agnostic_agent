@@ -39,7 +39,7 @@ class BaseAgentInput(BaseModel):
     user_prompt: Optional[str] = None
     user_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    kb_names: List[str] = Field(default_factory=list)
+    knowledge_names: List[str] = Field(default_factory=list)
 
 
 # Alias principal para uso en firmas

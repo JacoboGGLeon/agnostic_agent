@@ -26,7 +26,7 @@ from .memory import read_memory, write_memory  # ✅ memoria multi-nivel (in-mem
 from .knowledge import (  # ✅ KBs externas/tabulares
     KnowledgeBase,
     get_default_context,
-    get_kb_by_names,
+    select_knowledge_bases,
     build_kb_from_setup,
 )
 
@@ -178,10 +178,10 @@ class Agent:
 
         Si no hay nada en el YAML, cae en get_default_context().
         """
-        kb_list = build_kb_from_setup(setup_cfg)
-        if not kb_list:
-            kb_list = get_default_context()
-        return kb_list
+        knowledge_list = build_kb_from_setup(setup_cfg)
+        if not knowledge_list:
+            knowledge_list = get_default_context()
+        return knowledge_list
 
     @staticmethod
     def _resolve_context_tables(
@@ -306,7 +306,7 @@ class Agent:
         memory_cfg = setup_cfg.get("memory") or {}
 
         # 9) Knowledge Bases (tabulares / vectores / APIs) desde setup.yaml
-        kb_list = cls._build_kb_from_setup(setup_cfg)
+        knowledge_list = cls._build_kb_from_setup(setup_cfg)
 
         # 10) Tablas de contexto (parametrías, abreviaturas, etc.)
         final_context_tables, context_cfg = cls._resolve_context_tables(
@@ -321,7 +321,7 @@ class Agent:
             setup_path=str(setup_path_resolved) if setup_path_resolved else None,
             setup_config=setup_cfg,
             memory_cfg=memory_cfg,
-            knowledge_bases=kb_list,
+            knowledge_bases=knowledge_list,
             context_tables=final_context_tables,
             context_cfg=context_cfg,
             skill_registry=skill_registry,
@@ -437,7 +437,7 @@ class Agent:
         )
 
         # -------------------------
-        # 0) Resolver session_id / user_id / kb_names
+        # 0) Resolver session_id / user_id / knowledge_names
         # -------------------------
         session_id = agent_in.session_id or "default"
         user_id = None
@@ -446,13 +446,13 @@ class Agent:
 
         # Force default to ALL registered KBs if none specified
         # This fixes the issue where Planner sees "(No knowledge bases active)"
-        # when running from Streamlit without explicit kb_names in payload.
-        kb_names = agent_in.kb_names
-        if not kb_names:
-            kb_names = [kb.name for kb in self.knowledge_bases]
+        # when running from Streamlit without explicit knowledge_names in payload.
+        knowledge_names = agent_in.knowledge_names
+        if not knowledge_names:
+            knowledge_names = [kb.name for kb in self.knowledge_bases]
 
-        # Seleccionar KBs activas para este turno (si kb_names está vacío, usamos todas)
-        kb_selected = get_kb_by_names(kb_names, self.knowledge_bases)
+        # Seleccionar KBs activas para este turno (si knowledge_names está vacío, usamos todas)
+        knowledge_selected = select_knowledge_bases(knowledge_names, self.knowledge_bases)
 
         # -------------------------
         # 1) Leer memoria para esta sesión
@@ -475,9 +475,9 @@ class Agent:
             "user_id": user_id,
             "setup_path": self.setup_path or "",
             "setup_config": self.setup_config,  # 👈 YAML completo (por si lo necesita el grafo)
-            "kb_names": kb_names,
+            "knowledge_names": knowledge_names,
             "kb_all": [kb.__dict__ for kb in self.knowledge_bases],
-            "kb_selected": [kb.__dict__ for kb in kb_selected],
+            "knowledge_selected": [kb.__dict__ for kb in knowledge_selected],
             "memory_context": memory_context,
             # Tablas de contexto (para semantic_search_in_csv en el grafo)
             "context_tables": list(self.context_tables),
