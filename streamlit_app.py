@@ -163,7 +163,16 @@ section[data-testid="stSidebar"]{
   border: 1px solid var(--border);
   background: rgba(255,255,255,.05);
   box-shadow: var(--shadow);
+  box-shadow: var(--shadow);
   padding: 12px;
+}
+.inspector-box{
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.05);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin-bottom: 20px;
 }
 .inspector h3{ margin: 0 0 6px 0; }
 
@@ -212,29 +221,32 @@ with st.sidebar:
         index=["tools_strict", "free_policies", "hybrid"].index(st.session_state.agent_mode),
     )
 
-    st.markdown("### 🧭 Inspector")
-    show_thinking_tab = st.checkbox("🧠 Thinking", value=True)
-    show_deep_tab = st.checkbox("🧠 Deep", value=True)
-    show_dev_tab = st.checkbox("🔍 Dev", value=True)
+    show_inspector = st.toggle("🧭 Inspector", value=True)
+    
+    if show_inspector:
+        st.caption("Vistas:")
+        show_thinking_tab = st.checkbox("🧠 Thinking", value=True)
+        show_deep_tab = st.checkbox("🧠 Deep", value=True)
+        show_dev_tab = st.checkbox("🔍 Dev", value=True)
 
-    st.markdown("### 🧹 Acciones")
-    cA, cB = st.columns(2)
-    with cA:
-        if st.button("🗑️ Limpiar", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.agent = None
-            st.session_state.selected_msg_id = None
-            st.toast("Chat reiniciado.", icon="🧹")
-            st.rerun()
-    with cB:
-        if st.button("⬇️ Export", use_container_width=True):
-            export = {"agent_mode": st.session_state.agent_mode, "messages": st.session_state.messages}
-            st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
-            st.toast("Transcript listo.", icon="⬇️")
+    st.markdown("### ℹ️ Session Info")
+    st.caption(f"Mensajes: {len(st.session_state.messages)}")
+    
+    if st.button("🗑️ Limpiar todo", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.agent = None
+        st.session_state.selected_msg_id = None
+        st.toast("Chat reiniciado.", icon="🧹")
+        st.rerun()
+
+    if st.button("⬇️ Export transcript", use_container_width=True):
+        export = {"agent_mode": st.session_state.agent_mode, "messages": st.session_state.messages}
+        st.session_state.export_json = json.dumps(export, ensure_ascii=False, indent=2)
+        st.toast("Transcript listo.", icon="⬇️")
 
     if isinstance(st.session_state.export_json, str):
         st.download_button(
-            "Descargar transcript.json",
+            "Descargar JSON",
             data=st.session_state.export_json,
             file_name="transcript.json",
             mime="application/json",
@@ -463,7 +475,7 @@ st.markdown(
   </div>
   <div class="badges">
     <span class="badge {mode_class}">🧭 {mode_badge}</span>
-    <span class="badge">🔎 inspector: on</span>
+    <!-- <span class="badge">🔎 inspector: on</span> -->
   </div>
 </div>
 """,
@@ -542,8 +554,15 @@ with tab_online:
 
     # -------- INSPECTOR (right) --------
     with insp_col:
-        st.markdown('<div class="inspector">', unsafe_allow_html=True)
+        # Wrap everything in a container div
+        st.markdown('<div class="inspector-box">', unsafe_allow_html=True)
         st.markdown("### 🔎 Inspector")
+        
+        # Only show content if enabled in sidebar
+        if not show_inspector:
+            st.info("Inspector oculto. Actívalo en la barra lateral.")
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
 
         a_msgs = assistant_messages()
         if not a_msgs:
@@ -728,6 +747,21 @@ with tab_offline:
                             st.balloons()
                             st.success("¡Ingesta completada!")
                             st.json(res)
+                            
+                            # Log to history
+                            from agnostic_agent.knowledge_offline import log_ingestion_event
+                            
+                            # Construct metadata
+                            meta = {
+                                "file": uploaded_file.name,
+                                "chunks": res.get("chunks_inserted", 0),
+                                "db_path": DB_PATH,
+                                "status": "success"
+                            }
+                            # JSONL file in same dir as docs
+                            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+                            log_ingestion_event(meta, history_file)
+                            
                     except Exception as e:
                         st.error(f"Excepción crítica: {e}")
 
@@ -736,7 +770,7 @@ with tab_offline:
         # DB Stats
         st.markdown("### 📊 Estado de la Base de Datos")
         try:
-            from agnostic_agent.knowledge_offline import get_stats
+            from agnostic_agent.knowledge_offline import get_stats, get_ingestion_history
             stats = get_stats(DB_PATH)
             
             s1, s2, s3, s4 = st.columns(4)
@@ -751,6 +785,16 @@ with tab_offline:
             s4.metric("Dimensiones", stats.get("dim", 0))
             
             st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
+            
+            st.markdown("#### 📜 Historial de Ingesta (Persistente)")
+            history_file = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
+            history = get_ingestion_history(history_file)
+            
+            if history:
+                # Convert to dataframe for nicer display
+                st.dataframe(history, use_container_width=True)
+            else:
+                st.write("_(Sin historial previo)_")
 
         except ImportError:
             st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
@@ -872,13 +916,28 @@ with tab_offline:
                     st.markdown("**Descripción:**")
                     st.info(tool.description or "Sin descripción")
                     
-                    # Show Input Schema if pydantic args
+                    # Show Input Schema cleanly
                     st.markdown("**Esquema de Entrada (Args):**")
                     if tool.args_schema:
                         try:
-                            st.json(tool.args_schema.schema())
+                            schema = tool.args_schema.schema()
+                            props = schema.get("properties", {})
+                            required = schema.get("required", [])
+                            
+                            # Render as a markdown table or list
+                            if not props:
+                                st.markdown("_(Sin argumentos)_")
+                            else:
+                                for prop_name, prop_info in props.items():
+                                    is_req = "*(obligatorio)*" if prop_name in required else ""
+                                    t_type = prop_info.get("type", "any")
+                                    desc = prop_info.get("description", "")
+                                    st.markdown(f"- **`{prop_name}`** `({t_type})` {is_req}")
+                                    if desc:
+                                        st.markdown(f"  > {desc}")
                         except Exception as e:
                             st.error(f"Error generando esquema: {e}")
+                            st.json(tool.args_schema.schema()) # Fallback
                     else:
                         st.text("Sin esquema definido (str por defecto)")
 
