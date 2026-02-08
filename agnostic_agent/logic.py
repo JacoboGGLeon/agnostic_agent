@@ -829,10 +829,12 @@ def build_graph_agent(
         
         # INPUT REFINEMENT: Planner solo debe depender de subqueries y rich_context
         
+        analyzer = state.get("analyzer") or {}
         # 1. INPUT: subqueries (Extraído explícitamente del output del Analyzer)
         subqs = analyzer.get("subqueries") or []
         
         # 1.1 Filtrado de Tools/KBs (Skill Logic) para construir el contexto
+        active_skills = analyzer.get("active_skills") or []
         skill_mode = len(active_skills) > 0
         skill_mode = len(active_skills) > 0
         required_tool_names = set()
