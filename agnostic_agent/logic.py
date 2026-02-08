@@ -446,13 +446,26 @@ def _json_default(obj: Any) -> Any:
 # 1) Utilidades: strip_think() + “último assistant real”
 # ─────────────────────────────────────────────
 
-_THINK_RE = re.compile(r"<think>.*?</think>\s*", flags=re.S | re.I)
+# Regex mejorada: maneja cierre opcional (si el LLM se corta) y case-insensitve
+# (?s) = dot matches newline
+# <think>.*? = contenido non-greedy
+# (?:</think>|$) = termina en cierre o fin de string
+_THINK_RE = re.compile(r"(?s)<think>.*?(?:</think>|$)\s*", flags=re.IGNORECASE)
 
 def strip_think(txt: str) -> str:
-    """Elimina <think>...</think> si existe (Qwen / Hermes), y recorta."""
+    """Elimina <think>...</think> (o hasta fin de string) de forma robusta."""
     if not isinstance(txt, str):
         return ""
-    return _THINK_RE.sub("", txt).strip()
+    # 1. Intentar eliminar bloques completos o truncados
+    cleaned = _THINK_RE.sub("", txt).strip()
+    
+    # 2. Defensa en profundidad: Si limpiamos todo y queda vacío,
+    # significa que el modelo solo pensó y no respondió.
+    if not cleaned and txt.strip():
+        # Retornamos vacío para que el fallback del Summarizer ("¿Qué te gustaría hacer?") actúe.
+        return ""
+        
+    return cleaned
 
 def _is_pipeline_internal_ai(m: AnyMessage) -> bool:
     """
