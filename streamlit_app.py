@@ -735,7 +735,8 @@ with tab_offline:
         
         # Initialize session state for tools config if not exists
         if "tools_config" not in st.session_state:
-            st.session_state.tools_config = {name: True for name in TOOL_REGISTRY.keys()}
+            # User request: Default to ALL DISABLED so they can enable one by one
+            st.session_state.tools_config = {name: False for name in TOOL_REGISTRY.keys()}
 
         def _reset_agent():
             st.session_state.agent = None
