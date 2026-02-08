@@ -637,87 +637,19 @@ with tab_online:
 # TAB 2: OFFLINE MANAGER
 # ==========================================
 with tab_offline:
-    # Prepare tool list
-    # If we have a tools_config in session state, filter the tools
+    # Instantiate agent (the tool config is applied inside the agent init or run loop if logic permits, 
+    # but here we update the instance's tool list for hot-swapping if possible)
+    
+    agent = get_or_init_agent(st.session_state.agent_mode)
+    
+    # Apply tools_config dynamically:
     if "tools_config" in st.session_state:
-        # Prepare tool list
-        # If we have a tools_config in session state, filter the tools
-        if "tools_config" in st.session_state:
-            enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
-        else:
-            enabled_tools = None # All tools
-
-        tools_map = get_default_tools(enabled_tools)
-        
-        # --- Tool Inspection Section ---
-        st.divider()
-        st.markdown("### 🔬 Inspector de Herramientas")
-        
-        # Select a tool to inspect
-        tool_names = list(tools_map.keys())
-        if tool_names:
-            selected_tool_name = st.selectbox("Selecciona una herramienta para inspeccionar:", tool_names)
-            
-            if selected_tool_name:
-                tool = tools_map[selected_tool_name]
-                
-                c1, c2 = st.columns([1, 1])
-                
-                with c1:
-                    st.markdown(f"**Nombre:** `{tool.name}`")
-                    st.markdown("**Descripción:**")
-                    st.info(tool.description or "Sin descripción")
-                    
-                    # Show Input Schema if pydantic args
-                    st.markdown("**Esquema de Entrada (Args):**")
-                    if tool.args_schema:
-                        st.json(tool.args_schema.schema())
-                    else:
-                        st.text("Sin esquema definido (str por defecto)")
-
-                with c2:
-                    st.markdown("**🕸 Visualización del Proceso**")
-                    # Graphviz visualization of this specific tool's flow
-                    st.graphviz_chart(f'''
-                        digraph ToolProc {{
-                            rankdir=LR;
-                            node [shape=box, style=filled, color=lightblue];
-                            
-                            In [label="Input", shape=ellipse, color=lightgrey];
-                            Proc [label="{tool.name}", shape=box, color=orange, style="rounded,filled"];
-                            Out [label="Output", shape=ellipse, color=lightgreen];
-                            
-                            In -> Proc [label="args"];
-                            Proc -> Out [label="return"];
-                        }}
-                    ''')
-
-        else:
-            st.warning("No hay herramientas habilitadas.")
-
-        st.divider()
-        
-        # --- Real-time Logs Visualization ---
-        st.markdown("### 📜 Logs de Ejecución (Tiempo Real)")
-        
-        # Initialize logs in session state if not present
-        if "tool_logs" not in st.session_state:
-            st.session_state["tool_logs"] = []
-            
-        # Display logs
-        if st.session_state["tool_logs"]:
-            for log_entry in reversed(st.session_state["tool_logs"][-10:]): # Show last 10
-                with st.chat_message("tool", avatar="🛠"):
-                    st.markdown(f"**{log_entry['timestamp']}** - `{log_entry['tool']}`")
-                    with st.expander("Ver detalles"):
-                        st.markdown("**Input:**")
-                        st.code(str(log_entry['input']))
-                        st.markdown("**Output:**")
-                        st.code(str(log_entry['output']))
-        else:
-            st.caption("No hay logs de ejecución recientes.")
-
-    # ---------------------------------------------------------------------
+        enabled_tools = [name for name, active in st.session_state.tools_config.items() if active]
+        # Re-bind logic might be complex if LangGraph compiles the graph with tools fixed.
+        # But for 'agent.tools' list it's fine.
+        # The key is: get_or_init_agent creates a NEW agent if st.session_state.agent is None.
+        # Our toggle callback sets it to None, so this block will just re-init correctly.
+        pass 
     
     # Instantiate agent with logging wrapper if we want to capture logs (TODO: Implement callback/wrapper)
     # For now, we will just use the standard instantiation but we need to hook into it for logging.
@@ -798,15 +730,19 @@ with tab_offline:
     # -------------------------------------------------------------------------
     with tab_tm:
         st.markdown("### 🛠 Gestor de Herramientas")
-        st.markdown("Activa o desactiva las herramientas disponibles para el agente.")
         
         from agnostic_agent.tools import TOOL_REGISTRY
         
         # Initialize session state for tools config if not exists
         if "tools_config" not in st.session_state:
             st.session_state.tools_config = {name: True for name in TOOL_REGISTRY.keys()}
+
+        def _reset_agent():
+            st.session_state.agent = None
+            st.toast("Configuración de herramientas modificada. Agente reiniciado.", icon="🛠")
         
         # --- Tool Toggles ---
+        st.markdown("#### Configuración")
         cols = st.columns(3)
         for i, tool_name in enumerate(TOOL_REGISTRY.keys()):
             col = cols[i % 3]
@@ -815,47 +751,82 @@ with tab_offline:
             new_state = col.toggle(
                 label=tool_name, 
                 value=is_active, 
-                key=f"toggle_{tool_name}"
+                key=f"toggle_{tool_name}",
+                on_change=_reset_agent
             )
             st.session_state.tools_config[tool_name] = new_state
 
         st.divider()
+
+        # Re-map tools for the inspector based on current config (or all if we want to inspect disabled ones too?)
+        # Let's inspect 'enabled' ones or just all from registry? 
+        # For consistency with the old logic:
+        _tools_list = list(TOOL_REGISTRY.values()) # All available for inspection
+        tools_map = {t.name: t for t in _tools_list}
+
+        # --- Tool Inspection Section ---
+        st.markdown("### 🔬 Inspector de Herramientas")
         
-        # --- Visualization (Dummy for now, could be real history) ---
-        st.markdown("### 🕸 Visualización de Procesos (Input → Output)")
-        
-        # Example visualization using graphviz or mermaid
-        # For now, let's show a simple example of how a tool flow looks
-        
-        st.graphviz_chart('''
-            digraph ToolsFlow {
-                rankdir=LR;
-                node [shape=box, style=filled, color=lightblue];
+        # Select a tool to inspect
+        tool_names = list(tools_map.keys())
+        if tool_names:
+            selected_tool_name = st.selectbox("Selecciona una herramienta para inspeccionar:", tool_names)
+            
+            if selected_tool_name:
+                tool = tools_map[selected_tool_name]
                 
-                Input [label="Input User Query", shape=ellipse, color=lightgrey];
-                Agent [label="Agent Decision", shape=diamond, color=orange];
+                c1, c2 = st.columns([1, 1])
                 
-                Input -> Agent;
-                
-                subgraph cluster_tools {
-                    label = "Active Tools";
-                    style=dashed;
-                    color=grey;
+                with c1:
+                    st.markdown(f"**Nombre:** `{tool.name}`")
+                    st.markdown("**Descripción:**")
+                    st.info(tool.description or "Sin descripción")
                     
-                    Tool1 [label="search_knowledge_base"];
-                    Tool2 [label="sum_numbers"];
-                }
-                
-                Agent -> Tool1 [label="call"];
-                Tool1 -> Output1 [label="result"];
-                
-                Output1 [label="Output Context", shape=ellipse, color=lightgreen];
-            }
-        ''')
+                    # Show Input Schema if pydantic args
+                    st.markdown("**Esquema de Entrada (Args):**")
+                    if tool.args_schema:
+                        st.json(tool.args_schema.schema())
+                    else:
+                        st.text("Sin esquema definido (str por defecto)")
+
+                with c2:
+                    st.markdown("**🕸 Visualización del Proceso**")
+                    st.graphviz_chart(f'''
+                        digraph ToolProc {{
+                            rankdir=LR;
+                            node [shape=box, style=filled, color=lightblue];
+                            
+                            In [label="Input", shape=ellipse, color=lightgrey];
+                            Proc [label="{tool.name}", shape=box, color=orange, style="rounded,filled"];
+                            Out [label="Output", shape=ellipse, color=lightgreen];
+                            
+                            In -> Proc [label="args"];
+                            Proc -> Out [label="return"];
+                        }}
+                    ''')
+        else:
+            st.warning("No hay herramientas registradas.")
+
+        st.divider()
         
-        with st.expander("Ver logs de ejecución recientes (Simulado)"):
-            st.code("""
-[10:00:01] Agent called 'search_knowledge_base' with query="OpenAI Gym"
-[10:00:02] Tool 'search_knowledge_base' processing...
-[10:00:03] Tool returned 3 chunks.
-            """, language="log")
+        # --- Real-time Logs Visualization ---
+        st.markdown("### 📜 Logs de Ejecución (Tiempo Real)")
+        
+        if "tool_logs" not in st.session_state:
+            st.session_state["tool_logs"] = []
+            
+        if st.session_state["tool_logs"]:
+            if st.button("Limpiar Logs", key="clear_logs"):
+                 st.session_state["tool_logs"] = []
+                 st.rerun()
+
+            for log_entry in reversed(st.session_state["tool_logs"][-10:]): # Show last 10
+                with st.chat_message("tool", avatar="🛠"):
+                    st.markdown(f"**{log_entry['timestamp']}** - `{log_entry['tool']}`")
+                    with st.expander("Ver detalles"):
+                        st.markdown("**Input:**")
+                        st.code(str(log_entry['input']))
+                        st.markdown("**Output:**")
+                        st.code(str(log_entry['output']))
+        else:
+            st.caption("No hay logs de ejecución recientes.")
