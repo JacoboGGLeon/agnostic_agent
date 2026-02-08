@@ -56,6 +56,7 @@ class AnalyzerResult(TypedDict, total=False):
     propositional_logic: str
     subqueries: List[str]
     subqueries_logic: List[str]
+    selected_skill: Optional[str]  # ✅ Skill seleccionado por nombre
 
 
 class PlannerTrajectory(TypedDict, total=False):
@@ -832,6 +833,7 @@ def build_graph_agent(
     planner_llm,
     tools: List[Any],
     planner_config: PlannerConfig | None = None,
+    skill_registry: Any | None = None,  # ✅ Recibimos el registro
 ):
     """
     Grafo:
@@ -841,7 +843,7 @@ def build_graph_agent(
                       └─────────────→ SUMMARIZER → VALIDATOR → END
     """
     cfg = planner_config or PlannerConfig()
-    system_msg = build_planner_system_message(cfg)
+    base_system_msg = build_planner_system_message(cfg)
 
     # ANALYZER (rule-based inicial, pero ya guarda payload rico)
     def analyzer_node(state: State) -> Dict[str, Any]:
@@ -858,6 +860,20 @@ def build_graph_agent(
             "user_prompt": user_prompt,
         }
 
+        # Detección de Skills (simple keyword match por ahora, o semántico si tuviéramos)
+        selected_skill = None
+        if skill_registry:
+            # Buscamos si el nombre de alguna skill está en el prompt, 
+            # o si el prompt "activa" la skill. 
+            # Por simplicidad v1: chequeamos si descripcion o nombre matchean keywords.
+            # O mejor: Le pasamos la info al Planner más adelante.
+            # Pero el plan dice: Analyzer selects.
+            for skill in skill_registry.list_skills():
+                # Heurística muy básica: si el nombre de la skill está en el prompt
+                if skill.name.lower() in str(user_prompt).lower():
+                    selected_skill = skill.name
+                    break
+        
         # Split sencillo multi-sentencia: puntos y saltos de línea
         raw = str(user_prompt).replace("\n", " ")
         subqueries: List[str] = []
@@ -876,6 +892,7 @@ def build_graph_agent(
             "propositional_logic": propositional_logic,
             "subqueries": subqueries,
             "subqueries_logic": subqueries_logic,
+            "selected_skill": selected_skill,
         }
 
         return {"analyzer": analyzer}
@@ -890,6 +907,26 @@ def build_graph_agent(
 
         mem_str = _format_memory_context(mem_ctx)
         kb_str = _format_kb_hint(kb_names)
+
+        # Recuperar skill seleccionada
+        analyzer = state.get("analyzer") or {}
+        selected_skill_name = analyzer.get("selected_skill")
+        
+        skill_instructions = ""
+        if selected_skill_name and skill_registry:
+            skill = skill_registry.get_skill(selected_skill_name)
+            if skill:
+                 skill_instructions = (
+                     f"\n\n🚨 SKILL ACTIVADA: {skill.name.upper()}\n"
+                     f"Descripción: {skill.description}\n"
+                     "Instrucciones/Receta a seguir:\n"
+                     f"{skill.instructions}\n"
+                     "Sigue ESTRICTAMENTE estos pasos para resolver la tarea."
+                 )
+
+        # Construir system message dinámico
+        # (copiamos el base y le adjuntamos la skill instruction si existe)
+        current_sys_msg = SystemMessage(content=base_system_msg.content + skill_instructions)
 
         extra_system_messages: List[SystemMessage] = []
         if mem_str:
@@ -907,7 +944,7 @@ def build_graph_agent(
 
         ai_msg: AIMessage = call_planner_with_retry(
             planner_llm=planner_llm,
-            system_message=system_msg,
+            system_message=current_sys_msg,
             user_or_history_messages=msgs,
             planner_config=cfg,
             extra_system_messages=extra_system_messages,
@@ -1473,6 +1510,7 @@ def load_logic(
     tools: List[Any],
     planner_config: Optional[PlannerConfig] = None,
     logic_config: Optional[LogicConfig] = None,
+    skill_registry: Any | None = None,  # ✅ Added
 ) -> Any:
     """
     Carga y ejecuta la función builder que construye el grafo del agente.
@@ -1488,7 +1526,7 @@ def load_logic(
             raise AttributeError(
                 f"No se encontró función builder '{cfg.builder_fn}' en agnostic_agent.logic."
             )
-        return builder(planner_llm, tools, planner_config)
+        return builder(planner_llm, tools, planner_config, skill_registry)
 
     import importlib
 
@@ -1505,6 +1543,6 @@ def load_logic(
             f"El módulo '{cfg.module}' no tiene una función callable '{cfg.builder_fn}'."
         )
 
-    return builder(planner_llm, tools, planner_config)
+    return builder(planner_llm, tools, planner_config, skill_registry)
 
 

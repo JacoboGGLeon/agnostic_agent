@@ -280,6 +280,12 @@ def get_or_init_agent(mode: str) -> Agent:
                 
                 # Inicializamos pasando esa config
                 st.session_state.agent = Agent.init(config_or_setup=cfg)
+
+                # Sync Skills Config (persistence across resets)
+                if "skills_config" in st.session_state and st.session_state.agent.skill_registry:
+                    for sname, senabled in st.session_state.skills_config.items():
+                        st.session_state.agent.skill_registry.set_enabled(sname, senabled)
+
             except Exception as e:
                 st.error(f"Error iniciando agente: {e}")
                 st.stop()
@@ -708,7 +714,7 @@ with tab_offline:
         agent.tools = get_default_tools(enabled_tools)
         agent.tools_map = {t.name: t for t in agent.tools}
     # Create sub-tabs
-    tab_km, tab_tm, tab_logs = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager", "📜 Logs de Ejecución"])
+    tab_km, tab_tm, tab_skills, tab_logs = st.tabs(["📚 Knowledge Manager", "🛠 Tools Manager", "🧩 Skills Manager", "📜 Logs de Ejecución"])
 
     # -------------------------------------------------------------------------
     # 📚 Knowledge Manager Tab
@@ -739,7 +745,7 @@ with tab_offline:
             st.success(f"Archivo guardado en: `{save_path}`")
             
             if st.button("🚀 Procesar e Ingestar", type="primary"):
-                from agnostic_agent.knowledge_offline import ingest_pdf_file
+                from agnostic_agent.knowledge.vector import ingest_pdf_file
                 
                 with st.spinner("Procesando documento... (puede tardar si usa CPU)"):
                     try:
@@ -753,7 +759,7 @@ with tab_offline:
                             st.json(res)
                             
                             # Log to history
-                            from agnostic_agent.knowledge_offline import log_ingestion_event
+                            from agnostic_agent.knowledge.vector import log_ingestion_event
                             
                             # Construct metadata
                             meta = {
@@ -777,9 +783,9 @@ with tab_offline:
             # FORCE RELOAD to ensure new functions are picked up
             import sys
             import importlib
-            import agnostic_agent.knowledge_offline
-            importlib.reload(agnostic_agent.knowledge_offline)
-            from agnostic_agent.knowledge_offline import get_stats, get_ingestion_history
+            import agnostic_agent.knowledge.vector
+            importlib.reload(agnostic_agent.knowledge.vector)
+            from agnostic_agent.knowledge.vector import get_stats, get_ingestion_history
             
             stats = get_stats(DB_PATH)
             
@@ -807,7 +813,7 @@ with tab_offline:
                 st.write("_(Sin historial previo)_")
 
         except ImportError:
-            st.warning("No se pudo importar `get_stats` de `knowledge_offline`. Revisa la instalación.")
+            st.warning("No se pudo importar `get_stats` de `knowledge.vector`. Revisa la instalación.")
         except Exception as e:
             st.warning(f"No se pudo leer la DB: {e}")
 
@@ -968,6 +974,47 @@ with tab_offline:
                     ''')
         if not tool_names:
             st.warning("No hay herramientas registradas.")
+
+    # -------------------------------------------------------------------------
+    # 🧩 Skills Manager Tab
+    # -------------------------------------------------------------------------
+    with tab_skills:
+        st.markdown("### 🧩 Gestor de Skills")
+        st.info("Las **Skills** son recetas avanzadas que combinan herramientas y conocimiento para resolver tareas complejas.")
+        
+        if agent and agent.skill_registry:
+            skills = agent.skill_registry.list_skills(enabled_only=False)
+            if not skills:
+                st.warning("No se encontraron skills en la carpeta `skills/`.")
+            else:
+                for skill in skills:
+                    c1, c2 = st.columns([0.8, 0.2])
+                    with c1:
+                        st.markdown(f"**{skill.name}**")
+                        st.caption(skill.description)
+                    with c2:
+                        # Toggle
+                        is_on = st.toggle("Activar", value=skill.enabled, key=f"skill_toggle_{skill.name}", label_visibility="collapsed")
+                        
+                        if is_on != skill.enabled:
+                            agent.skill_registry.set_enabled(skill.name, is_on)
+                            # Persist
+                            if "skills_config" not in st.session_state:
+                                st.session_state.skills_config = {}
+                            st.session_state.skills_config[skill.name] = is_on
+                            st.rerun()
+
+                    with st.expander(f"Ver receta: {skill.name}"):
+                        st.markdown(f"**Tools requeridas:** `{skill.tools}`")
+                        st.markdown(f"**KBs requeridas:** `{skill.kbs}`")
+                        st.markdown("---")
+                        st.markdown(skill.instructions)
+                        if skill.file_path:
+                            st.caption(f"Fuente: `{skill.file_path}`")
+                    
+                    st.divider()
+        else:
+            st.error("No se ha cargado el registro de skills (Agent no inicializado o sin registry).")
 
     # -------------------------------------------------------------------------
     # 📜 Logs de Ejecución Tab

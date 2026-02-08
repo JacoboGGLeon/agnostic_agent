@@ -23,7 +23,7 @@ from .communication import (
 )
 from .tools import get_default_tools  # ✅ catálogo global de tools
 from .memory import read_memory, write_memory  # ✅ memoria multi-nivel (in-memory)
-from .context import (  # ✅ KBs externas/tabulares
+from .knowledge import (  # ✅ KBs externas/tabulares
     KnowledgeBase,
     get_default_context,
     get_kb_by_names,
@@ -31,51 +31,12 @@ from .context import (  # ✅ KBs externas/tabulares
 )
 
 
+from .skills import SkillRegistry  # ✅ registro de skills
+
 class Agent:
     """
     Agente agnóstico sobre LangGraph + Qwen3.
-
-    Patrones de inicialización:
-
-        # 1) Totalmente por defecto (sin setup.yaml)
-        agent = Agent.init()
-
-        # 2) Pasando path a setup.yaml (panel de control middleware)
-        agent = Agent.init("setup.yaml")
-        # o bien:
-        agent = Agent.init(setup_path="setup.yaml")
-
-        # 3) Pasando un PlannerConfig explícito (ignora planner de setup.yaml)
-        agent = Agent.init(PlannerConfig(temperature=0.0))
-
-        # 4) Pasando tablas de contexto (parametrías / abreviaturas, etc.)
-        agent = Agent.init(
-            "setup.yaml",
-            context_tables=[
-                "/content/parametrias.csv",
-                "/content/diccionario_abreviaturas.csv",
-            ],
-        )
-
-    - run_turn(...) SIEMPRE devuelve un dict:
-
-        {
-          "dev_out":  {...},  # traza completa (pipeline + raw_state)
-          "deep_out": {...},  # resumen por sección (ANALYZER/PLANNER/...).
-          "user_out": {...},  # respuesta 1:1 basada en herramientas.
-        }
-
-    El grafo deja en el estado:
-      - tool_runs
-      - summary / pipeline_summary (SummaryDict)
-      - user_out / deep_out / dev_out (strings opcionales)
-    y este wrapper los empaqueta en AgentOutput.
-
-    Además:
-      - Resuelve session_id / kb_names a partir de AgentInput.
-      - Inyecta memory_context (read_memory) en el estado.
-      - Inyecta knowledge_bases y context_tables (parametrías, abreviaturas, etc.).
-      - Al final de cada turno actualiza la memoria con write_memory.
+    ...
     """
 
     def __init__(
@@ -90,6 +51,7 @@ class Agent:
         knowledge_bases: Optional[List[KnowledgeBase]] = None,
         context_tables: Optional[List[str]] = None,
         context_cfg: Optional[Dict[str, Any]] = None,
+        skill_registry: Optional[SkillRegistry] = None,
     ) -> None:
         self.graph_app = graph_app
         self.planner_config = planner_config
@@ -112,6 +74,9 @@ class Agent:
 
         # Config de contexto crudo desde setup.yaml (opcional)
         self.context_cfg: Dict[str, Any] = context_cfg or {}
+
+        # Registro de Skills
+        self.skill_registry = skill_registry
 
         # Estado de conversación multi-turn (historial reducido)
         self._state: Optional[Dict[str, Any]] = None
@@ -258,6 +223,7 @@ class Agent:
         tools: Optional[List[Any]] = None,
         *,
         context_tables: Optional[List[str]] = None,
+        skills_dir: Optional[str] = None,
     ) -> "Agent":
         """
         Construye un Agent listo para usar.
@@ -310,6 +276,20 @@ class Agent:
             enabled_names = tools_section.get("enabled")
             tools_list = get_default_tools(enabled_names=enabled_names)
 
+        # 5.5) Inicializar Skills
+        # Intentar buscar 'skills' dir en setup.yaml o argumento o default
+        skills_path = skills_dir
+        if not skills_path:
+            skills_section = setup_cfg.get("skills") or {}
+            skills_path = skills_section.get("path")
+        
+        if not skills_path:
+             # Default: agnostic_agent/skills sibling to this file
+             base_dir = os.path.dirname(__file__)
+             skills_path = os.path.join(base_dir, "skills")
+        
+        skill_registry = SkillRegistry(skills_path)
+
         # 6) LLM planner bindeado a las tools
         planner_llm = build_planner_llm(cfg)
         planner_llm = planner_llm.bind_tools(tools_list)
@@ -319,6 +299,7 @@ class Agent:
             planner_llm=planner_llm,
             tools=tools_list,
             planner_config=cfg,
+            skill_registry=skill_registry,
         )
 
         # 8) Config de memoria desde setup.yaml (si existe)
@@ -343,6 +324,7 @@ class Agent:
             knowledge_bases=kb_list,
             context_tables=final_context_tables,
             context_cfg=context_cfg,
+            skill_registry=skill_registry,
         )
 
     # ------------------------------------------------------------------

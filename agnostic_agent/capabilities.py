@@ -517,4 +517,5 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatQwenVllm:
         temperature=cfg.temperature,
         enable_thinking=cfg.enable_thinking,
         request_timeout=cfg.request_timeout,
+        openai_api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
     )

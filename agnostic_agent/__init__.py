@@ -19,11 +19,8 @@ Arquitectura por módulos:
                       (ANALYZER, PLANNER, EXECUTOR, CATCHER, SUMMARIZER, VALIDATOR).
 - agent.py          → clase Agent de alto nivel (init, run_turn).
 - communication.py  → normalización de I/O (AgentInput, AgentOutput, vistas user/deep/dev).
-- context.py        → definición de Knowledge Bases y conectores externos
-                      (por ejemplo:
-                       · BD tabular en SQLite
-                       · VDB en sqlite-vec
-                       · otras fuentes RAG, APIs, SQL, etc.).
+- context.py        → (DEPRECATED -> see knowledge/) definición de Knowledge Bases.
+- knowledge/        → Nuevo sistema modular de conocimiento (vector, sql, tabular, json).
 """
 
 from .agent import Agent
@@ -38,7 +35,7 @@ from .capabilities import (
     start_qwen_vllm_servers,
 )
 from .tools import get_default_tools
-from .context import KnowledgeBase, get_default_context
+from .knowledge import KnowledgeBase, get_default_context
 
 __version__ = "0.2.0"
 

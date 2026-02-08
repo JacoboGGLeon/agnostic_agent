@@ -10,8 +10,10 @@ from typing import List, Tuple, Optional, Dict, Any, Union
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field
 from transformers import AutoTokenizer, AutoModel
+
+# Import shared types
+from agnostic_agent.knowledge.types import ElementNode, Chunk
 
 # Try to import fitz (PyMuPDF)
 try:
@@ -31,32 +33,9 @@ logger = logging.getLogger(__name__)
 
 # Constants
 EMB_MODEL_REPO = "Qwen/Qwen3-Embedding-0.6B"
-# We'll use a local cache dir for models if needed, or rely on HF cache
-# For now, let's assume standard HF behavior or a specific dir if set in env
 MODELS_CACHE_DIR = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
 EMB_DIM = 1024
 
-# -----------------------------------------------------------------------------
-# Data Models
-# -----------------------------------------------------------------------------
-
-class ElementNode(BaseModel):
-    id: str
-    page: int
-    kind: str
-    md: str
-    bbox: Optional[Tuple[float, float, float, float]] = None
-    prev_id: Optional[str] = None
-    next_id: Optional[str] = None
-    source_path: str
-
-class Chunk(BaseModel):
-    chunk_id: str
-    element_id: str
-    page: int
-    md: str
-    neighbor_ids: List[str] = Field(default_factory=list)
-    source_path: str
 
 # -----------------------------------------------------------------------------
 # PDF Parsing Logic
@@ -86,11 +65,6 @@ def _parse_with_docling(pdf_path: str) -> Tuple[List[ElementNode], int]:
     nodes: List[ElementNode] = []
     node_seq = 0
     
-    # Depending on docling version, iteration might be different. 
-    # Attempting a generic approach based on the notebook code.
-    # Note: doc.pages might be a dict or list depending on version.
-    
-    # If pages is a dict-like or we need to iterate differently:
     iterable_pages = pages.values() if isinstance(pages, dict) else pages
 
     for page_idx, page in enumerate(iterable_pages, start=1):
@@ -107,7 +81,7 @@ def _parse_with_docling(pdf_path: str) -> Tuple[List[ElementNode], int]:
             md = ""
             try:
                 if hasattr(it, "export_to_markdown"):
-                    md = it.export_to_markdown() # Notebook had doc arg, but latest docling might not need it or handles it differently
+                    md = it.export_to_markdown()
                 elif hasattr(it, "to_markdown"):
                     md = it.to_markdown()
                 elif hasattr(it, "text"):
@@ -158,7 +132,6 @@ def _parse_with_pymupdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
         page = doc[page_idx]
         blocks = page.get_text("blocks") # (x0, y0, x1, y1, text, block_no, block_type)
         
-        # Check if blocks is empty or None
         if not blocks:
             logger.info(f"PyMuPDF: Page {page_idx+1} has no text blocks.")
             continue
@@ -220,6 +193,7 @@ def parse_pdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
         
     return nodes, total_pages
 
+
 # -----------------------------------------------------------------------------
 # Chunking Logic
 # -----------------------------------------------------------------------------
@@ -239,7 +213,6 @@ def build_chunks(nodes: List[ElementNode], k_neighbors: int = 1) -> List[Chunk]:
             # Construct markdown with context annotations
             md_parts = [f"<!-- NODE {n.id} ({n.kind}) -->\n{n.md}"]
             for nb in neigh:
-                # We append neighbors for context but main node is first
                 md_parts.append(f"\n<!-- NEIGHBOR {nb.id} ({nb.kind}) -->\n{nb.md}")
 
             chunk_id = f"{n.id}::k{k_neighbors}"
@@ -255,6 +228,7 @@ def build_chunks(nodes: List[ElementNode], k_neighbors: int = 1) -> List[Chunk]:
             ))
     return chunks
 
+
 # -----------------------------------------------------------------------------
 # Embedding Logic
 # -----------------------------------------------------------------------------
@@ -263,7 +237,6 @@ _EMBEDDER_CACHE: Dict[str, Any] = {}
 
 def get_vllm_client():
     from openai import OpenAI
-    # Default vLLM embedding port in agnostic setup is often 8001
     api_base = os.getenv("VLLM_EMB_URL", "http://localhost:8001/v1")
     api_key = os.getenv("VLLM_API_KEY", "EMPTY")
     return OpenAI(base_url=api_base, api_key=api_key)
@@ -272,7 +245,6 @@ def check_vllm_embedding_available() -> bool:
     """Checks if vLLM embedding endpoint is responsive."""
     try:
         client = get_vllm_client()
-        # Try a dummy embedding
         client.embeddings.create(input=["test"], model=EMB_MODEL_REPO)
         logger.info(f"vLLM embedding endpoint found at {client.base_url}")
         return True
@@ -287,9 +259,6 @@ def get_embedder():
 
     logger.info(f"Loading embedding model (LOCAL): {EMB_MODEL_REPO}")
     
-    # FORCE CPU to avoid OOM when vLLM is hogging the GPU
-    # User confirmed vLLM is running in POWER mode taking almost all VRAM.
-    # NOW CONFIGURABLE: Defaults to "cpu" for safety, but can be overridden.
     device = os.getenv("LOCAL_EMBEDDING_DEVICE", "cpu")
     logger.info(f"Using device '{device}' for local embeddings (default: cpu).")
 
@@ -303,7 +272,6 @@ def get_embedder():
         )
     except Exception as e:
         logger.error(f"Failed to load model from HF {EMB_MODEL_REPO}: {e}")
-        # Fallback to local if needed, but for now re-raise or handle
         raise e
 
     _EMBEDDER_CACHE["tokenizer"] = tokenizer
@@ -321,15 +289,11 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
     if not texts:
         return np.zeros((0, EMB_DIM), dtype="float32")
 
-    # 1. Try vLLM first IF configured and available
-    # User logs show 404 for embeddings, so vLLM is likely LLM-only.
-    # We'll check the env var but default to False if not explicitly set to force usage.
     use_vllm = os.getenv("USE_VLLM_EMBEDDING", "0") == "1"
     
     if use_vllm:
         try:
             client = get_vllm_client()
-            # OpenAI API handles batching, but we can respect batch_size too
             all_vecs = []
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
@@ -343,12 +307,9 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
         except Exception as e:
              logger.warning(f"vLLM embedding failed ({e}), falling back to local Transformers.")
     
-    # 2. Local Fallback (CPU/GPU)
-    # This is the primary path if vLLM embeddings are disabled (start_emb_server=False)
     tokenizer, model = get_embedder()
     all_vecs = []
     
-    # Ensure model is in eval mode
     model.eval()
 
     for i in range(0, len(texts), batch_size):
@@ -367,6 +328,7 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
     
     return np.vstack(all_vecs)
 
+
 # -----------------------------------------------------------------------------
 # Database Logic (SQLite + sqlite-vec)
 # -----------------------------------------------------------------------------
@@ -380,13 +342,11 @@ def init_db(db_path: str):
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
 
-    # 1. Float vector table (Virtual Table using vec0)
     conn.execute(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS v_chunks
         USING vec0(embedding FLOAT[{EMB_DIM}]);
     """)
 
-    # 2. Metadata table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chunks_meta (
             rowid INTEGER PRIMARY KEY,
@@ -418,19 +378,15 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
     for i, ch in enumerate(chunks):
         blob = _pack_f32(embeddings[i])
         
-        # Insert metadata (ignore if exists, or replace? unique chunk_id)
-        # Using INSERT OR REPLACE to update content if re-ingesting
         cur.execute("""
             INSERT OR REPLACE INTO chunks_meta(chunk_id, element_id, page, md, neighbors, source_path)
             VALUES (?, ?, ?, ?, ?, ?);
         """, (ch.chunk_id, ch.element_id, ch.page, ch.md, json.dumps(ch.neighbor_ids), ch.source_path))
         
-        # Get the rowid (autoincrement from primary key)
         cur.execute("SELECT rowid FROM chunks_meta WHERE chunk_id = ?", (ch.chunk_id,))
         row = cur.fetchone()
         if row:
             row_id = row[0]
-            # Upsert vector
             cur.execute("""
                 INSERT OR REPLACE INTO v_chunks(rowid, embedding)
                 VALUES (?, ?);
@@ -444,7 +400,6 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     if not os.path.exists(db_path):
         return []
 
-    # Embed query
     q_vec = embed_texts([query])[0]
     q_blob = _pack_f32(q_vec)
 
@@ -454,8 +409,6 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
 
-    # Search
-    # sqlite-vec syntax: WHERE embedding MATCH ? AND k = ?
     try:
         rows = conn.execute("""
             SELECT rowid, distance
@@ -472,7 +425,6 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         conn.close()
         return []
 
-    # Fetch metadata
     results = []
     for r in rows:
         row_id, dist = r
@@ -484,8 +436,7 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         
         if meta_row:
             results.append({
-                "score": dist, # cosine distance usually? lower is better depending on metric, vec0 default usually L2 or Cosine? 
-                               # generic 'distance'. 
+                "score": dist,
                 "chunk_id": meta_row[0],
                 "element_id": meta_row[1],
                 "page": meta_row[2],
@@ -502,10 +453,8 @@ def get_stats(db_path: str) -> Dict[str, Any]:
         return {"chunks": 0, "files": 0, "size_bytes": 0, "vector_count": 0, "dim": 0}
         
     size_bytes = os.path.getsize(db_path)
-    
     conn = sqlite3.connect(db_path)
     
-    # Load sqlite-vec extension for v_chunks query
     try:
         import sqlite_vec
         conn.enable_load_extension(True)
@@ -518,7 +467,6 @@ def get_stats(db_path: str) -> Dict[str, Any]:
         n_chunks = conn.execute("SELECT COUNT(*) FROM chunks_meta").fetchone()[0]
         n_files = conn.execute("SELECT COUNT(DISTINCT source_path) FROM chunks_meta").fetchone()[0]
         
-        # Try to count vectors in virtual table
         try:
             n_vectors = conn.execute("SELECT count(*) FROM v_chunks").fetchone()[0]
         except:
@@ -536,6 +484,7 @@ def get_stats(db_path: str) -> Dict[str, Any]:
         return {"chunks": 0, "files": 0, "size_bytes": size_bytes, "vector_count": 0, "dim": 0}
     finally:
         conn.close()
+
 
 # -----------------------------------------------------------------------------
 # Main Facade
@@ -565,7 +514,7 @@ def ingest_pdf_file(pdf_path: str, db_path: str, k_neighbors: int = 1) -> Dict[s
 
     # 4. Store
     try:
-        init_db(db_path) # Ensure DB exists
+        init_db(db_path) 
         upsert_chunks(db_path, chunks, embeddings)
     except Exception as e:
         return {"error": f"Database insertion failed: {e}"}
@@ -582,13 +531,8 @@ def ingest_pdf_file(pdf_path: str, db_path: str, k_neighbors: int = 1) -> Dict[s
 # Persistence / History Log
 # -----------------------------
 def log_ingestion_event(metadata: Dict[str, Any], history_path: str) -> None:
-    """
-    Log an ingestion event to a JSONL file.
-    """
     import datetime
-    import json
     
-    # Add timestamp if not present
     if "timestamp" not in metadata:
         metadata["timestamp"] = datetime.datetime.now().isoformat()
         
@@ -599,12 +543,6 @@ def log_ingestion_event(metadata: Dict[str, Any], history_path: str) -> None:
         logger.error(f"Error writing to history log: {e}")
 
 def get_ingestion_history(history_path: str) -> List[Dict[str, Any]]:
-    """
-    Read ingestion history from JSONL file.
-    Returns list of dicts, newest first.
-    """
-    import json
-    
     if not os.path.exists(history_path):
         return []
         
