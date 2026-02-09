@@ -736,9 +736,14 @@ def build_graph_agent(
             
             # --- FALLBACK AGNOSTICO ---
             # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),
-            # NO forzamos nada. Dejamos que el Planner decida usar 'search_knowledge_base' si lo necesita.
+            # FORZAMOS 'semantic_researcher' para evitar uso de tools alucinadas (Skills-First).
             if not selected_skills and knowledge_available:
-                print("[ANALYZER] ℹ️ Model returned no skills but Knowledge Bases are available. Delegating decision to Planner.")
+                print("[ANALYZER] ℹ️ Model returned no skills but Knowledge Bases are available.")
+                if skill_registry and skill_registry.get_skill("semantic_researcher"):
+                     print("[ANALYZER] 🛡️ Enforcing 'semantic_researcher' to restrict tool usage.")
+                     selected_skills = ["semantic_researcher"]
+                else:
+                     print("[ANALYZER] ⚠️ 'semantic_researcher' not found in registry. Running in generalist mode.")
             # ------------------------
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
@@ -1043,7 +1048,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 for step in dag_steps:
                     t_name = step.get("tool")
                     t_args = step.get("args", {})
-                    t_id = step.get("step_id") or str(uuid.uuid4())[:8]
+                    # RE-GENERATE ID to ensure uniqueness across consolidated subqueries
+                    # The LLM often restarts at "step_1" for each subquery.
+                    original_id = step.get("step_id") or "step_?"
+                    t_id = f"{original_id}_{i}_{str(uuid.uuid4())[:4]}"
                     
                     if t_name:
                         # STRICT SKILL CHECK
