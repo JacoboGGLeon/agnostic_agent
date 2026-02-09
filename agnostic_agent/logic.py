@@ -915,28 +915,6 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
         tool_calls = []
         llm_raw_out = ""
         
-        try:
-            # ─────────────────────────────────────────────────────────────
-            # DYNAMIC TOOL RE-BINDING (Skill Isolation)
-            # ─────────────────────────────────────────────────────────────
-            # Si estamos en modo Skill, el LLM NO debe ver tools que no sean de la skill.
-            # Como agent.py bindea TODAS las tools al inicio, aquí debemos re-bindear
-            # solo las permitidas (active_tools) sobre el modelo base.
-            # ─────────────────────────────────────────────────────────────
-            current_llm = planner_llm
-            if skill_mode and active_tools:
-                # Comprobamos si realmente estamos restringiendo algo
-                # (Si active_tools == tools, no hace falta re-bindear, pero por seguridad lo hacemos si hay skills)
-                
-                # Desempaquetar RunnableBinding si existe
-                base_model = getattr(planner_llm, "bound", planner_llm)
-                
-                # Re-bind explícito con solo las tools activas
-                # Esto asegura que la API definition que recibe el modelo solo tenga lo permitido.
-                current_llm = base_model.bind_tools(active_tools)
-                print(f"[PLANNER] 🔒 Skill Mode Active. Re-bound LLM to {len(active_tools)} tools: {[t.name for t in active_tools]}")
-
-
     # 3. Iterar Subqueries (Query-by-Query Planning)
     # CANONICAL IMPLEMENTATION: Loop over each subquery to generate specific plans
     from agnostic_agent.prompts import PLANNER_DAG_SYSTEM_PROMPT
