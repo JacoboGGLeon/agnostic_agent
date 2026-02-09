@@ -542,7 +542,7 @@ def judge_row_with_context(
 # ─────────────────────────────────────────────
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def search_knowledge_base(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     """
     Search for information in the knowledge base.
     

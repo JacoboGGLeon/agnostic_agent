@@ -509,7 +509,16 @@ def find_last_assistant_real(messages: List[AnyMessage]) -> Optional[AIMessage]:
 def _fmt_args(args: dict) -> str:
     if not args:
         return ""
-    return ", ".join(f"{k}={repr(v)}" for k, v in args.items())
+    # Avoid repr() for strings to prevent double escaping in UI
+    parts = []
+    for k, v in args.items():
+        if isinstance(v, str):
+            # For strings, just output the value (maybe wrapped in quotes for clarity if needed, 
+            # but simpler is better for UI display)
+            parts.append(f"{k}='{v}'")
+        else:
+             parts.append(f"{k}={repr(v)}")
+    return ", ".join(parts)
 
 
 def _fmt_output(tool_name: str, v: Any) -> str:

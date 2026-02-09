@@ -468,8 +468,14 @@ def default_selected_id() -> Optional[int]:
 def card_md(title: str, body_md: str, icon: str = "⬛", hint: str = "") -> None:
     body_md = body_md or "_(vacío)_"
     hint_html = f'<span class="hint">{html.escape(hint)}</span>' if hint else ""
-    # NOTE: body_md here is treated as plain HTML content; for Deep this is OK.
-    # For Thinking we use code-card below so it looks like "markdown blocks".
+    
+    # Convert Markdown to HTML for the body
+    try:
+        # 'extra' extension enables things like tables and fenced code blocks
+        body_html = markdown.markdown(body_md, extensions=['extra'])
+    except Exception:
+        body_html = html.escape(body_md).replace("\n", "<br>")
+
     st.markdown(
         f"""
 <div class="card">
@@ -477,7 +483,7 @@ def card_md(title: str, body_md: str, icon: str = "⬛", hint: str = "") -> None
     <div>{icon} {html.escape(title)}</div>
     {hint_html}
   </div>
-  <div class="card-b">{body_md}</div>
+  <div class="card-b">{body_html}</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -694,7 +700,7 @@ with tab_online:
                             # We can reuse card_code but change the title/icon
                             
                             content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
-                            card_code("Vista profunda (deep_out / summary)", content_to_show, icon="🧠", hint="pipeline")
+                            card_md("Vista profunda (deep_out / summary)", content_to_show, icon="🧠", hint="pipeline")
 
                         elif tab_key == "dev":
                             render_tool_runs(tool_runs)

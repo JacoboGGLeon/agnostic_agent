@@ -406,7 +406,7 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
     conn.close()
 
 
-def search_db(db_path: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     """
     Performs semantic search in the DB, returning the Top-K results FOR EACH document.
     """
