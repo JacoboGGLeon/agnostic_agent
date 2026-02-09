@@ -936,118 +936,151 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                 current_llm = base_model.bind_tools(active_tools)
                 print(f"[PLANNER] 🔒 Skill Mode Active. Re-bound LLM to {len(active_tools)} tools: {[t.name for t in active_tools]}")
 
-            # Enviamos [sys, ...history, user]
-            response = current_llm.invoke([sys_msg] + history[:-1] + [user_msg])
-            llm_raw_out = response.content
+
+    # 3. Iterar Subqueries (Query-by-Query Planning)
+    # CANONICAL IMPLEMENTATION: Loop over each subquery to generate specific plans
+    from agnostic_agent.prompts import PLANNER_DAG_SYSTEM_PROMPT
+    
+    # Inyectar variables globales
+    sys_content = PLANNER_DAG_SYSTEM_PROMPT
+    
+    # Si el usuario desactivó el pensamiento, forzamos al modelo en el prompt
+    if cfg and not cfg.enable_thinking:
+        sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON DAG block."
+    
+    # Preparar LLM (Re-bind si es necesario)
+    current_llm = planner_llm
+    if skill_mode and active_tools:
+        # Desempaquetar RunnableBinding si existe
+        base_model = getattr(planner_llm, "bound", planner_llm)
+        current_llm = base_model.bind_tools(active_tools)
+        print(f"[PLANNER] 🔒 Skill Mode Active. Re-bound LLM to {len(active_tools)} tools.")
+    
+    history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
+    
+    all_tool_calls: List[Dict[str, Any]] = []
+    plan_trajs: List[PlannerTrajectory] = []
+    
+    global_llm_clean: str = ""
+    global_llm_raw: str = ""
+    
+    # Fallback si no hay subqueries (usar prompt directo)
+    if not subqs:
+         user_messages = [m for m in msgs if isinstance(m, HumanMessage)]
+         last_user = user_messages[-1] if user_messages else None
+         if isinstance(last_user, HumanMessage):
+             subqs = [last_user.content]
+
+    # LOOP PRINCIPAL: Query-by-Query
+    seen_calls_keys = set()
+    
+    for i, subq in enumerate(subqs, start=1):
+        try:
+            print(f"[PLANNER] Planning for Subquery {i}/{len(subqs)}: {subq}")
             
-            # 5. Parseo DAG JSON (Wait! Clean thinking first)
-            # Primero quitamos el <think>...</think> para no confundir al json.loads
-            content_cleaned = strip_think(llm_raw_out).strip()
+            # Construir prompt específico
+            user_msg_content = f"""CONTEXTO DISPONIBLE:
+{rich_context_text}
+
+TAREA ACTUAL (Subquery {i} de {len(subqs)}):
+Genera el DAG exclusivo para resolver: "{subq}"
+"""
+            user_msg = HumanMessage(content=user_msg_content)
             
-            # Ahora buscamos el bloque json
+            # Enviar [sys, ...history, user]
+            response = current_llm.invoke([SystemMessage(content=sys_content)] + history[:-1] + [user_msg])
+            
+            current_raw = response.content
+            global_llm_raw += f"\n\n--- Subquery {i}: {subq} ---\n{current_raw}"
+            
+            # Parseo DAG
+            content_cleaned = strip_think(current_raw).strip()
+            global_llm_clean += f"\n\n--- Plan {i}: {subq} ---\n{content_cleaned}"
+            
+            # Limpieza JSON
             if "```" in content_cleaned:
                 import re
-                # Quitamos ```json ... y ```
                 content_cleaned = re.sub(r"```json\s*", "", content_cleaned)
                 content_cleaned = re.sub(r"```\s*", "", content_cleaned)
             
-            # Fallback: a veces queda texto antes/después, buscamos el primer { y último }
             start_brace = content_cleaned.find("{")
             end_brace = content_cleaned.rfind("}")
+            
+            dag_steps = []
             if start_brace != -1 and end_brace != -1:
-                content_cleaned = content_cleaned[start_brace : end_brace + 1]
+                json_str = content_cleaned[start_brace : end_brace + 1]
+                try:
+                    dag_data = json.loads(json_str)
+                    dag_steps = dag_data.get("dag", [])
+                except json.JSONDecodeError:
+                    print(f"[PLANNER] ⚠️ JSON Decode Error for subquery {i}")
             
-            print(f"[PLANNER DEBUG] Content to parse: {content_cleaned[:100]}...")
-            dag_data = json.loads(content_cleaned)
-            dag_steps = dag_data.get("dag", [])
-            
-            # 6. Convertir DAG a Tool Calls lineales
-            # Asumimos que la lista 'dag' ya viene ordenada topológicamente o secuencialmente
-            
-            # Conjunto de nombres de tools permitidas
+            # Procesar pasos del DAG
             allowed_tool_names = {t.name for t in active_tools} if active_tools else None
+            subq_calls = []
             
-            seen_calls = set()
             for step in dag_steps:
                 t_name = step.get("tool")
                 t_args = step.get("args", {})
                 t_id = step.get("step_id") or str(uuid.uuid4())[:8]
                 
-                # Validar existencias
                 if t_name:
-                    # STRICT SKILL CHECK: Si estamos en modo skill, SOLO permitir tools activas
+                    # STRICT SKILL CHECK
                     if skill_mode and allowed_tool_names and t_name not in allowed_tool_names:
-                        print(f"[PLANNER] ⛔ Tool '{t_name}' BLOCKED. Not in active skill tools: {allowed_tool_names}")
+                        print(f"[PLANNER] ⛔ Tool '{t_name}' BLOCKED (Not in skill).")
                         continue
-                        
-                    # DEDUPLICATION CHECK
-                    t_args_str = json.dumps(t_args, sort_keys=True)
-                    dedup_key = (t_name, t_args_str)
                     
-                    if dedup_key in seen_calls:
-                        print(f"[PLANNER] ⚠️ Duplicate tool call detected: {t_name} args={t_args}. Skipping.")
+                    # DEDUPLICATION CHECK
+                    # Usamos nombre + args como clave única
+                    args_sorted = json.dumps(t_args, sort_keys=True)
+                    dedup_key = (t_name, args_sorted)
+                    
+                    if dedup_key in seen_calls_keys:
+                        print(f"[PLANNER] ⚠️ Duplicate call skipped: {t_name}")
                         continue
-                    seen_calls.add(dedup_key)
-
-                    tool_calls.append({
+                    seen_calls_keys.add(dedup_key)
+                    
+                    call_obj = {
                         "name": t_name,
                         "args": t_args,
                         "id": t_id,
-                        "type": "tool_call" # Explicit type for LangChain
-                    })
+                        "type": "tool_call"
+                    }
+                    subq_calls.append(call_obj)
+                    all_tool_calls.append(call_obj)
             
-            print(f"[PLANNER] DAG generado con {len(tool_calls)} pasos. Tools: {[t['name'] for t in tool_calls]}")
+            # Generar descripción para PlannerTrajectory
+            desc_lines = []
+            if not subq_calls:
+                desc_lines.append("No tools needed or planning specific to this query.")
+            else:
+                 for tc in subq_calls:
+                     desc_lines.append(f"Call `{tc['name']}`")
             
-            print(f"[PLANNER] DAG generado con {len(tool_calls)} pasos.")
+            plan_trajs.append(PlannerTrajectory(
+                subquery=subq,
+                description="\n".join(desc_lines)
+            ))
             
         except Exception as e:
-            print(f"[PLANNER] Error generating/parsing DAG: {e}")
-            # Fallback: Respuesta vacía o error
-            
-        # 7. Construir AIMessage compatible
-        clean_out = strip_think(llm_raw_out)
-        
-        ai_msg = AIMessage(
-            content=clean_out,
-            tool_calls=tool_calls,
-            additional_kwargs={"dag_raw": llm_raw_out}
-        )
-        
-        llm_clean_out = clean_out
+            print(f"[PLANNER] ❌ Error planning subquery {i}: {e}")
+            plan_trajs.append(PlannerTrajectory(subquery=subq, description=f"Error: {e}"))
 
-        if not subqs:
-            user_messages = [m for m in msgs if isinstance(m, HumanMessage)]
-            last_user = user_messages[-1] if user_messages else None
-            if isinstance(last_user, HumanMessage):
-                subqs = [last_user.content]
+    # 7. Construir AIMessage final consolidado
+    print(f"[PLANNER] Total consolidated tool calls: {len(all_tool_calls)}")
+    
+    ai_msg = AIMessage(
+        content=global_llm_clean.strip(),
+        tool_calls=all_tool_calls,
+        additional_kwargs={"dag_raw": global_llm_raw}
+    )
 
-        plan_trajs: List[PlannerTrajectory] = []
-        if subqs:
-            desc_lines: List[str] = []
-            if not tool_calls:
-                desc_lines.append(
-                    "No se planificó ninguna llamada a herramientas; "
-                    "el agente responderá directamente."
-                )
-            else:
-                for idx, tc in enumerate(tool_calls, start=1):
-                    desc_lines.append(
-                        f"Paso {idx}: llamar a la herramienta `{tc['name']}` "
-                        f"con args={tc.get('args', {})}."
-                    )
-            plan_trajs.append(
-                PlannerTrajectory(
-                    subquery=subqs[0],
-                    description="\n".join(desc_lines),
-                )
-            )
-
-        return {
-            "messages": [ai_msg],
-            "planner_trajs": plan_trajs,
-            "llm_raw_out": llm_raw_out,
-            "llm_clean_out": llm_clean_out,
-        }
+    return {
+        "messages": [ai_msg],
+        "planner_trajs": plan_trajs,
+        "llm_raw_out": global_llm_raw,
+        "llm_clean_out": global_llm_clean,
+    }
 
     # EXECUTOR HELPERS
     def _resolve_dependency_arg(val: Any, results: Dict[str, Any]) -> Any:

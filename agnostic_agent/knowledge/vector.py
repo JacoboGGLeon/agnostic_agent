@@ -405,8 +405,11 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
     conn.commit()
     conn.close()
 
-def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-    """Performs semantic search in the DB."""
+
+def search_db(db_path: str, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    """
+    Performs semantic search in the DB, returning the Top-K results FOR EACH document.
+    """
     if not os.path.exists(db_path):
         return []
 
@@ -420,50 +423,56 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     conn.enable_load_extension(False)
 
     try:
-        rows = conn.execute("""
-            SELECT rowid, distance
-            FROM v_chunks
-            WHERE embedding MATCH ? AND k = ?
-            ORDER BY distance ASC;
-        """, (q_blob, top_k)).fetchall()
+        # 1. Get all unique source paths (documents)
+        paths = [r[0] for r in conn.execute("SELECT DISTINCT source_path FROM chunks_meta").fetchall()]
+        
+        all_results = []
+        
+        for path in paths:
+            # 2. For each document, run a restricted vector search
+            # We use a subquery to filter rowids belonging to this document
+            rows = conn.execute("""
+                SELECT v.rowid, v.distance
+                FROM v_chunks v
+                WHERE v.rowid IN (SELECT rowid FROM chunks_meta WHERE source_path = ?)
+                  AND v.embedding MATCH ?
+                  AND k = ?
+                ORDER BY v.distance ASC;
+            """, (path, q_blob, top_k)).fetchall()
+            
+            for r in rows:
+                row_id, dist = r
+                
+                # Convert L2 distance to Cosine Similarity
+                sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
+                
+                meta_row = conn.execute("""
+                    SELECT chunk_id, element_id, page, md, neighbors, source_path
+                    FROM chunks_meta
+                    WHERE rowid = ?
+                """, (row_id,)).fetchone()
+                
+                if meta_row:
+                    all_results.append({
+                        "score": sim,
+                        "distance": dist,
+                        "chunk_id": meta_row[0],
+                        "element_id": meta_row[1],
+                        "page": meta_row[2],
+                        "md": meta_row[3],
+                        "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
+                        "source_path": meta_row[5]
+                    })
+        
+        # 3. Global sort by score (descending)
+        all_results.sort(key=lambda x: x["score"], reverse=True)
+        return all_results
+
     except Exception as e:
         logger.error(f"Search failed: {e}")
-        conn.close()
         return []
-
-    if not rows:
+    finally:
         conn.close()
-        return []
-
-    results = []
-    for r in rows:
-        row_id, dist = r
-        
-        # Convert L2 distance to Cosine Similarity (assuming normalized vectors)
-        # d^2 = 2(1 - sim) => sim = 1 - d^2/2
-        # Clamp to 0-1 range just in case
-        sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
-        
-        meta_row = conn.execute("""
-            SELECT chunk_id, element_id, page, md, neighbors, source_path
-            FROM chunks_meta
-            WHERE rowid = ?
-        """, (row_id,)).fetchone()
-        
-        if meta_row:
-            results.append({
-                "score": sim, # Return Similarity
-                "distance": dist, # Keep raw distance just in case
-                "chunk_id": meta_row[0],
-                "element_id": meta_row[1],
-                "page": meta_row[2],
-                "md": meta_row[3],
-                "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
-                "source_path": meta_row[5]
-            })
-            
-    conn.close()
-    return results
 
 def get_stats(db_path: str) -> Dict[str, Any]:
     if not os.path.exists(db_path):

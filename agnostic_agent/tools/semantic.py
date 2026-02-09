@@ -542,9 +542,12 @@ def judge_row_with_context(
 # ─────────────────────────────────────────────
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
+def search_knowledge_base(query: str, top_k: int = 3) -> List[Dict[str, Any]]:
     """
-    Primary tool for finding information about specific projects, documents, history, definitions, or any data not in your general training.
+    Search for information in the knowledge base.
+    
+    IMPORTANT: This search returns the Top-K results FOR EACH document in the database.
+    (e.g., if there are 5 documents and top_k=3, it may return up to 15 results).
     
     Use this tool whenever the user asks about:
     - "El proyecto..." (The project...)
@@ -563,7 +566,7 @@ def search_knowledge_base(query: str) -> List[Dict[str, Any]]:
         return [{"warning": "No knowledge base found (embeddings.db). Please ingest documents via the Offline Manager tab."}]
         
     try:
-        results = search_db(db_path, query, top_k=5)
+        results = search_db(db_path, query, top_k=top_k)
         return results
     except Exception as e:
         return [{"error": f"Search failed: {e}"}]
