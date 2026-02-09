@@ -532,23 +532,29 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
     """
     if not runs:
         return (
-            "No se invocó ninguna herramienta. "
-            "No puedo responder con garantías a la pregunta sólo con razonamiento interno."
+            "> [!NOTE]\n"
+            "> No se invocó ninguna herramienta. No es posible dar una respuesta con garantías basadas en datos externos."
         )
 
     partes = [
-        "📌 **Resumen basado en herramientas (sin alucinaciones)**",
+        "### 📚 Resultados de Herramientas",
+        "A continuación se detalla la información técnica recuperada:",
+        ""
     ]
 
     for r in runs:
         arg_str = _fmt_args(r["args"])
         out_str = _fmt_output(r["name"], r["output"])
         
-        # Generic formatting: Code block for large outputs if needed
-        if len(out_str) > 100 or "\n" in out_str:
-             partes.append(f"- `{r['name']}({arg_str})`:\n```json\n{out_str}\n```")
+        # Professional block for each tool
+        partes.append(f"#### 🛠 `{r['name']}`")
+        partes.append(f"- **Argumentos**: `{arg_str}`")
+        
+        if len(out_str) > 50 or "\n" in out_str:
+             partes.append(f"- **Salida**:\n```json\n{out_str}\n```")
         else:
-             partes.append(f"- `{r['name']}({arg_str})` → **{out_str}**")
+             partes.append(f"- **Salida**: `{out_str}`")
+        partes.append("")
 
     return "\n".join(partes)
 
@@ -1272,12 +1278,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
             if analyzer:
                 analyzer_text_lines = [
-                    f"Input payload: {input_payload!r}",
-                    f"Lógica proposicional: {logic or '(no construida)'}",
-                    f"Subconsultas ({len(subqs)}):",
+                    f"**Payload Inicial**:\n```json\n{json.dumps(input_payload, ensure_ascii=False, indent=2)}\n```",
+                    f"- **Lógica**: `{logic or '(no construida)'}`",
+                    f"- **Subconsultas** ({len(subqs)}):",
                 ]
                 for s in subqs:
-                    analyzer_text_lines.append(f"- {s}")
+                    analyzer_text_lines.append(f"  - {s}")
                 analyzer_text = "\n".join(analyzer_text_lines)
             else:
                 analyzer_text = "No se ejecutó ANALYZER o no dejó estado."
@@ -1286,10 +1292,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             if planner_trajs:
                 pl_lines: List[str] = []
                 for i, tr in enumerate(planner_trajs, start=1):
-                    pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
+                    pl_lines.append(f"#### Subquery {i}")
+                    pl_lines.append(f"**Query**: `{tr.get('subquery', '')}`")
                     desc = tr.get("description")
                     if desc:
-                        pl_lines.append(desc)
+                        pl_lines.append(f"**Acción**: {desc}")
+                    pl_lines.append("")
                 planner_text = "\n".join(pl_lines)
             else:
                 planner_text = (
@@ -1300,12 +1308,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             executor_steps = state.get("executor_steps", []) or []
             if executor_steps:
                 ex_lines: List[str] = [
-                    f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
+                    f"Se ejecutaron **{len(executor_steps)}** llamadas a herramientas:"
                 ]
                 for step in executor_steps:
                     ex_lines.append(
-                        f"- tool_call_id={step['tool_call_id']}, "
-                        f"name={step['tool_name']}, args={step['args']!r}"
+                        f"- `ID:{step['tool_call_id']}` | **Tool**: `{step['tool_name']}`\n"
+                        f"  - **Args**: `{json.dumps(step['args'], ensure_ascii=False)}`"
                     )
                 executor_text = "\n".join(ex_lines)
             else:
@@ -1424,12 +1432,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             # (Copia de lógica de metadatos para consistencia)
             if analyzer:
                 analyzer_text_lines = [
-                    f"Input payload: {input_payload!r}",
-                    f"Lógica proposicional: {logic or '(no construida)'}",
-                    f"Subconsultas ({len(subqs)}):",
+                    f"**Payload Inicial**:\n```json\n{json.dumps(input_payload, ensure_ascii=False, indent=2)}\n```",
+                    f"- **Lógica**: `{logic or '(no construida)'}`",
+                    f"- **Subconsultas** ({len(subqs)}):",
                 ]
                 for s in subqs:
-                    analyzer_text_lines.append(f"- {s}")
+                    analyzer_text_lines.append(f"  - {s}")
                 analyzer_text = "\n".join(analyzer_text_lines)
             else:
                 analyzer_text = "No se ejecutó ANALYZER o no dejó estado."
@@ -1438,10 +1446,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             if planner_trajs:
                 pl_lines: List[str] = []
                 for i, tr in enumerate(planner_trajs, start=1):
-                    pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
+                    pl_lines.append(f"#### Subquery {i}")
+                    pl_lines.append(f"**Query**: `{tr.get('subquery', '')}`")
                     desc = tr.get("description")
                     if desc:
-                        pl_lines.append(desc)
+                        pl_lines.append(f"**Planner Action**: {desc}")
+                    pl_lines.append("")
                 planner_text = "\n".join(pl_lines)
             else:
                 planner_text = "No se construyó un plan de herramientas."
@@ -1449,12 +1459,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             executor_steps = state.get("executor_steps", []) or []
             if executor_steps:
                 ex_lines_list: List[str] = [
-                    f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
+                    f"Se ejecutaron **{len(executor_steps)}** llamadas a herramientas:"
                 ]
                 for step in executor_steps:
                     ex_lines_list.append(
-                        f"- tool_call_id={step['tool_call_id']}, "
-                        f"name={step['tool_name']}, args={step['args']!r}"
+                        f"- `ID:{step['tool_call_id']}` | **Tool**: `{step['tool_name']}`\n"
+                        f"  - **Args**: `{json.dumps(step['args'], ensure_ascii=False)}`"
                     )
                 executor_text = "\n".join(ex_lines_list)
             else:
@@ -1462,11 +1472,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
             if runs:
                 ca_lines_list: List[str] = [
-                    f"Catcher recopiló {len(runs)} resultados de tools."
+                    f"Catcher recopiló **{len(runs)}** resultados de tools."
                 ]
                 for r in runs:
                     ca_lines_list.append(
-                        f"- {r['name']}({r['args']!r}) → output tipo {type(r['output']).__name__}"
+                        f"- `{r['name']}` ID:`{r['id']}` → output tipo `{type(r['output']).__name__}`"
                     )
                 catcher_text = "\n".join(ca_lines_list)
             else:
@@ -1485,19 +1495,24 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
         sections = [
-            "## Resumen del pipeline",
-            "### ANALYZER",
+            "## 🛠 Resumen de Ejecución (Pipeline)",
+            "### 🔍 ANALYZER",
             analyzer_text,
-            "### PLANNER",
+            "---",
+            "### 🗺 PLANNER",
             planner_text,
-            "### EXECUTOR",
+            "---",
+            "### ⚙️ EXECUTOR",
             executor_text,
-            "### CATCHER",
+            "---",
+            "### 📦 CATCHER",
             catcher_text,
-            "### SUMMARIZER (basado en herramientas)",
+            "---",
+            "### 📝 SUMMARIZER",
             summarizer_text,
-            "### RESPUESTA FINAL (modo usuario)",
-            user_answer,
+            "---",
+            "### 🟢 RESPUESTA FINAL",
+            f"> {user_answer}",
         ]
         answer_markdown = "\n\n".join(sections)
 
@@ -1509,19 +1524,24 @@ Genera el DAG exclusivo para resolver: "{subq}"
         # Además rellenamos dev_out / deep_out / user_out:
         dev_out = answer_markdown
         deep_out = "\n\n".join([
-            "## Resumen deep del pipeline",
-            "### ANALYZER",
+            "## 🧠 Resumen Deep del Pipeline",
+            "### 🔍 ANALYZER",
             analyzer_text,
-            "### PLANNER",
+            "---",
+            "### 🗺 PLANNER",
             planner_text,
-            "### EXECUTOR",
+            "---",
+            "### ⚙️ EXECUTOR",
             executor_text,
-            "### CATCHER",
+            "---",
+            "### 📦 CATCHER",
             catcher_text,
-            "### SUMMARIZER",
+            "---",
+            "### 📝 SUMMARIZER",
             summarizer_text,
-            "### RESPUESTA FINAL",
-            user_answer,
+            "---",
+            "### 🟢 RESPUESTA FINAL",
+            f"> {user_answer}",
         ])
         # ═══════════════════════════════════════════════════════════════════
         # AGNOSTIC FIX: Strip <think> tags from user_out
