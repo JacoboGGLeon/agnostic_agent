@@ -541,14 +541,46 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
     ]
 
     for r in runs:
-        arg_str = _fmt_args(r["args"])
-        out_str = _fmt_output(r["name"], r["output"])
+        tool_name = r["name"]
+        args = r["args"]
+        output = r["output"]
+        arg_str = _fmt_args(args)
+        
+        # ─── SPECIAL FORMATTING FOR KNOWLEDGE SEARCH ───
+        if tool_name == "search_knowledge_base" and isinstance(output, list):
+            partes.append(f"\n### 🔍 Resultados de búsqueda (`{arg_str}`)")
+            if not output:
+                partes.append("_(Sin resultados relevantes)_")
+            else:
+                for idx, item in enumerate(output, start=1):
+                    if not isinstance(item, dict):
+                        continue
+                        
+                    score = item.get("score", 0.0)
+                    src_path = item.get("source_path", "unknown")
+                    # Extract basename for cleaner display
+                    src_name = os.path.basename(src_path) if src_path else "unknown object"
+                    
+                    content_md = item.get("md", "").strip()
+                    # Truncate content for display if excessively long, though usually chunks are manageable
+                    # But for "Deep View" user wants to see what the agent saw.
+                    
+                    # Markdown Card-like format
+                    card = (
+                        f"**{idx}. {src_name}** (Relevancia: {score:.2f})\n"
+                        f"> {content_md.replace(chr(10), '  ' + chr(10))}\n" # Indent content
+                    )
+                    partes.append(card)
+            continue
+
+        # ─── DEFAULT FORMATTING ───
+        out_str = _fmt_output(tool_name, output)
         
         # Generic formatting: Code block for large outputs if needed
         if len(out_str) > 100 or "\n" in out_str:
-             partes.append(f"- `{r['name']}({arg_str})`:\n```json\n{out_str}\n```")
+             partes.append(f"- `{tool_name}({arg_str})`:\n```json\n{out_str}\n```")
         else:
-             partes.append(f"- `{r['name']}({arg_str})` → **{out_str}**")
+             partes.append(f"- `{tool_name}({arg_str})` → **{out_str}**")
 
     return "\n".join(partes)
 

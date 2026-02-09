@@ -869,8 +869,6 @@ with tab_offline:
             
             s4.metric("Dimensiones", stats.get("dim", 0))
             
-            st.info("💡 **Tip:** Para consultar esta base de conocimiento, ¡simplemente pregúntale al agente! Él decidirá cuándo usar la herramienta `search_knowledge_base`.")
-
             st.markdown("### 📚 Inventario de Conocimiento (En Base de Datos)")
             try:
                 from agnostic_agent.knowledge.vector import get_ingested_files
@@ -884,23 +882,7 @@ with tab_offline:
             except Exception as e:
                 st.error(f"Error leyendo inventario: {e}")
 
-            st.markdown("### 📜 Historial de Ingesta (Persistente)")
-            
-            history_file_path = os.path.join(DOCS_DIR, "knowledge_history.jsonl")
-            
-            c1, c2 = st.columns([0.8, 0.2])
-            with c2:
-                if st.button("🗑️ Limpiar Historial", key="clear_hist", use_container_width=True):
-                    if os.path.exists(history_file_path):
-                        os.remove(history_file_path)
-                        st.toast("Historial eliminado.", icon="🗑️")
-                        st.rerun()
-            
-            hist = get_ingestion_history(history_file_path)
-            if hist:
-                st.dataframe(hist, use_container_width=True)
-            else:
-                st.caption("_(Sin historial)_")
+
                 
         except Exception as e:
             st.error(f"Error cargando estadísticas: {e}")
