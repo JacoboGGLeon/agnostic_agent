@@ -55,7 +55,7 @@ if "plugin_manager" not in st.session_state:
     try:
         # Load config
         config = load_config()
-        pm = PluginManager(config.get("plugins", {}))
+        pm = PluginManager(config.plugins.model_dump())
         pm.load_plugins()
         st.session_state.plugin_manager = pm
     except Exception as e:

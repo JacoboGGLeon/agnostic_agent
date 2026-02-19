@@ -423,48 +423,43 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     conn.enable_load_extension(False)
 
     try:
-        # 1. Get all unique source paths (documents)
-        paths = [r[0] for r in conn.execute("SELECT DISTINCT source_path FROM chunks_meta").fetchall()]
-        
+        # GLOBAL SEARCH (Top-K across all docs)
+        # We query v_chunks directly for the top k matches globally.
+        rows = conn.execute("""
+            SELECT v.rowid, v.distance
+            FROM v_chunks v
+            WHERE v.embedding MATCH ?
+              AND k = ?
+            ORDER BY v.distance ASC;
+        """, (q_blob, top_k)).fetchall()
+
         all_results = []
         
-        for path in paths:
-            # 2. For each document, run a restricted vector search
-            # We use a subquery to filter rowids belonging to this document
-            rows = conn.execute("""
-                SELECT v.rowid, v.distance
-                FROM v_chunks v
-                WHERE v.rowid IN (SELECT rowid FROM chunks_meta WHERE source_path = ?)
-                  AND v.embedding MATCH ?
-                  AND k = ?
-                ORDER BY v.distance ASC;
-            """, (path, q_blob, top_k)).fetchall()
+        for r in rows:
+            row_id, dist = r
             
-            for r in rows:
-                row_id, dist = r
-                
-                # Convert L2 distance to Cosine Similarity
-                sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
-                
-                meta_row = conn.execute("""
-                    SELECT chunk_id, element_id, page, md, neighbors, source_path
-                    FROM chunks_meta
-                    WHERE rowid = ?
-                """, (row_id,)).fetchone()
-                
-                if meta_row:
-                    all_results.append({
-                        "score": sim,
-                        "distance": dist,
-                        "chunk_id": meta_row[0],
-                        "element_id": meta_row[1],
-                        "page": meta_row[2],
-                        "md": meta_row[3],
-                        "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
-                        "source_path": meta_row[5]
-                    })
-        
-        # 3. Global sort by score (descending)
+            # Convert L2 distance to Cosine Similarity
+            sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
+            
+            meta_row = conn.execute("""
+                SELECT chunk_id, element_id, page, md, neighbors, source_path
+                FROM chunks_meta
+                WHERE rowid = ?
+            """, (row_id,)).fetchone()
+            
+            if meta_row:
+                all_results.append({
+                    "score": sim,
+                    "distance": dist,
+                    "chunk_id": meta_row[0],
+                    "element_id": meta_row[1],
+                    "page": meta_row[2],
+                    "md": meta_row[3],
+                    "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
+                    "source_path": meta_row[5]
+                })
+
+        # Sort desc by score
         all_results.sort(key=lambda x: x["score"], reverse=True)
         return all_results
 

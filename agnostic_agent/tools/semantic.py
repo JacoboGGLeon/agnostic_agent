@@ -548,8 +548,8 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     """
     Search for information in the knowledge base.
     
-    IMPORTANT: This search returns the Top-K results FOR EACH document in the database.
-    (e.g., if there are 5 documents and top_k=3, it may return up to 15 results).
+    IMPORTANT: This search returns the Global Top-K results across ALL documents.
+    (e.g., if top_k=5, it returns the 5 best matching chunks from the entire database).
     
     Use this tool whenever the user asks about:
     - "El proyecto..." (The project...)
