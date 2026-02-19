@@ -58,11 +58,25 @@ def render_offline_tab(agent_factory):
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         file_description = st.text_input("Descripción", placeholder="Ej: Manual 2024")
         
-        DOCS_DIR = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
-        DB_PATH = os.getenv("AGNOSTIC_DB_PATH", os.path.join(os.getcwd(), "session", "embeddings.db"))
+        # Priority: Env Var > Session Dir > Current Dir (Explicit Colab fallback)
+        default_session_db = os.path.join(os.getcwd(), "session", "embeddings.db")
+        default_root_db = os.path.join(os.getcwd(), "embeddings.db")
+        colab_db = "/content/session/embeddings.db"
+        
+        env_db = os.getenv("AGNOSTIC_DB_PATH")
+        if env_db:
+            DB_PATH = env_db
+        elif os.path.exists(default_session_db):
+            DB_PATH = default_session_db
+        elif os.path.exists(colab_db):
+            DB_PATH = colab_db
+        else:
+            DB_PATH = default_session_db # Default to session for creation
         
         os.makedirs(DOCS_DIR, exist_ok=True)
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        
+        st.caption(f"DB Path: `{DB_PATH}`")
         
         if uploaded_file:
             save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
@@ -132,7 +146,12 @@ def render_offline_tab(agent_factory):
              if selected_tool_name:
                  tool = tools_map[selected_tool_name]
                  st.markdown(f"### {tool.name}")
-                 if tool.description:
+                 
+                 # Render full docstring if available, else description
+                 doc_content = getattr(tool.func, "__doc__", None) if hasattr(tool, "func") else None
+                 if doc_content:
+                     st.markdown(doc_content)
+                 elif tool.description:
                      st.markdown(tool.description)
                  
                  # Dynamic Form for Arguments
@@ -198,8 +217,14 @@ def render_offline_tab(agent_factory):
                 for i, skill in enumerate(skills):
                     with col1 if i % 2 == 0 else col2:
                         st.markdown(f"**{skill.name}**")
-                        if skill.description:
-                            st.markdown(skill.description)
+                        
+                        # Render full instructions (Markdown content)
+                        if getattr(skill, "instructions", None):
+                             with st.expander("📖 Ver instrucciones completas", expanded=False):
+                                 st.markdown(skill.instructions)
+                        elif skill.description:
+                            st.caption(skill.description)
+                            
                         is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
                         if is_on != skill.enabled:
                             agent.skill_registry.set_enabled(skill.name, is_on)
