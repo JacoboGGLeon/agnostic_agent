@@ -12,7 +12,7 @@ from agnostic_agent.core.models.io_models import (
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
 from agnostic_agent.knowledge import select_knowledge_bases, KnowledgeBase
-from agnostic_agent.app.errors import TurnExecutionError
+from agnostic_agent.app.errors import AgnosticAgentError, TurnExecutionError
 
 class TurnService:
     """

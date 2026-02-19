@@ -700,7 +700,8 @@ def build_graph_agent(
         sys_content = ANALYZER_SYSTEM_PROMPT.replace("{user_prompt}", user_prompt) \
                                           .replace("{knowledge_available}", str(knowledge_available)) \
                                           .replace("{knowledge_names}", str(knowledge_names)) \
-                                          .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS)
+                                          .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS) \
+                                          .replace("{AVAILABLE_SKILLS}", available_skills_txt or "[]")
         
         if available_skills_txt:
             sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"

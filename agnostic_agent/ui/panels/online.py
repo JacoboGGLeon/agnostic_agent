@@ -2,6 +2,7 @@ import streamlit as st
 import html
 import markdown
 import datetime
+from typing import List
 from agnostic_agent.ui.panels.helpers import (
     get_raw_state, extract_tool_runs, next_id, normalize_output, 
     strip_user_prefix, as_text

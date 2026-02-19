@@ -1,6 +1,7 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import json
+import re
 import numpy as np
 import pandas as pd
 import torch
@@ -562,6 +563,62 @@ def judge_row_with_context(
 # KNOWLEDGE BASE SEARCH (Offline / Local DB)
 # ─────────────────────────────────────────────
 
+def _tokenize_for_source_match(text: str) -> List[str]:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+    return [tok for tok in cleaned.split() if len(tok) >= 3]
+
+
+def _auto_select_source_filter(
+    query: str, files: List[Dict[str, Any]]
+) -> Optional[str]:
+    """
+    Picks a likely file name for targeted retrieval based on query overlap
+    with file metadata (name/description/path). Returns None on low confidence.
+    """
+    q = (query or "").strip().lower()
+    if not q or not files:
+        return None
+
+    q_tokens = _tokenize_for_source_match(q)
+    if not q_tokens:
+        return None
+
+    best_name: Optional[str] = None
+    best_score = -1.0
+    second_score = -1.0
+
+    for row in files:
+        file_name = str(row.get("file") or "")
+        description = str(row.get("description") or "")
+        source_path = str(row.get("path") or "")
+        haystack = f"{file_name} {description} {source_path}".lower()
+
+        score = 0.0
+        if q in haystack:
+            score += 6.0
+        if file_name and file_name.lower() in q:
+            score += 5.0
+
+        token_hits = sum(1 for tok in q_tokens if tok in haystack)
+        score += float(token_hits)
+
+        if score > best_score:
+            second_score = best_score
+            best_score = score
+            best_name = file_name or source_path
+        elif score > second_score:
+            second_score = score
+
+    # Confidence gate:
+    # - Avoid selecting a source for generic questions.
+    # - Avoid ambiguous picks if candidates are too close.
+    if best_score < 3.0:
+        return None
+    if second_score >= 0 and (best_score - second_score) < 1.0 and best_score < 6.0:
+        return None
+    return best_name
+
+
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
 def list_knowledge_sources() -> List[Dict[str, Any]]:
     """
@@ -597,14 +654,30 @@ def search_knowledge_base(query: str, top_k: int = 15, source_filter: str = None
     
     Returns relevant text chunks with source metadata.
     """
-    from agnostic_agent.knowledge.vector import search_db
+    from agnostic_agent.knowledge.vector import search_db, get_ingested_files
     db_path = _resolve_vector_db_path()
     
     if not os.path.exists(db_path):
         return [{"warning": f"No knowledge base found at {db_path}. Please ingest documents via the Offline Manager tab."}]
         
     try:
-        results = search_db(db_path, query, top_k=top_k, source_filter=source_filter)
+        selected_filter = source_filter
+        auto_selected = False
+
+        # If planner did not provide a filter, try to infer a specific file first.
+        if not selected_filter:
+            files = get_ingested_files(db_path)
+            inferred_filter = _auto_select_source_filter(query, files)
+            if inferred_filter:
+                selected_filter = inferred_filter
+                auto_selected = True
+
+        results = search_db(db_path, query, top_k=top_k, source_filter=selected_filter)
+
+        # Safe fallback: if auto-filter had no hits, retry globally.
+        if auto_selected and not results:
+            results = search_db(db_path, query, top_k=top_k, source_filter=None)
+
         return results
     except Exception as e:
         return [{"error": f"Search failed: {e}"}]
