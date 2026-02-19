@@ -23,7 +23,7 @@ Notas:
     * con tablas de contexto (input B, p.ej. parametrías y
       diccionarios de abreviaturas/definiciones),
     * y, opcionalmente, documentos (OCR de contratos) vía tools
-      como semantic_search_in_csv + rerank_docs.
+      como context_search_in_csv + rerank_docs.
 """
 
 from dataclasses import dataclass

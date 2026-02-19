@@ -240,7 +240,7 @@ def _get_csv_embeddings(
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def semantic_search_in_csv(
+def context_search_in_csv(
     query: str,
     csv_path: str,
     text_columns: List[str],
@@ -276,6 +276,11 @@ def semantic_search_in_csv(
         )
 
     return results
+
+
+# Backwards-compatible python alias (NOT a separate tool name).
+# The tool's name is determined at decoration time (context_search_in_csv).
+semantic_search_in_csv = context_search_in_csv
 
 
 # ─────────────────────────────────────────────
