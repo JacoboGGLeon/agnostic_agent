@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
+# from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
 from agnostic_agent.tools.decorators import tool
 from agnostic_agent.capabilities import DEFAULT_EMB_ID, DEFAULT_RERANK_ID, LocalModelPaths
 
@@ -34,6 +34,7 @@ def _ensure_embedding_loaded() -> None:
         )
         device = "cuda" if use_cuda else "cpu"
 
+    from transformers import AutoTokenizer, AutoModel
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
     model.to(device)
@@ -341,6 +342,7 @@ def _ensure_reranker_loaded() -> None:
         )
         device = "cuda" if use_cuda else "cpu"
 
+    from transformers import AutoTokenizer, AutoModelForCausalLM
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:

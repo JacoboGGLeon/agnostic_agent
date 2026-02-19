@@ -32,6 +32,8 @@ from .knowledge import (  # ✅ KBs externas/tabulares
 
 
 from .skills import SkillRegistry  # ✅ registro de skills
+from .app.turn_service import TurnService
+from .app.errors import TurnExecutionError
 
 class Agent:
     """
@@ -56,30 +58,26 @@ class Agent:
         self.graph_app = graph_app
         self.planner_config = planner_config
         self.tools = tools
-
-        # Panel de control cargado desde setup.yaml (si existe)
-        self.setup_path: Optional[str] = setup_path
-        self.setup_config: Dict[str, Any] = setup_config or {}
-
-        # Config de memoria (session / short_term / long_term)
-        self.memory_cfg: Dict[str, Any] = memory_cfg or {}
-
-        # KBs registradas (tabulares, vectores, APIs, etc.)
-        self.knowledge_bases: List[KnowledgeBase] = (
-            knowledge_bases if knowledge_bases is not None else get_default_context()
-        )
-
-        # Tablas CSV de contexto (parametrías, abreviaturas/definiciones, etc.)
-        self.context_tables: List[str] = context_tables or []
-
-        # Config de contexto crudo desde setup.yaml (opcional)
-        self.context_cfg: Dict[str, Any] = context_cfg or {}
-
-        # Registro de Skills
         self.skill_registry = skill_registry
 
-        # Estado de conversación multi-turn (historial reducido)
-        self._state: Optional[Dict[str, Any]] = None
+        # Initialize TurnService with all necessary dependencies
+        self.turn_service = TurnService(
+            graph_app=graph_app,
+            knowledge_bases=knowledge_bases if knowledge_bases is not None else get_default_context(),
+            memory_cfg=memory_cfg or {},
+            context_tables=context_tables or [],
+            context_cfg=context_cfg or {},
+            setup_path=setup_path,
+            setup_config=setup_config,
+        )
+
+        # Backward compatibility for attributes accessed directly
+        self.setup_path = setup_path
+        self.setup_config = setup_config or {}
+        self.memory_cfg = memory_cfg or {}
+        self.knowledge_bases = self.turn_service.knowledge_bases
+        self.context_tables = self.turn_service.context_tables
+        self.context_cfg = self.turn_service.context_cfg
 
     # ------------------------------------------------------------------
     # Helpers de setup.yaml
@@ -227,19 +225,6 @@ class Agent:
     ) -> "Agent":
         """
         Construye un Agent listo para usar.
-
-        Patrones soportados:
-
-            agent = Agent.init()
-            agent = Agent.init("setup.yaml")
-            agent = Agent.init(setup_path)  # PathLike
-            agent = Agent.init(PlannerConfig(...))
-            agent = Agent.init("setup.yaml", context_tables=[...])
-
-        NOTA:
-        - Si pasas PlannerConfig → se ignora el bloque `planner` de setup.yaml.
-        - Si quieres combinar ambas cosas, construye tú el PlannerConfig
-          leyendo el YAML y pásalo aquí.
         """
         # 1) Resolver si el primer parámetro es un PlannerConfig o un path
         setup_path: Optional[Union[str, Path]] = None
@@ -328,278 +313,16 @@ class Agent:
         )
 
     # ------------------------------------------------------------------
-    # Helpers internos
-    # ------------------------------------------------------------------
-    def _coerce_input(
-        self,
-        user_input: Union[str, Dict[str, Any], AgentInput],
-    ) -> AgentInput:
-        """
-        Normaliza la entrada a AgentInput:
-
-        - str  -> AgentInput(user_prompt=...)
-        - dict -> AgentInput(**dict)
-        - AgentInput -> se respeta tal cual
-        """
-        if isinstance(user_input, AgentInput):
-            return user_input
-        if isinstance(user_input, dict):
-            return AgentInput(**user_input)
-        return AgentInput(user_prompt=str(user_input))
-
-    def _clean_prev_messages(self) -> List[AnyMessage]:
-        """
-        Limpia el historial previo para evitar ToolMessages gigantes en turnos futuros.
-        """
-        msgs: List[AnyMessage] = []
-        if self._state is None:
-            return msgs
-
-        for m in self._state.get("messages", []):
-            # ❌ No arrastramos ToolMessages con JSONs enormes
-            if isinstance(m, ToolMessage):
-                continue
-            msgs.append(m)
-        return msgs
-
-    def _build_deep_text(
-        self,
-        summary_obj: Optional[AgentSummary],
-    ) -> str:
-        """
-        Construye la vista 'deep' (resumen por sección) a partir de AgentSummary.
-
-        - No incluye el raw_state completo.
-        - Es más compacta que la traza dev_out, pero sigue seccionada.
-        """
-        if summary_obj is None:
-            # Si por alguna razón no hay summary, devolvemos cadena vacía;
-            # el caller puede hacer fallback.
-            return ""
-
-        parts: List[str] = ["## Resumen deep del pipeline"]
-
-        if summary_obj.analyzer:
-            parts.append("### ANALYZER\n" + summary_obj.analyzer)
-        if summary_obj.planner:
-            parts.append("### PLANNER\n" + summary_obj.planner)
-        if summary_obj.executor:
-            parts.append("### EXECUTOR\n" + summary_obj.executor)
-        if summary_obj.catcher:
-            parts.append("### CATCHER\n" + summary_obj.catcher)
-        if summary_obj.summarizer:
-            parts.append("### SUMMARIZER (basado en herramientas)\n" + summary_obj.summarizer)
-        if summary_obj.final_answer:
-            parts.append("### RESPUESTA FINAL\n" + summary_obj.final_answer)
-
-        return "\n\n".join(parts)
-
-    # ------------------------------------------------------------------
-    # API público
+    # API público (Delegado a TurnService)
     # ------------------------------------------------------------------
     def run_turn(
         self,
         user_input: Union[str, Dict[str, Any], AgentInput],
     ) -> Dict[str, Any]:
         """
-        Ejecuta un turno de conversación.
-
-        Devuelve SIEMPRE un dict:
-
-            {
-              "dev_out": {
-                  "final_answer": "...pipeline markdown (traza completa)...",
-                  "summary": {...},
-                  "tool_runs": [...],
-                  "raw_state": {...}   # estado crudo del grafo
-              },
-              "deep_out": {
-                  "final_answer": "...resumen por sección...",
-                  "summary": {...},
-                  "tool_runs": [...],
-                  "raw_state": {}      # vista ligera
-              },
-              "user_out": {
-                  "final_answer": "...respuesta para usuario (1:1)...",
-                  "summary": {...},
-                  "tool_runs": [...],
-                  "raw_state": {}
-              }
-            }
+        Ejecuta un turno de conversación delegando al TurnService.
         """
-        agent_in = self._coerce_input(user_input)
-
-        # Texto canónico del prompt (user_prompt > user_text como fallback)
-        prompt_text = (
-            getattr(agent_in, "user_prompt", None)
-            or getattr(agent_in, "user_text", None)
-            or ""
-        )
-
-        # -------------------------
-        # 0) Resolver session_id / user_id / knowledge_names
-        # -------------------------
-        session_id = agent_in.session_id or "default"
-        user_id = None
-        if agent_in.metadata:
-            user_id = agent_in.metadata.get("user_id")
-
-        # Force default to ALL registered KBs if none specified
-        # This fixes the issue where Planner sees "(No knowledge bases active)"
-        # when running from Streamlit without explicit knowledge_names in payload.
-        knowledge_names = agent_in.knowledge_names
-        if not knowledge_names:
-            knowledge_names = [kb.name for kb in self.knowledge_bases]
-
-        # Seleccionar KBs activas para este turno (si knowledge_names está vacío, usamos todas)
-        knowledge_selected = select_knowledge_bases(knowledge_names, self.knowledge_bases)
-
-        # -------------------------
-        # 1) Leer memoria para esta sesión
-        # -------------------------
-        memory_context = read_memory(session_id=session_id)
-
-        # 2) Construir estado de entrada al grafo
-        prev_messages = self._clean_prev_messages()
-        state_in: State = {
-            "messages": prev_messages + [HumanMessage(content=prompt_text)],
-            "analyzer": None,
-            "planner_trajs": [],
-            "executor_steps": [],
-            "tool_runs": [],
-            "summary": None,
-            "pipeline_summary": None,
-            # Campos extra (no tipados en State, pero soportados por TypedDict total=False)
-            "user_prompt": prompt_text,
-            "session_id": session_id,
-            "user_id": user_id,
-            "setup_path": self.setup_path or "",
-            "setup_config": self.setup_config,  # 👈 YAML completo (por si lo necesita el grafo)
-            "knowledge_names": knowledge_names,
-            "kb_all": [kb.__dict__ for kb in self.knowledge_bases],
-            "knowledge_selected": [kb.__dict__ for kb in knowledge_selected],
-            "memory_context": memory_context,
-            # Tablas de contexto (para semantic_search_in_csv en el grafo)
-            "context_tables": list(self.context_tables),
-            "context_cfg": self.context_cfg,
-        }
-
-        # 3) Invocar grafo
-        out_state: State = self.graph_app.invoke(state_in)
-        self._state = out_state  # guardamos para multi-turn
-
-        # 4) Extraer último AIMessage (por si no vienen campos dev_out/deep_out en state)
-        ai_messages = [
-            m for m in out_state.get("messages", []) if isinstance(m, AIMessage)
-        ]
-        last_ai = ai_messages[-1] if ai_messages else None
-        last_ai_text = last_ai.content if last_ai is not None else ""
-
-        # 5) Campos de texto que el grafo ya pudo haber dejado en el estado
-        dev_text_state = out_state.get("dev_out")  # type: ignore[assignment]
-        deep_text_state = out_state.get("deep_out")  # type: ignore[assignment]
-        user_text_state = out_state.get("user_out")  # type: ignore[assignment]
-
-        # 6) Summary estructurado (con final_answer "para usuario")
-        raw_summary: Dict[str, Any] = (
-            out_state.get("pipeline_summary")  # type: ignore[arg-type]
-            or out_state.get("summary")  # type: ignore[arg-type]
-            or {}
-        )
-        if raw_summary:
-            summary_obj = AgentSummary(**raw_summary)
-            summary_user_answer = summary_obj.final_answer or ""
-        else:
-            summary_obj = None
-            summary_user_answer = ""
-
-        # 7) Tool runs normalizados (para las tres vistas)
-        raw_runs = out_state.get("tool_runs", []) or []
-        tool_runs: List[ToolRun] = []
-        for r in raw_runs:
-            tool_runs.append(
-                ToolRun(
-                    id=str(r.get("id", "")),
-                    name=str(r.get("name", "")),
-                    args=r.get("args", {}),
-                    output=r.get("output"),
-                )
-            )
-
-        # 8) Resolver textos finales por vista con prioridades claras
-        # USER:
-        #   1) user_text_state (si el grafo lo puso)
-        #   2) summary_user_answer (si existe en AgentSummary)
-        #   3) last_ai_text (último mensaje de la traza)
-        final_user = (
-            (user_text_state or "").strip()
-            or summary_user_answer.strip()
-            or last_ai_text.strip()
-        )
-
-        # DEEP:
-        #   1) deep_text_state (del grafo)
-        #   2) _build_deep_text(summary_obj)
-        #   3) summary_user_answer
-        final_deep = (
-            (deep_text_state or "").strip()
-            or self._build_deep_text(summary_obj).strip()
-            or summary_user_answer.strip()
-            or last_ai_text.strip()
-        )
-
-        # DEV:
-        #   1) dev_text_state (del grafo: traza markdown completa)
-        #   2) last_ai_text
-        #   3) deep_text (como fallback)
-        final_dev = (
-            (dev_text_state or "").strip()
-            or last_ai_text.strip()
-            or final_deep
-        )
-
-        # 9) Construir vistas
-        dev_view = AgentView(
-            final_answer=final_dev,
-            summary=summary_obj,
-            tool_runs=tool_runs,
-            raw_state=out_state,  # vista completa
-        )
-
-        deep_view = AgentView(
-            final_answer=final_deep,
-            summary=summary_obj,
-            tool_runs=tool_runs,
-            raw_state={},  # light view
-        )
-
-        user_view = AgentView(
-            final_answer=final_user,
-            summary=summary_obj,
-            tool_runs=tool_runs,
-            raw_state={},  # usuario nunca necesita estado crudo
-        )
-
-        # 10) Actualizar memoria de largo/corto plazo
-        try:
-            write_memory(
-                session_id=session_id,
-                user_prompt=prompt_text,
-                user_out=final_user,
-                user_id=user_id,
-                memory_cfg=self.memory_cfg,
-            )
-        except Exception as e:
-            # No queremos que un fallo en memoria rompa el turno
-            print(f"[Agent] ⚠️ Error escribiendo memoria: {e!r}")
-
-        # 11) Empaquetar en AgentOutput y devolver como dict puro
-        output = AgentOutput(
-            dev_out=dev_view,
-            deep_out=deep_view,
-            user_out=user_view,
-        )
-        return output.to_dict()
+        return self.turn_service.run_turn(user_input)
 
     # ------------------------------------------------------------------
     # Extras útiles para debugging
@@ -607,8 +330,8 @@ class Agent:
     @property
     def last_state(self) -> Optional[Dict[str, Any]]:
         """Devuelve el último estado crudo del grafo (solo lectura)."""
-        return self._state
+        return self.turn_service.last_state
 
     def reset_session(self) -> None:
         """Resetea el estado interno de conversación (no borra memoria global)."""
-        self._state = None
+        self.turn_service.reset_session()

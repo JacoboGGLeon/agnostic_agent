@@ -38,10 +38,9 @@ from .tools import get_default_tools
 from .knowledge import KnowledgeBase, get_default_context
 from .skills import SkillRegistry, Skill
 
-__version__ = "0.2.1"
+from .legacy.compatibility import AgentSession
 
-# Alias de compatibilidad con versiones anteriores (legacy)
-AgentSession = Agent  # type: ignore
+__version__ = "0.3.0"  # Bump version for V2 release
 
 # API pública principal
 __all__ = [

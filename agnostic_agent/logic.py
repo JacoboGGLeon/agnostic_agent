@@ -1297,7 +1297,39 @@ Genera el DAG exclusivo para resolver: "{subq}"
             llm_raw = state.get("llm_raw_out") or (_coerce_content_str(getattr(last_ai, "content", "")) if last_ai else "")
             llm_clean = state.get("llm_clean_out") or strip_think(llm_raw)
 
-            if last_ai_has_tools:
+            # DETECTAR SI ES UN JSON DAG VACÍO (Artifact of Planner Node)
+            is_empty_dag = False
+            # Check for specific artifacts of planner_node output structure
+            # It usually looks like: "\n\n--- Plan 1: ... ---\n{\n "dag": []\n}"
+            if '"dag": []' in llm_clean or "'dag': []" in llm_clean:
+                 is_empty_dag = True
+            
+            if is_empty_dag:
+                 # FALLBACK CONVERSACIONAL
+                 # El planner dijo "no necesito tools". Ahora responde al usuario.
+                 fallback_sys = (
+                     "Eres un asistente servicial y agnóstico.\n"
+                     "El usuario te ha dicho algo que NO requiere herramientas externas.\n"
+                     "Responde de forma natural, útil y amable en el idioma del usuario.\n"
+                     "NO inventes información."
+                 )
+                 
+                 try:
+                     # Usamos el base_model (sin tools bound) para evitar loops o tool execution
+                     # planner_llm está en el closure de build_graph_agent
+                     base_chat_model = getattr(planner_llm, "bound", planner_llm)
+                     
+                     fallback_reply = base_chat_model.invoke([
+                        SystemMessage(content=fallback_sys),
+                        HumanMessage(content=user_prompt)
+                     ])
+                     fallback_content = getattr(fallback_reply, "content", "")
+                     # Strip thinking locally just in case
+                     user_answer = strip_think(fallback_content)
+                 except Exception as e:
+                     user_answer = f"Hola. He recibido tu mensaje: '{user_prompt}'"
+
+            elif last_ai_has_tools:
                 user_answer = (
                     "Se planificaron llamadas a herramientas, pero no se obtuvo ninguna salida. "
                     "Revisa EXECUTOR/CATCHER o el registro de tools."
