@@ -580,12 +580,12 @@ def list_knowledge_sources() -> List[Dict[str, Any]]:
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def search_knowledge_base(query: str, top_k: int = 5, source_filter: str = None) -> List[Dict[str, Any]]:
+def search_knowledge_base(query: str, top_k: int = 15, source_filter: str = None) -> List[Dict[str, Any]]:
     """
     Search for information in the knowledge base.
     
     IMPORTANT: This search returns the Global Top-K results across ALL documents.
-    (e.g., if top_k=5, it returns the 5 best matching chunks from the entire database).
+    (e.g., if top_k=15, it returns the 15 best matching chunks from the entire database).
     
     Use source_filter (exact filename or path) to restrict search to a specific document found via list_knowledge_sources.
     
