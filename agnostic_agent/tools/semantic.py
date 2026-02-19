@@ -637,7 +637,12 @@ def list_knowledge_sources() -> List[Dict[str, Any]]:
 
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def search_knowledge_base(query: str, top_k: int = 15, source_filter: str = None) -> List[Dict[str, Any]]:
+def search_knowledge_base(
+    query: str,
+    top_k: int = 15,
+    source_filter: str = None,
+    source_filter_origin: str = None,
+) -> List[Dict[str, Any]]:
     """
     Search for information in the knowledge base.
     
@@ -645,6 +650,7 @@ def search_knowledge_base(query: str, top_k: int = 15, source_filter: str = None
     (e.g., if top_k=15, it returns the 15 best matching chunks from the entire database).
     
     Use source_filter (exact filename or path) to restrict search to a specific document found via list_knowledge_sources.
+    Optional source_filter_origin can be one of: user | planner.
     
     Use this tool whenever the user asks about:
     - "El proyecto..." (The project...)
@@ -662,22 +668,40 @@ def search_knowledge_base(query: str, top_k: int = 15, source_filter: str = None
         
     try:
         selected_filter = source_filter
-        auto_selected = False
+        selected_origin = (source_filter_origin or "").strip().lower()
+        if selected_origin not in ("user", "planner", "auto", "none"):
+            selected_origin = None
 
-        # If planner did not provide a filter, try to infer a specific file first.
-        if not selected_filter:
+        # If planner/user provided a filter, preserve it.
+        if selected_filter:
+            selected_origin = selected_origin or "planner"
+        else:
+            # Try to infer a specific file first.
             files = get_ingested_files(db_path)
             inferred_filter = _auto_select_source_filter(query, files)
             if inferred_filter:
                 selected_filter = inferred_filter
-                auto_selected = True
+                selected_origin = "auto"
+            else:
+                selected_origin = "none"
 
         results = search_db(db_path, query, top_k=top_k, source_filter=selected_filter)
 
-        # Safe fallback: if auto-filter had no hits, retry globally.
-        if auto_selected and not results:
-            results = search_db(db_path, query, top_k=top_k, source_filter=None)
+        # Attach diagnostics in every result for Inspector / Dev trace.
+        if results:
+            for item in results:
+                if isinstance(item, dict):
+                    item["effective_source_filter"] = selected_filter
+                    item["source_filter_origin"] = selected_origin
+            return results
 
-        return results
+        # Keep diagnostics visible even when there are no rows.
+        return [
+            {
+                "_meta_only": True,
+                "effective_source_filter": selected_filter,
+                "source_filter_origin": selected_origin or "none",
+            }
+        ]
     except Exception as e:
         return [{"error": f"Search failed: {e}"}]

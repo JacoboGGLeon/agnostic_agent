@@ -111,7 +111,7 @@ def render_offline_tab(agent_factory):
             col1.metric("Chunks", int(stats.get("chunks", 0)))
             col2.metric("Files", int(stats.get("files", 0)))
             col3.metric("Vectors", int(stats.get("vector_count", 0)))
-            col4.metric("DB size (bytes)", int(stats.get("size_bytes", 0)))
+            col4.metric("L2 Docs", int(stats.get("doc_index_count", 0)))
 
             st.markdown("#### Archivos ingeridos")
             files_rows = get_ingested_files(db_path)

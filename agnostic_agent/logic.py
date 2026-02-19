@@ -563,8 +563,19 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
             if not output:
                 partes.append("_(Sin resultados relevantes)_")
             else:
+                first = output[0] if output and isinstance(output[0], dict) else {}
+                eff_filter = first.get("effective_source_filter")
+                filt_origin = first.get("source_filter_origin")
+                if filt_origin or eff_filter:
+                    partes.append(
+                        f"- `source_filter_origin`: **{filt_origin or 'none'}**  \n"
+                        f"- `effective_source_filter`: **{eff_filter or 'none'}**"
+                    )
+
                 for idx, item in enumerate(output, start=1):
                     if not isinstance(item, dict):
+                        continue
+                    if item.get("_meta_only"):
                         continue
                         
                     score = item.get("score", 0.0)
@@ -578,7 +589,13 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
                     
                     # Markdown Card-like format
                     card = (
-                        f"**{idx}. {src_name}** (Relevancia: {score:.2f})\n"
+                        f"**{idx}. {src_name}** (Relevancia: {score:.2f})"
+                        + (
+                            f" [Árbol {item.get('search_tree')}, L2={item.get('doc_score', 0):.2f}, L1={item.get('chunk_score', 0):.2f}]"
+                            if item.get("search_tree")
+                            else ""
+                        )
+                        + "\n"
                         f"> {content_md.replace(chr(10), '  ' + chr(10))}\n" # Indent content
                     )
                     partes.append(card)

@@ -368,11 +368,83 @@ def init_db(db_path: str):
             ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # L2 index: one embedding centroid per document (source_path).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS docs_index (
+            source_path TEXT PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            n_chunks INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_meta_source_path ON chunks_meta(source_path);"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_meta_source_page ON chunks_meta(source_path, page);"
+    )
     conn.commit()
     conn.close()
 
 def _pack_f32(arr: np.ndarray) -> bytes:
     return arr.astype("float32").tobytes()
+
+
+def _unpack_f32(blob: bytes) -> np.ndarray:
+    return np.frombuffer(blob, dtype=np.float32)
+
+
+def _normalize(vec: np.ndarray) -> np.ndarray:
+    denom = np.linalg.norm(vec) + 1e-9
+    return (vec / denom).astype("float32")
+
+
+def _doc_centroid(embeddings: np.ndarray) -> np.ndarray:
+    if embeddings.size == 0:
+        return np.zeros((EMB_DIM,), dtype="float32")
+    return _normalize(np.mean(embeddings, axis=0))
+
+
+def _tokenize_lex(text: str) -> List[str]:
+    import re as _re
+    cleaned = _re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+    return [t for t in cleaned.split() if len(t) >= 2]
+
+
+def _lexical_overlap_score(query: str, descriptor: str) -> float:
+    q_toks = _tokenize_lex(query)
+    if not q_toks:
+        return 0.0
+    d = (descriptor or "").lower()
+    hits = sum(1 for t in q_toks if t in d)
+    return float(hits) / float(len(q_toks))
+
+
+def upsert_document_index(db_path: str, source_path: str, embeddings: np.ndarray) -> None:
+    """
+    Maintains L2 document-level index (centroid embedding per document).
+    """
+    import sqlite_vec
+
+    conn = sqlite3.connect(db_path)
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+
+    centroid = _doc_centroid(embeddings)
+    blob = _pack_f32(centroid)
+    n_chunks = int(embeddings.shape[0]) if embeddings.ndim > 1 else int(bool(embeddings.size))
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO docs_index (source_path, embedding, n_chunks, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (str(source_path), blob, n_chunks),
+    )
+    conn.commit()
+    conn.close()
 
 def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
     """Inserts chunks and their embeddings into the DB."""
@@ -408,7 +480,9 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
 
 def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Performs semantic search in the DB, returning the Top-K results FOR EACH document.
+    Hierarchical semantic search:
+      L2 -> choose best document(s) from docs_index
+      L1 -> search best chunks only inside selected document(s)
     """
     if not os.path.exists(db_path):
         return []
@@ -423,71 +497,130 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
     conn.enable_load_extension(False)
 
     try:
+        # Strict mode: require hierarchical index already materialized.
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        required = {"v_chunks", "chunks_meta", "docs_index"}
+        if not required.issubset(tables):
+            logger.error(
+                "search_db requires strict HKB schema (chunks_meta + docs_index). "
+                "Reingest documents with the current pipeline."
+            )
+            return []
+
+        q_vec_norm = _normalize(q_vec)
+        desc_map: Dict[str, str] = {}
+        try:
+            for s_path, desc in conn.execute(
+                "SELECT source_path, description FROM files_meta"
+            ).fetchall():
+                desc_map[str(s_path)] = str(desc or "")
+        except Exception:
+            desc_map = {}
+
+        # Resolve candidate documents (L2)
         if source_filter:
             sf = source_filter.strip()
-            # Apply source restriction inside vector query to avoid global-topk truncation bias.
+            doc_rows = conn.execute(
+                """
+                SELECT source_path, embedding
+                FROM docs_index
+                WHERE source_path = ?
+                   OR source_path LIKE ?
+                   OR source_path LIKE ?
+                """,
+                (sf, f"%/{sf}", f"%\\{sf}"),
+            ).fetchall()
+            doc_candidates = []
+            for s_path, emb_blob in doc_rows:
+                d_vec = _unpack_f32(emb_blob)
+                vec_score = float(np.dot(q_vec_norm, _normalize(d_vec)))
+                descriptor = f"{Path(s_path).name} {desc_map.get(str(s_path), '')}"
+                lex_score = _lexical_overlap_score(query, descriptor)
+                d_score = (0.80 * max(0.0, vec_score)) + (0.20 * lex_score)
+                doc_candidates.append((s_path, d_score))
+            doc_candidates.sort(key=lambda x: x[1], reverse=True)
+        else:
+            doc_rows = conn.execute(
+                "SELECT source_path, embedding FROM docs_index"
+            ).fetchall()
+
+            doc_candidates = []
+            for s_path, emb_blob in doc_rows:
+                d_vec = _unpack_f32(emb_blob)
+                vec_score = float(np.dot(q_vec_norm, _normalize(d_vec)))
+                descriptor = f"{Path(s_path).name} {desc_map.get(str(s_path), '')}"
+                lex_score = _lexical_overlap_score(query, descriptor)
+                d_score = (0.80 * max(0.0, vec_score)) + (0.20 * lex_score)
+                doc_candidates.append((s_path, d_score))
+
+            doc_candidates.sort(key=lambda x: x[1], reverse=True)
+
+            # Expansion strategy: top-1 anchor + neighbors close in score.
+            if doc_candidates:
+                best = doc_candidates[0][1]
+                expanded = [c for c in doc_candidates if c[1] >= (best - 0.08)]
+                doc_candidates = expanded[:3] if len(expanded) > 3 else expanded
+
+        if not doc_candidates:
+            return []
+
+        # L1 search inside selected L2 documents.
+        l1_fetch_k = max(10, top_k * 3)
+        all_results = []
+        seen_chunk_ids = set()
+
+        for doc_path, doc_score in doc_candidates:
             rows = conn.execute(
                 """
-                SELECT v.rowid, v.distance
+                SELECT
+                    v.distance,
+                    m.chunk_id,
+                    m.element_id,
+                    m.page,
+                    m.md,
+                    m.neighbors,
+                    m.source_path
                 FROM v_chunks v
                 JOIN chunks_meta m ON m.rowid = v.rowid
                 WHERE v.embedding MATCH ?
                   AND k = ?
-                  AND (
-                    m.source_path = ?
-                    OR m.source_path LIKE ?
-                    OR m.source_path LIKE ?
-                  )
+                  AND m.source_path = ?
                 ORDER BY v.distance ASC;
                 """,
-                (q_blob, top_k, sf, f"%/{sf}", f"%\\{sf}"),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT v.rowid, v.distance
-                FROM v_chunks v
-                WHERE v.embedding MATCH ?
-                  AND k = ?
-                ORDER BY v.distance ASC;
-                """,
-                (q_blob, top_k),
+                (q_blob, l1_fetch_k, doc_path),
             ).fetchall()
 
-        all_results = []
-        
-        for r in rows:
-            row_id, dist = r
-            
-            # Convert L2 distance to Cosine Similarity
-            sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
-            
-            meta_row = conn.execute("""
-                SELECT chunk_id, element_id, page, md, neighbors, source_path
-                FROM chunks_meta
-                WHERE rowid = ?
-            """, (row_id,)).fetchone()
-            
-            if meta_row:
-                s_path = meta_row[5]
-                
-                all_results.append({
-                    "score": sim,
-                    "distance": dist,
-                    "chunk_id": meta_row[0],
-                    "element_id": meta_row[1],
-                    "page": meta_row[2],
-                    "md": meta_row[3],
-                    "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
-                    "source_path": s_path
-                })
-                
-                if len(all_results) >= top_k:
-                    break
+            for dist, chunk_id, element_id, page, md, neighbors_raw, source_path in rows:
+                chunk_sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
+                fused_score = (0.75 * chunk_sim) + (0.25 * max(0.0, doc_score))
+                if chunk_id in seen_chunk_ids:
+                    continue
+                seen_chunk_ids.add(chunk_id)
 
-        # Sort desc by score
+                all_results.append(
+                    {
+                        "score": float(fused_score),
+                        "distance": float(dist),
+                        "chunk_score": float(chunk_sim),
+                        "doc_score": float(max(0.0, doc_score)),
+                        "doc_descriptor": f"{Path(source_path).name} {desc_map.get(str(source_path), '')}".strip(),
+                        "chunk_id": chunk_id,
+                        "element_id": element_id,
+                        "page": page,
+                        "md": md,
+                        "neighbors": json.loads(neighbors_raw) if neighbors_raw else [],
+                        "source_path": source_path,
+                        "search_tree": "L2->L1",
+                    }
+                )
+
         all_results.sort(key=lambda x: x["score"], reverse=True)
-        return all_results
+        return all_results[:top_k]
 
     except Exception as e:
         logger.error(f"Search failed: {e}")
@@ -524,7 +657,8 @@ def get_stats(db_path: str) -> Dict[str, Any]:
             "files": n_files, 
             "size_bytes": size_bytes,
             "vector_count": n_vectors,
-            "dim": EMB_DIM
+            "dim": EMB_DIM,
+            "doc_index_count": conn.execute("SELECT COUNT(*) FROM docs_index").fetchone()[0]
         }
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
@@ -687,6 +821,7 @@ def ingest_pdf_file(
     try:
         init_db(db_path) 
         upsert_chunks(db_path, chunks, embeddings)
+        upsert_document_index(db_path, str(pdf_path), embeddings)
         
         # 4.1 Update file metadata
         conn = sqlite3.connect(db_path)
