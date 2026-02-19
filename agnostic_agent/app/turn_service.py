@@ -109,8 +109,10 @@ class TurnService:
             # Metadata resolution
             session_id = agent_in.session_id or "default"
             user_id = None
+            forced_skill = None
             if agent_in.metadata:
                 user_id = agent_in.metadata.get("user_id")
+                forced_skill = agent_in.metadata.get("forced_skill")
 
             # Knowledge selection
             knowledge_names = agent_in.knowledge_names
@@ -135,6 +137,7 @@ class TurnService:
                 "user_prompt": prompt_text,
                 "session_id": session_id,
                 "user_id": user_id,
+                "forced_skill": forced_skill, # ✅ Injected from UI
                 "setup_path": self.setup_path or "",
                 "setup_config": self.setup_config,
                 "knowledge_names": knowledge_names,

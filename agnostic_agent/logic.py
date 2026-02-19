@@ -114,6 +114,7 @@ class State(TypedDict, total=False):
     validator: Optional[ValidatorResult]
 
     # Metadatos / contexto
+    forced_skill: Optional[str] # ✅ Skill forzada desde UI
     user_prompt: Optional[str]
     session_id: Optional[str]
     knowledge_names: List[str]
@@ -717,6 +718,18 @@ def build_graph_agent(
         subqueries = [user_prompt]
         logic_form = "q1"
         
+        # --- FORCED SKILL LOGIC ---
+        forced_skill = state.get("forced_skill")
+        if forced_skill and forced_skill != "Auto (Analyzer)":
+             print(f"[ANALYZER] 🔒 Forced Skill active: {forced_skill}")
+             selected_skills = [forced_skill]
+             # Bypass LLM invocation for skill selection, but maybe run it for subqueries?
+             # For simplicity and speed in "Testing Mode", we can just pass the prompt as single subquery.
+             # Or we can run LLM but override the skills.
+             # Let's run LLM to get subqueries/logic_form, but OVERRIDE skills.
+             pass
+        # --------------------------
+
         try:
             response = planner_llm.invoke([sys_msg, user_msg])
             content = response.content
@@ -732,7 +745,10 @@ def build_graph_agent(
             
             subqueries = data.get("subqueries", [user_prompt])
             logic_form = data.get("logic_form", "q1")
-            selected_skills = data.get("selected_skills", [])
+            
+            # IF NOT FORCED, use model output
+            if not forced_skill or forced_skill == "Auto (Analyzer)":
+                selected_skills = data.get("selected_skills", [])
             
             # --- FALLBACK AGNOSTICO ---
             # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),

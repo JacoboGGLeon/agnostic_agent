@@ -125,8 +125,18 @@ def render_online_tab(agent_factory):
         st.session_state.messages.append(msg_payload)
 
         agent = agent_factory()
+        
+        # Build metadata with forced skill if selected
+        run_metadata = {}
+        if selected_skill and selected_skill != "Auto (Analyzer)":
+            run_metadata["forced_skill"] = selected_skill
+
         try:
-            raw_out = agent.run_turn(prompt)
+            # Pass metadata to run_turn
+            raw_out = agent.run_turn({
+                "user_prompt": prompt,
+                "metadata": run_metadata
+            })
         except Exception as e:
             st.error(f"Error corriendo agente: {e}")
             st.stop()
