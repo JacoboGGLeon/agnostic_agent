@@ -53,10 +53,20 @@ def render_offline_tab(agent_factory):
     # 📚 Knowledge Manager
     with tab_km:
         st.markdown("### 📚 Gestor de Conocimiento")
+        
+        # Add Reset Button for convenience
+        if st.button("🔄 Reiniciar Conexión (Recargar Agente)"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+            
         st.info("Subir documentos PDF para procesarlos e incorporarlos a la base vectorial.")
         
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         file_description = st.text_input("Descripción", placeholder="Ej: Manual 2024")
+        
+        # Define paths
+        DOCS_DIR = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
         
         # Priority: Env Var > Session Dir > Current Dir (Explicit Colab fallback)
         default_session_db = os.path.join(os.getcwd(), "session", "embeddings.db")
