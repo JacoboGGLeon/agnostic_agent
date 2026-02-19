@@ -5,7 +5,19 @@ from agnostic_agent.tools.decorators import tool
 
 @tool(mode="public", output_schema={"type": "string"})
 def to_upper(text: str) -> str:
-    """Convierte el texto a mayúsculas."""
+    """
+    Convierte el texto a mayúsculas.
+    
+    ### Ejemplo Teórico-Práctico
+    
+    Sea $x$ el texto de entrada y $f(x)$ la función de transformación:
+    
+    $$ f(x) = x.upper() $$
+    
+    Donde:
+    - $x$: "hola mundo"
+    - Resultado: "HOLA MUNDO"
+    """
     return text.upper()
 
 

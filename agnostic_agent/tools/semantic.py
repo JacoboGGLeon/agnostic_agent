@@ -562,10 +562,19 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     from agnostic_agent.knowledge.vector import search_db
     # Default path used in streamlit_app.py
     # Ideally should be in a config/env, but this aligns with current implementation
-    db_path = os.getenv("VECTOR_DB_PATH", os.path.join(os.getcwd(), "embeddings.db"))
+    # Priority: Env Var > Session Dir > Current Dir
+    default_session_db = os.path.join(os.getcwd(), "session", "embeddings.db")
+    default_root_db = os.path.join(os.getcwd(), "embeddings.db")
+    
+    db_path = os.getenv("VECTOR_DB_PATH")
+    if not db_path:
+        if os.path.exists(default_session_db):
+            db_path = default_session_db
+        else:
+            db_path = default_root_db
     
     if not os.path.exists(db_path):
-        return [{"warning": "No knowledge base found (embeddings.db). Please ingest documents via the Offline Manager tab."}]
+        return [{"warning": f"No knowledge base found at {db_path}. Please ingest documents via the Offline Manager tab."}]
         
     try:
         results = search_db(db_path, query, top_k=top_k)

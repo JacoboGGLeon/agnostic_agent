@@ -25,7 +25,10 @@ st.set_page_config(
 # -----------------------------
 def load_css():
     file_name = "styles.css"
-    # Search paths: specific asset folders, current dir, or relative to script
+    # Extended search strategy:
+    # 1. Standard paths
+    # 2. Recursive search in current directory (depth 3)
+    
     candidates = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", file_name),
         os.path.join(os.getcwd(), "assets", file_name),
@@ -34,10 +37,29 @@ def load_css():
         "assets/styles.css",
     ]
     
+    # Add recursive search
+    try:
+        for root, dirs, files in os.walk(os.getcwd()):
+            if file_name in files:
+                candidates.append(os.path.join(root, file_name))
+            # Limit depth hack (not perfect but safe for small repos)
+            if root.count(os.sep) - os.getcwd().count(os.sep) > 3:
+                del dirs[:] 
+    except:
+        pass
+
     css_content = ""
     found_path = None
     
-    for path in candidates:
+    # Deduplicate while preserving order
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        if c not in seen:
+            unique_candidates.append(c)
+            seen.add(c)
+            
+    for path in unique_candidates:
         if os.path.exists(path):
             try:
                 with open(path) as f:
@@ -50,7 +72,14 @@ def load_css():
     if found_path:
         st.markdown(f'<style>{css_content}</style>', unsafe_allow_html=True)
     else:
-        st.warning(f"⚠️ CSS not found. GUI might look unstyled. (Tried: {', '.join(candidates)})")
+        # Fallback inline minimal style
+        st.markdown("""
+        <style>
+        .topbar { padding: 10px; border-bottom: 1px solid #333; }
+        .logo-img { width: 108px; }
+        </style>
+        """, unsafe_allow_html=True)
+        st.warning(f"⚠️ CSS not found. Using minimal fallback. (Tried: {', '.join(unique_candidates[:3])}...)")
 
 load_css()
 
