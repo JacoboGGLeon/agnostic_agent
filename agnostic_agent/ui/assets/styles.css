@@ -49,13 +49,17 @@
 }
 
 .block-container {
-  padding-top: 1.0rem;
+  padding-top: .75rem;
   padding-bottom: 1.6rem;
 }
 
 section[data-testid="stSidebar"] {
   background: rgba(7, 33, 70, .86);
   border-right: 1px solid rgba(73, 165, 230, .28);
+}
+
+.topbar-offset {
+  height: 2.75rem;
 }
 
 .topbar {
@@ -71,7 +75,7 @@ section[data-testid="stSidebar"] {
   box-shadow: var(--shadow);
   box-shadow: var(--shadow);
   margin-bottom: 10px;
-  margin-top: 5px;
+  margin-top: 0px;
 }
 
 .brand {
@@ -208,19 +212,16 @@ div[data-testid="stChatMessage"] {
   text-align: right;
 }
 
-/* Inspector wrapper */
-.inspector-box {
-  border-radius: var(--r);
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, .05);
-  box-shadow: var(--shadow);
-  padding: 12px;
-  margin-top: 0px !important;
+/* Inspector container (st.container(border=True)) */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: var(--r) !important;
+  border: 1px solid var(--border) !important;
+  background: rgba(255, 255, 255, .05) !important;
+  box-shadow: var(--shadow) !important;
 }
 
-.inspector-box h3 {
-  margin-top: 0 !important;
-  padding-top: 0 !important;
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+  padding: 12px !important;
 }
 
 /* Remove empty containers explicitly */
@@ -237,6 +238,3 @@ div[data-testid="stVerticalBlock"]>div:has(> .element-container:empty) {
 }
 
 /* Remove extra padding from top of sidebar/main */
-.block-container {
-  padding-top: 2rem !important;
-}

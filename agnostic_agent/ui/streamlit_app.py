@@ -149,6 +149,7 @@ def get_or_init_agent() -> Agent:
 render_sidebar()
 
 # 2. Topbar
+st.markdown('<div class="topbar-offset"></div>', unsafe_allow_html=True)
 st.markdown(
     f"""
 <div class="topbar">
