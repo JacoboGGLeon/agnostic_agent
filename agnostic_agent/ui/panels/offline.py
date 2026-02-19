@@ -53,7 +53,7 @@ def render_offline_tab(agent_factory):
     # 📚 Knowledge Manager
     with tab_km:
         st.markdown("### 📚 Gestor de Conocimiento")
-        st.info("Subir documentos PDF para procesarlos.")
+        st.info("Subir documentos PDF para procesarlos e incorporarlos a la base vectorial.")
         
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         file_description = st.text_input("Descripción", placeholder="Ej: Manual 2024")
@@ -64,16 +64,44 @@ def render_offline_tab(agent_factory):
         
         if uploaded_file:
             save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
-            with open(save_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            st.success(f"Guardado en: `{save_path}`")
+            # Save file
+            if not os.path.exists(save_path):
+                with open(save_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
             
-            if st.button("🚀 Procesar", type="primary"):
-                 st.info("Ingestion functionality is migrated. Please use CLI tools for now.")
+            st.success(f"Archivo listo: `{uploaded_file.name}`")
+            
+            if st.button("🚀 Procesar e Ingestar", type="primary"):
+                 from agnostic_agent.knowledge.vector import ingest_pdf_file
+                 
+                 progress_bar = st.progress(0, text="Iniciando...")
+                 
+                 def _update_ui(p, msg):
+                     progress_bar.progress(int(p * 100), text=msg)
+                     
+                 try:
+                     result = ingest_pdf_file(
+                         pdf_path=save_path,
+                         db_path=DB_PATH,
+                         description=file_description,
+                         progress_callback=_update_ui
+                     )
+                     
+                     if result.get("success"):
+                         st.balloons()
+                         st.success(f"✅ Ingestión completada: {result['chunks']} chunks creados.")
+                         st.json(result)
+                     else:
+                         st.error(f"❌ Error: {result.get('error')}")
+                         
+                 except Exception as e:
+                     st.error(f"Error crítico durante la ingestión: {e}")
 
-    # 🛠 Tools Manager
+    # 🛠 Tools Manager (Sandbox)
     with tab_tm:
-        st.markdown("### 🛠 Gestor de Herramientas")
+        st.markdown("### 🛠 Tools Playground")
+        st.info("Prueba las herramientas disponibles con entradas manuales.")
+        
         _tools_list = []
         if agent and hasattr(agent, "tools"):
              _tools_list = agent.tools
@@ -83,8 +111,63 @@ def render_offline_tab(agent_factory):
         if not tools_map:
              st.warning("No tools loaded in agent.")
         else:
-             for tname in tools_map:
-                 st.text(f"- {tname}")
+             tool_names = list(tools_map.keys())
+             selected_tool_name = st.selectbox("Seleccionar Herramienta", tool_names)
+             
+             if selected_tool_name:
+                 tool = tools_map[selected_tool_name]
+                 st.markdown(f"**Description:** {tool.description}")
+                 
+                 # Dynamic Form for Arguments
+                 st.markdown("#### Inputs")
+                 args_schema = tool.args
+                 inputs = {}
+                 
+                 # Simple auto-form generation based on pydantic args schema
+                 if args_schema:
+                     for field_name, field_def3 in args_schema.items():
+                         # Try to infer type
+                         ftype = field_def3.get("type", "string")
+                         title = field_def3.get("title", field_name)
+                         
+                         if ftype == "integer":
+                             inputs[field_name] = st.number_input(f"{title} ({field_name})", value=0, step=1)
+                         elif ftype == "number":
+                             inputs[field_name] = st.number_input(f"{title} ({field_name})", value=0.0)
+                         elif ftype == "boolean":
+                             inputs[field_name] = st.checkbox(f"{title} ({field_name})")
+                         elif ftype == "array":
+                              val_str = st.text_area(f"{title} ({field_name}) - JSON List", value="[]")
+                              try:
+                                  inputs[field_name] = json.loads(val_str)
+                              except:
+                                  st.error(f"Invalid JSON for {field_name}")
+                         else:
+                             inputs[field_name] = st.text_input(f"{title} ({field_name})")
+                 
+                 if st.button(f"▶ Ejecutar {selected_tool_name}", type="primary"):
+                     try:
+                         with st.spinner("Ejecutando..."):
+                             output = tool.invoke(inputs)
+                             
+                         st.markdown("#### Resultado")
+                         st.success("Ejecución exitosa")
+                         st.write(output)
+                         
+                         # Log execution
+                         if "tool_logs" not in st.session_state:
+                             st.session_state.tool_logs = []
+                         
+                         import datetime
+                         st.session_state.tool_logs.append({
+                             "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+                             "tool": selected_tool_name,
+                             "inputs": inputs,
+                             "output": str(output) # Force string serialization
+                         })
+                         
+                     except Exception as e:
+                         st.error(f"Error ejecutando tool: {e}")
 
     # 🧩 Skills Manager
     with tab_skills:
@@ -94,13 +177,18 @@ def render_offline_tab(agent_factory):
             if not skills:
                  st.warning("No skills found.")
             else:
-                for skill in skills:
-                    is_on = st.toggle(skill.name, value=skill.enabled, key=f"s_{skill.name}")
-                    if is_on != skill.enabled:
-                        agent.skill_registry.set_enabled(skill.name, is_on)
-                        if "skills_config" not in st.session_state: st.session_state.skills_config = {}
-                        st.session_state.skills_config[skill.name] = is_on
-                        st.rerun()
+                col1, col2 = st.columns(2)
+                for i, skill in enumerate(skills):
+                    with col1 if i % 2 == 0 else col2:
+                        st.markdown(f"**{skill.name}**")
+                        st.caption(skill.description)
+                        is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
+                        if is_on != skill.enabled:
+                            agent.skill_registry.set_enabled(skill.name, is_on)
+                            if "skills_config" not in st.session_state: st.session_state.skills_config = {}
+                            st.session_state.skills_config[skill.name] = is_on
+                            st.rerun()
+                        st.divider()
         else:
             st.warning("Skill registry not available.")
 

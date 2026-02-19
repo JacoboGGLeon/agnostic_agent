@@ -23,16 +23,35 @@ st.set_page_config(
 # -----------------------------
 # CSS Loading
 # -----------------------------
-def load_css(file_name):
-    try:
-        with open(file_name) as f:
-            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.warning(f"CSS file not found: {file_name}")
+def load_css():
+    file_name = "styles.css"
+    # Search paths: specific asset folders, current dir, or relative to script
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", file_name),
+        os.path.join(os.getcwd(), "assets", file_name),
+        os.path.join(os.getcwd(), "agnostic_agent", "ui", "assets", file_name),
+        "assets/styles.css",
+    ]
+    
+    css_content = ""
+    found_path = None
+    
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    css_content = f.read()
+                found_path = path
+                break
+            except:
+                continue
+                
+    if found_path:
+        st.markdown(f'<style>{css_content}</style>', unsafe_allow_html=True)
+    else:
+        st.warning(f"⚠️ CSS not found. GUI might look unstyled. (Tried: {', '.join(candidates)})")
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-css_path = os.path.join(current_dir, "assets", "styles.css")
-load_css(css_path)
+load_css()
 
 # -----------------------------
 # Session State Init
@@ -104,7 +123,7 @@ st.markdown(
     f"""
 <div class="topbar">
   <div class="brand">
-    <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
+    <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA" style="width: 108px; height: auto;"/>
     <div class="title">Agentic Lab · Studio</div>
   </div>
   <div class="badges">
