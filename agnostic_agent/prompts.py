@@ -110,7 +110,7 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
     {
       "step_id": "step_1",
       "tool": "nombre_exacto_tool",
-      "args": {"arg_name": "valor_literal_o_variable"},
+      "args": {"nombre_parametro_real_de_la_tool": "valor_literal_o_variable"},
       "depends_on": [] 
     }
   ]
@@ -119,9 +119,10 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
 ### INSTRUCCIONES ESPECÍFICAS
 1. Analiza cada subquery.
 2. Selecciona la herramienta adecuada del contexto.
-3. Define los argumentos (SOLO literales del prompt del usuario o referencias `$step_id.output`).
-4. Establece dependencias.
-5. Si no hay herramientas útiles, devuelve `{"dag": []}` y deja que el modelo responda con su conocimiento general.
+3. Define los argumentos usando EXACTAMENTE los nombres del esquema de entrada de la tool (Input Schema).
+4. SOLO usa literales del prompt del usuario o referencias `$step_id.output`.
+5. Establece dependencias.
+6. Si no hay herramientas útiles, devuelve `{"dag": []}` y deja que el modelo responda con su conocimiento general.
 """.strip()
 
 

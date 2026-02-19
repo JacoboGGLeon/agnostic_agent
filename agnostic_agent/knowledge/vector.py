@@ -572,6 +572,51 @@ def get_ingested_files(db_path: str) -> List[Dict[str, Any]]:
         logger.error(f"Error listing ingested files: {e}")
         return []
 
+
+def get_chunks_metadata(db_path: str, limit: int = 200) -> List[Dict[str, Any]]:
+    """
+    Devuelve metadata por elemento/chunk para inspección en UI.
+    """
+    if not os.path.exists(db_path):
+        return []
+
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            """
+            SELECT chunk_id, element_id, page, source_path, neighbors, md
+            FROM chunks_meta
+            ORDER BY rowid DESC
+            LIMIT ?
+            """,
+            (int(max(1, limit)),),
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error reading chunks metadata: {e}")
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for chunk_id, element_id, page, source_path, neighbors_raw, md in rows:
+        try:
+            neighbors = json.loads(neighbors_raw) if neighbors_raw else []
+        except Exception:
+            neighbors = []
+        preview = (md or "").replace("\n", " ").strip()
+        if len(preview) > 220:
+            preview = preview[:220] + "..."
+        out.append(
+            {
+                "chunk_id": chunk_id,
+                "element_id": element_id,
+                "page": page,
+                "source_path": source_path,
+                "neighbors_count": len(neighbors),
+                "md_preview": preview,
+            }
+        )
+    return out
+
 def ingest_pdf_file(
     pdf_path: str, 
     db_path: str, 

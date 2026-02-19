@@ -1145,6 +1145,40 @@ Genera el DAG exclusivo para resolver: "{subq}"
             
         return val
 
+    def _repair_tool_args(tool_obj: Any, raw_args: Any) -> Any:
+        """
+        Normaliza args al esquema real de la tool para tolerar planes con claves genéricas
+        (por ejemplo: {"arg_name": "..."} para tools de un solo parámetro).
+        """
+        if not isinstance(raw_args, dict):
+            return raw_args
+
+        args = dict(raw_args)
+        schema = getattr(tool_obj, "args", None)
+        if not isinstance(schema, dict):
+            return args
+
+        expected_fields = list(schema.keys())
+        if not expected_fields:
+            return args
+
+        # Caso típico: planner devuelve {"arg_name": ...} y la tool espera un único campo.
+        if "arg_name" in args and "arg_name" not in expected_fields and len(expected_fields) == 1:
+            target = expected_fields[0]
+            args[target] = args.get("arg_name")
+            args.pop("arg_name", None)
+            return args
+
+        # Si el plan trae un único campo no esperado y la tool espera solo uno, remap defensivo.
+        if len(expected_fields) == 1:
+            target = expected_fields[0]
+            if target not in args and len(args) == 1:
+                only_key = next(iter(args.keys()))
+                if only_key not in expected_fields:
+                    args[target] = args.pop(only_key)
+
+        return args
+
 
     # EXECUTOR
     def executor_node(state: State) -> Dict[str, Any]:
@@ -1197,6 +1231,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
             try:
                 tool_obj = next(t for t in tools if t.name == name)
+                args = _repair_tool_args(tool_obj, args)
                 observation = tool_obj.invoke(args)
             except StopIteration:
                 observation = {"error": f"Tool '{name}' no encontrada."}

@@ -15,6 +15,25 @@ from agnostic_agent.capabilities import DEFAULT_EMB_ID, DEFAULT_RERANK_ID, Local
 _EMB_STATE: Dict[str, Any] = {}
 
 
+def _resolve_vector_db_path() -> str:
+    """
+    Resuelve la ruta de la DB vectorial de forma consistente entre UI y tools.
+    Prioridad:
+    1) AGNOSTIC_DB_PATH
+    2) VECTOR_DB_PATH (compat legacy)
+    3) ./session/embeddings.db
+    4) ./embeddings.db
+    """
+    db_path = os.getenv("AGNOSTIC_DB_PATH") or os.getenv("VECTOR_DB_PATH")
+    if db_path:
+        return db_path
+
+    default_session_db = os.path.join(os.getcwd(), "session", "embeddings.db")
+    if os.path.exists(default_session_db):
+        return default_session_db
+    return os.path.join(os.getcwd(), "embeddings.db")
+
+
 def _ensure_embedding_loaded() -> None:
     """Carga Qwen3-Embedding una sola vez en memoria."""
     if _EMB_STATE:
@@ -560,18 +579,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     Returns relevant text chunks with source metadata.
     """
     from agnostic_agent.knowledge.vector import search_db
-    # Default path used in streamlit_app.py
-    # Ideally should be in a config/env, but this aligns with current implementation
-    # Priority: Env Var > Session Dir > Current Dir
-    default_session_db = os.path.join(os.getcwd(), "session", "embeddings.db")
-    default_root_db = os.path.join(os.getcwd(), "embeddings.db")
-    
-    db_path = os.getenv("VECTOR_DB_PATH")
-    if not db_path:
-        if os.path.exists(default_session_db):
-            db_path = default_session_db
-        else:
-            db_path = default_root_db
+    db_path = _resolve_vector_db_path()
     
     if not os.path.exists(db_path):
         return [{"warning": f"No knowledge base found at {db_path}. Please ingest documents via the Offline Manager tab."}]
