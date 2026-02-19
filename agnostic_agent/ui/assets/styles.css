@@ -68,6 +68,8 @@ section[data-testid="stSidebar"] {
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   margin-bottom: 10px;
+  margin-top: 60px;
+  /* Push down below Streamlit header */
 }
 
 .brand {
@@ -212,6 +214,11 @@ div[data-testid="stChatMessage"] {
   box-shadow: var(--shadow);
   padding: 12px;
   margin-top: 0px !important;
+}
+
+.inspector-box h3 {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
 /* Remove empty containers explicitly */

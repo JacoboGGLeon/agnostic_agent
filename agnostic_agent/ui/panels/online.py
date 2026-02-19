@@ -9,106 +9,98 @@ from agnostic_agent.ui.panels.helpers import (
 from agnostic_agent.ui.panels.inspector import render_inspector
 
 def render_online_tab(agent_factory):
-    feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
+    # -------- MAIN SCROLLABLE AREA (Chat + Inspector) --------
+    # Adjust height as needed. 650px allows space for the fixed footer on standard screens.
+    with st.container(height=650, border=False):
+        feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
 
-    # -------- FEED (left) --------
-    with feed_col:
-        for msg in st.session_state.messages:
-            role = msg.get("role", "user")
+        # -------- FEED (left) --------
+        with feed_col:
+            for msg in st.session_state.messages:
+                role = msg.get("role", "user")
 
-            if role == "user":
-                with st.chat_message("user"):
-                    content = msg.get("content", "")
-                    st.markdown(
-                        f"""
-                        <div class="bubble-user">
-                          {html.escape(content)}
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
+                if role == "user":
+                    with st.chat_message("user"):
+                        content = msg.get("content", "")
+                        st.markdown(
+                            f"""
+                            <div class="bubble-user">
+                              {html.escape(content)}
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
 
-            elif role == "assistant":
-                out = msg.get("out") or {}
-                content = msg.get("content") or ""
-                used_mode = out.get("agent_mode", "")
-                
-                raw_state = get_raw_state(out)
-                tool_runs = extract_tool_runs(out, raw_state)
+                elif role == "assistant":
+                    out = msg.get("out") or {}
+                    content = msg.get("content") or ""
+                    used_mode = out.get("agent_mode", "")
+                    
+                    raw_state = get_raw_state(out)
+                    tool_runs = extract_tool_runs(out, raw_state)
 
-                # Capture Tool Logs
-                if "tool_logs" not in st.session_state:
-                    st.session_state["tool_logs"] = []
-                
-                # We check if we already logged this run to avoid dupes?
-                # Actually, in re-runs we just rebuild UI, the session_state logs persist.
-                # The logic in original file was doing append inside the loop over session_state.messages
-                # This causes DUPLICATION on every rerun! 
-                # FIX: Moving log capture to turn execution time or check existence.
-                # For faithful reproduction, I'll allow the duplication if original had it, 
-                # but it looks like original logic was flawed.
-                # I will Skip log appending here to fix the bug, assuming logs are captured at execution.
-                # Wait, original code:
-                # `if "tool_logs" not in st.session_state: st.session_state["tool_logs"] = []`
-                # `for tr in tool_runs: ... append` (inside the loop over messages)
-                # Yes, that duplicates logs on every refresh. I will Fix it by not appending here.
-                # I'll rely on execution time logging.
+                    # Badge
+                    badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
+                    
+                    with st.chat_message("assistant"):
+                        try:
+                            raw_html = markdown.markdown(content or "_(sin respuesta)_", extensions=['extra'])
+                        except:
+                            raw_html = html.escape(content or "_(sin respuesta)_").replace("\n", "<br>")
 
-                badge_html = f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>' if used_mode else ""
-                
-                with st.chat_message("assistant"):
-                    try:
-                        raw_html = markdown.markdown(content or "_(sin respuesta)_", extensions=['extra'])
-                    except:
-                        raw_html = html.escape(content or "_(sin respuesta)_").replace("\n", "<br>")
+                        st.markdown(
+                            f"""
+                            <div class="bubble-agent">
+                              <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 4px;">👤 Respuesta {badge_html} <span class="hint">id={msg.get('id')}</span></div>
+                              <div class="bubble-content">{raw_html}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        c1, c2, c3 = st.columns([1.2, 1.0, 0.8])
+                        with c1:
+                            st.caption(f"🛠 tools: {len(tool_runs)}")
+                        with c3:
+                            if st.button("🔎 Inspect", key=f"inspect_{msg.get('id')}", use_container_width=True):
+                                st.session_state.selected_msg_id = msg.get("id")
+                                st.toast(f"Inspector → id={msg.get('id')}", icon="🔎")
+                                st.rerun()
 
-                    st.markdown(
-                        f"""
-                        <div class="bubble-agent">
-                          <div style="font-size: 0.8em; opacity: 0.8; margin-bottom: 4px;">👤 Respuesta {badge_html} <span class="hint">id={msg.get('id')}</span></div>
-                          <div class="bubble-content">{raw_html}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    c1, c2, c3 = st.columns([1.2, 1.0, 0.8])
-                    with c1:
-                        st.caption(f"🛠 tools: {len(tool_runs)}")
-                    with c3:
-                        if st.button("🔎 Inspect", key=f"inspect_{msg.get('id')}", use_container_width=True):
-                            st.session_state.selected_msg_id = msg.get("id")
-                            st.toast(f"Inspector → id={msg.get('id')}", icon="🔎")
-                            st.rerun()
+        # -------- INSPECTOR (right) --------
+        with insp_col:
+            render_inspector()
 
-    # -------- INSPECTOR (right) --------
-    # -------- INSPECTOR (right) --------
-    with insp_col:
-        render_inspector()
-
-    # -------- SKILL SELECTOR (Fixed Layout) --------
+    # -------- SKILL SELECTOR (Fixed Layout - Bottom) --------
+    # This sits outside the scrollable container, effectively creating a footer
+    st.markdown("---") # Visual separator
+    
     # Helper to get skills
     skills: List[str] = []
     agent = agent_factory() # Instantiate temp agent to get registry
     if agent and agent.skill_registry:
          skills = [s.name for s in agent.skill_registry.list_skills()]
     
-    selected_skill = st.selectbox(
-        "Skill de Prueba (Forzar contexto)", 
-        ["Auto (Analyzer)"] + skills,
-        index=0,
-        key="debug_skill_selector",
-        help="Selecciona una skill específica para ver sus herramientas asociadas."
-    )
+    # Layout for Skill Selector relative to Input
+    # We use columns to constrain width if desired, or full width
+    sk_col, _ = st.columns([1, 1])
+    with sk_col:
+        selected_skill = st.selectbox(
+            "Skill de Prueba (Forzar contexto)", 
+            ["Auto (Analyzer)"] + skills,
+            index=0,
+            key="debug_skill_selector",
+            help="Selecciona una skill específica para ver sus herramientas asociadas."
+        )
     
-    # Display Active Tools for Selected Skill
-    if selected_skill != "Auto (Analyzer)" and agent.skill_registry:
-        skill_obj = agent.skill_registry.get_skill(selected_skill)
-        if skill_obj:
-            tools_str = " | ".join([f"`{t}`" for t in skill_obj.tools])
-            st.caption(f"🔧 **Tools Activas**: {tools_str}")
-            if skill_obj.knowledge:
-                 know_str = ", ".join(skill_obj.knowledge)
-                 st.caption(f"📚 **Knowledge**: {know_str}")
+        # Display Active Tools for Selected Skill
+        if selected_skill != "Auto (Analyzer)" and agent.skill_registry:
+            skill_obj = agent.skill_registry.get_skill(selected_skill)
+            if skill_obj:
+                tools_str = " | ".join([f"`{t}`" for t in skill_obj.tools])
+                st.caption(f"🔧 **Tools Activas**: {tools_str}")
+                if skill_obj.knowledge:
+                     know_str = ", ".join(skill_obj.knowledge)
+                     st.caption(f"📚 **Knowledge**: {know_str}")
 
 
     # -------- INPUT --------

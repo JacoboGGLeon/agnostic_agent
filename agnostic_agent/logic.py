@@ -713,7 +713,7 @@ def build_graph_agent(
         # Enviamos un mensaje dummy de usuario para activar la generación
         user_msg = HumanMessage(content="Analiza mi petición y genera el JSON.")
 
-        # 2. Invocar LLM
+        # 2. Invocar LLM (o Bypass si hay Forced Skill)
         selected_skills = []
         subqueries = [user_prompt]
         logic_form = "q1"
@@ -722,12 +722,30 @@ def build_graph_agent(
         forced_skill = state.get("forced_skill")
         if forced_skill and forced_skill != "Auto (Analyzer)":
              print(f"[ANALYZER] 🔒 Forced Skill active: {forced_skill}")
+             
+             # Bypass LLM invocation completely for decomposition.
+             # We assume the user's prompt is the single subquery to be solved by this skill.
              selected_skills = [forced_skill]
-             # Bypass LLM invocation for skill selection, but maybe run it for subqueries?
-             # For simplicity and speed in "Testing Mode", we can just pass the prompt as single subquery.
-             # Or we can run LLM but override the skills.
-             # Let's run LLM to get subqueries/logic_form, but OVERRIDE skills.
-             pass
+             subqueries = [user_prompt]
+             logic_form = "q1"
+             
+             # Early return structure (construction similar to end of function)
+             subqueries_logic = ["q1"]
+             analyzer = {
+                "input_payload": {"user_prompt": user_prompt},
+                "propositional_logic": logic_form,
+                "subqueries": subqueries,
+                "subqueries_logic": subqueries_logic,
+             }
+             analyzer_msg = AIMessage(
+                content=f"### ANALYZER (Forced Mode)\nSkills: {selected_skills}\nSubqueries: {subqueries}",
+                additional_kwargs={"pipeline_internal": True, "node": "analyzer"}
+             )
+             return {
+                "analyzer": analyzer,
+                "_active_skills_internal": selected_skills,
+                "messages": [analyzer_msg]
+             }
         # --------------------------
 
         try:
@@ -741,14 +759,18 @@ def build_graph_agent(
                 content = re.sub(r"```json\s*", "", content)
                 content = re.sub(r"```\s*", "", content)
             
-            data = json.loads(content.strip())
+            # Additional cleanup for Qwen sometimes returning descriptive text before JSON
+            content = content.strip()
+            if not content.startswith("{") and "{" in content:
+                 content = content[content.find("{"):]
+                 if "}" in content:
+                      content = content[:content.rfind("}")+1]
+
+            data = json.loads(content)
             
             subqueries = data.get("subqueries", [user_prompt])
             logic_form = data.get("logic_form", "q1")
-            
-            # IF NOT FORCED, use model output
-            if not forced_skill or forced_skill == "Auto (Analyzer)":
-                selected_skills = data.get("selected_skills", [])
+            selected_skills = data.get("selected_skills", [])
             
             # --- FALLBACK AGNOSTICO ---
             # Si hay KBs disponibles y el modelo no seleccionó ninguna skill (o lista vacía),
