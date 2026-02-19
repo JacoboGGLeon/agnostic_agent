@@ -30,6 +30,7 @@ def load_css():
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", file_name),
         os.path.join(os.getcwd(), "assets", file_name),
         os.path.join(os.getcwd(), "agnostic_agent", "ui", "assets", file_name),
+        "/content/assets/styles.css",
         "assets/styles.css",
     ]
     

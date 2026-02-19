@@ -59,8 +59,10 @@ def render_offline_tab(agent_factory):
         file_description = st.text_input("Descripción", placeholder="Ej: Manual 2024")
         
         DOCS_DIR = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
-        DB_PATH = os.getenv("AGNOSTIC_DB_PATH", os.path.join(os.getcwd(), "embeddings.db"))
+        DB_PATH = os.getenv("AGNOSTIC_DB_PATH", os.path.join(os.getcwd(), "session", "embeddings.db"))
+        
         os.makedirs(DOCS_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         
         if uploaded_file:
             save_path = os.path.abspath(os.path.join(DOCS_DIR, uploaded_file.name))
@@ -111,12 +113,27 @@ def render_offline_tab(agent_factory):
         if not tools_map:
              st.warning("No tools loaded in agent.")
         else:
-             tool_names = list(tools_map.keys())
-             selected_tool_name = st.selectbox("Seleccionar Herramienta", tool_names)
+             # Group tools by prefix
+             groups = {}
+             for tname, tool in tools_map.items():
+                 prefix = tname.split(".")[0] if "." in tname else "General"
+                 if prefix not in groups:
+                     groups[prefix] = []
+                 groups[prefix].append(tool)
+             
+             # Group Selector
+             selected_group = st.selectbox("Grupo", list(groups.keys()))
+             
+             tools_in_group = groups.get(selected_group, [])
+             tool_names_in_group = [t.name for t in tools_in_group]
+             
+             selected_tool_name = st.selectbox("Herramienta", tool_names_in_group)
              
              if selected_tool_name:
                  tool = tools_map[selected_tool_name]
-                 st.markdown(f"**Description:** {tool.description}")
+                 st.markdown(f"### {tool.name}")
+                 if tool.description:
+                     st.markdown(tool.description)
                  
                  # Dynamic Form for Arguments
                  st.markdown("#### Inputs")
@@ -181,7 +198,8 @@ def render_offline_tab(agent_factory):
                 for i, skill in enumerate(skills):
                     with col1 if i % 2 == 0 else col2:
                         st.markdown(f"**{skill.name}**")
-                        st.caption(skill.description)
+                        if skill.description:
+                            st.markdown(skill.description)
                         is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
                         if is_on != skill.enabled:
                             agent.skill_registry.set_enabled(skill.name, is_on)
