@@ -123,6 +123,13 @@ Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para reso
 4. SOLO usa literales del prompt del usuario o referencias `$step_id.output`.
 5. Establece dependencias.
 6. Si no hay herramientas útiles, devuelve `{"dag": []}` y deja que el modelo responda con su conocimiento general.
+
+### ESTRATEGIA DE PROCESAMIENTO INTELIGENTE (ROUTING)
+- Si el usuario pregunta por un TEMA ESPECÍFICO (ej: "¿Qué dice el documento X?", "Resumen de Y", "¿Qué es OpenAI Gym?"):
+  - **PASO 1**: LLAMA SIEMPRE a `list_knowledge_sources` para ver qué archivos hay disponibles.
+  - **PASO 2**: Identifica el archivo más relevante en el output de Paso 1.
+  - **PASO 3**: Llama a `search_knowledge_base` usando `source_filter="/ruta/al/archivo/relevante"` y el query original.
+  - ESTO ES CRÍTICO para evitar "ruido" de otros documentos irrelevantes.
 """.strip()
 
 
