@@ -11,7 +11,14 @@ from agnostic_agent.ui.panels.inspector import render_inspector
 def render_online_tab(agent_factory):
     # -------- MAIN SCROLLABLE AREA (Chat + Inspector) --------
     # Adjust height as needed. 650px allows space for the fixed footer on standard screens.
-    with st.container(height=650, border=False):
+    # -------- MAIN SCROLLABLE AREA (Chat + Inspector) --------
+    # Adjust height as needed. 650px allows space for the fixed footer on standard screens.
+    # Using a fixed height can sometimes cause layout "jumps" or double scrollbars.
+    # We will try a slightly different approach: just columns, relying on main page scroll for now
+    # if the container was causing the hang. But user explicitly asked for "partir en 2".
+    # Let's keep the container but ensure it doesn't break the event loop.
+    
+    with st.container(height=600, border=False):
         feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
 
         # -------- FEED (left) --------
