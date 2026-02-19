@@ -563,12 +563,31 @@ def judge_row_with_context(
 # ─────────────────────────────────────────────
 
 @tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
-def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def list_knowledge_sources() -> List[Dict[str, Any]]:
+    """
+    Lists all available documents/files in the knowledge base.
+    Returns metadata including filename, description, and ingestion timestamp.
+    Use this to understand what information is available before searching or to find specific documents to target.
+    """
+    from agnostic_agent.knowledge.vector import get_ingested_files
+    db_path = _resolve_vector_db_path()
+    if not os.path.exists(db_path):
+        return []
+    try:
+        return get_ingested_files(db_path)
+    except Exception as e:
+        return [{"error": f"Failed to list sources: {e}"}]
+
+
+@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
+def search_knowledge_base(query: str, top_k: int = 5, source_filter: str = None) -> List[Dict[str, Any]]:
     """
     Search for information in the knowledge base.
     
     IMPORTANT: This search returns the Global Top-K results across ALL documents.
     (e.g., if top_k=5, it returns the 5 best matching chunks from the entire database).
+    
+    Use source_filter (exact filename or path) to restrict search to a specific document found via list_knowledge_sources.
     
     Use this tool whenever the user asks about:
     - "El proyecto..." (The project...)
@@ -585,7 +604,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         return [{"warning": f"No knowledge base found at {db_path}. Please ingest documents via the Offline Manager tab."}]
         
     try:
-        results = search_db(db_path, query, top_k=top_k)
+        results = search_db(db_path, query, top_k=top_k, source_filter=source_filter)
         return results
     except Exception as e:
         return [{"error": f"Search failed: {e}"}]

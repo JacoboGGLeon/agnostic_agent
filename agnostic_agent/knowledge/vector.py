@@ -406,7 +406,7 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
     conn.close()
 
 
-def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Performs semantic search in the DB, returning the Top-K results FOR EACH document.
     """
@@ -423,15 +423,17 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     conn.enable_load_extension(False)
 
     try:
-        # GLOBAL SEARCH (Top-K across all docs)
-        # We query v_chunks directly for the top k matches globally.
+        # If filtering, we need to fetch more candidates to ensure we find enough matches
+        # after filtering.
+        fetch_k = top_k * 10 if source_filter else top_k
+        
         rows = conn.execute("""
             SELECT v.rowid, v.distance
             FROM v_chunks v
             WHERE v.embedding MATCH ?
               AND k = ?
             ORDER BY v.distance ASC;
-        """, (q_blob, top_k)).fetchall()
+        """, (q_blob, fetch_k)).fetchall()
 
         all_results = []
         
@@ -448,6 +450,16 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
             """, (row_id,)).fetchone()
             
             if meta_row:
+                s_path = meta_row[5]
+                
+                # Apply filter if requested
+                if source_filter:
+                     # Loose matching logic
+                     if not (s_path == source_filter or \
+                             s_path.endswith(f"/{source_filter}") or \
+                             s_path.endswith(f"\\{source_filter}")):
+                         continue
+                
                 all_results.append({
                     "score": sim,
                     "distance": dist,
@@ -456,8 +468,11 @@ def search_db(db_path: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
                     "page": meta_row[2],
                     "md": meta_row[3],
                     "neighbors": json.loads(meta_row[4]) if meta_row[4] else [],
-                    "source_path": meta_row[5]
+                    "source_path": s_path
                 })
+                
+                if len(all_results) >= top_k:
+                    break
 
         # Sort desc by score
         all_results.sort(key=lambda x: x["score"], reverse=True)
