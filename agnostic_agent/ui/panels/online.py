@@ -81,8 +81,35 @@ def render_online_tab(agent_factory):
                             st.rerun()
 
     # -------- INSPECTOR (right) --------
+    # -------- INSPECTOR (right) --------
     with insp_col:
         render_inspector()
+
+    # -------- SKILL SELECTOR (Fixed Layout) --------
+    # Helper to get skills
+    skills: List[str] = []
+    agent = agent_factory() # Instantiate temp agent to get registry
+    if agent and agent.skill_registry:
+         skills = [s.name for s in agent.skill_registry.list_skills()]
+    
+    selected_skill = st.selectbox(
+        "Skill de Prueba (Forzar contexto)", 
+        ["Auto (Analyzer)"] + skills,
+        index=0,
+        key="debug_skill_selector",
+        help="Selecciona una skill específica para ver sus herramientas asociadas."
+    )
+    
+    # Display Active Tools for Selected Skill
+    if selected_skill != "Auto (Analyzer)" and agent.skill_registry:
+        skill_obj = agent.skill_registry.get_skill(selected_skill)
+        if skill_obj:
+            tools_str = " | ".join([f"`{t}`" for t in skill_obj.tools])
+            st.caption(f"🔧 **Tools Activas**: {tools_str}")
+            if skill_obj.knowledge:
+                 know_str = ", ".join(skill_obj.knowledge)
+                 st.caption(f"📚 **Knowledge**: {know_str}")
+
 
     # -------- INPUT --------
     prompt = st.chat_input("Escribe tu mensaje…")

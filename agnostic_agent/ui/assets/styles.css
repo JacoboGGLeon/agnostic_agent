@@ -23,15 +23,15 @@
 }
 
 /* Hide Streamlit Header (Blue bar) but KEEP Hamburger Menu clickable */
-header[data-testid="stHeader"] {
+/* Hide Streamlit Header (Blue bar) but KEEP Hamburger Menu clickable */
+/* header[data-testid="stHeader"] {
   background: transparent !important;
-  /* Remove "visibility: hidden" so buttons work */
-}
+} */
 
 /* Hide the colored bar decoration if possible, or just accept transparent bg */
-header[data-testid="stHeader"]>div:first-child {
+/* header[data-testid="stHeader"]>div:first-child {
   background: transparent !important;
-}
+} */
 
 /* Hide "Deploy" button if desired */
 .stDeployButton {

@@ -248,11 +248,20 @@ def render_offline_tab(agent_factory):
                 for i, skill in enumerate(skills):
                     with col1 if i % 2 == 0 else col2:
                         st.markdown(f"**{skill.name}**")
+                        
+                        # Render YAML Metadata nicely
+                        if skill.description:
+                            st.caption(skill.description)
+                        
+                        if skill.tools:
+                            st.markdown(f"🛠 **Tools**: {', '.join([f'`{t}`' for t in skill.tools])}")
+                        
+                        if skill.knowledge:
+                            st.markdown(f"📚 **Knowledge**: {', '.join([f'`{k}`' for k in skill.knowledge])}")
+
                         if getattr(skill, "instructions", None):
                             with st.expander("Ver instrucciones completas", expanded=False):
                                 st.markdown(skill.instructions)
-                        elif skill.description:
-                            st.caption(skill.description)
 
                         is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
                         if is_on != skill.enabled:
