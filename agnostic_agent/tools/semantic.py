@@ -565,7 +565,7 @@ def judge_row_with_context(
 
 def _tokenize_for_source_match(text: str) -> List[str]:
     cleaned = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
-    return [tok for tok in cleaned.split() if len(tok) >= 3]
+    return [tok for tok in cleaned.split() if len(tok) >= 2]
 
 
 def _auto_select_source_filter(
@@ -612,7 +612,7 @@ def _auto_select_source_filter(
     # Confidence gate:
     # - Avoid selecting a source for generic questions.
     # - Avoid ambiguous picks if candidates are too close.
-    if best_score < 3.0:
+    if best_score < 2.0:
         return None
     if second_score >= 0 and (best_score - second_score) < 1.0 and best_score < 6.0:
         return None

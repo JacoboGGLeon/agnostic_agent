@@ -423,17 +423,36 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
     conn.enable_load_extension(False)
 
     try:
-        # If filtering, we need to fetch more candidates to ensure we find enough matches
-        # after filtering.
-        fetch_k = top_k * 10 if source_filter else top_k
-        
-        rows = conn.execute("""
-            SELECT v.rowid, v.distance
-            FROM v_chunks v
-            WHERE v.embedding MATCH ?
-              AND k = ?
-            ORDER BY v.distance ASC;
-        """, (q_blob, fetch_k)).fetchall()
+        if source_filter:
+            sf = source_filter.strip()
+            # Apply source restriction inside vector query to avoid global-topk truncation bias.
+            rows = conn.execute(
+                """
+                SELECT v.rowid, v.distance
+                FROM v_chunks v
+                JOIN chunks_meta m ON m.rowid = v.rowid
+                WHERE v.embedding MATCH ?
+                  AND k = ?
+                  AND (
+                    m.source_path = ?
+                    OR m.source_path LIKE ?
+                    OR m.source_path LIKE ?
+                  )
+                ORDER BY v.distance ASC;
+                """,
+                (q_blob, top_k, sf, f"%/{sf}", f"%\\{sf}"),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT v.rowid, v.distance
+                FROM v_chunks v
+                WHERE v.embedding MATCH ?
+                  AND k = ?
+                ORDER BY v.distance ASC;
+                """,
+                (q_blob, top_k),
+            ).fetchall()
 
         all_results = []
         
@@ -451,14 +470,6 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
             
             if meta_row:
                 s_path = meta_row[5]
-                
-                # Apply filter if requested
-                if source_filter:
-                     # Loose matching logic
-                     if not (s_path == source_filter or \
-                             s_path.endswith(f"/{source_filter}") or \
-                             s_path.endswith(f"\\{source_filter}")):
-                         continue
                 
                 all_results.append({
                     "score": sim,
