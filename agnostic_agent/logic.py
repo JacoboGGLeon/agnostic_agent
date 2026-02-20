@@ -572,6 +572,12 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
 
                 for idx, item in enumerate(output, start=1):
                     if not isinstance(item, dict):
+                        # Defensive fallback for unexpected item types.
+                        try:
+                            raw_item = json.dumps(item, ensure_ascii=False, default=_json_default)
+                        except Exception:
+                            raw_item = str(item)
+                        partes.append(f"- item {idx}: `{raw_item}`")
                         continue
                     if item.get("_meta_only"):
                         continue
@@ -581,7 +587,14 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
                     # Extract basename for cleaner display
                     src_name = os.path.basename(src_path) if src_path else "unknown object"
                     
-                    content_md = item.get("md", "").strip()
+                    raw_md = item.get("md", "")
+                    if isinstance(raw_md, str):
+                        content_md = raw_md.strip()
+                    else:
+                        try:
+                            content_md = json.dumps(raw_md, ensure_ascii=False, default=_json_default)
+                        except Exception:
+                            content_md = str(raw_md)
                     # Truncate content for display if excessively long, though usually chunks are manageable
                     # But for "Deep View" user wants to see what the agent saw.
                     
@@ -664,6 +677,20 @@ def _sanitize_subquery_text(text: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     return t.strip(" .")
+
+
+def _is_placeholder_subquery(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    placeholder_patterns = [
+        r"^q\d+$",
+        r"^subquery\s*\d+$",
+        r"^paso/?pregunta\s*\d+$",
+        r"^paso\s*\d+$",
+        r"^pregunta\s*\d+$",
+    ]
+    return any(re.match(p, t) for p in placeholder_patterns)
 
 
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -850,7 +877,20 @@ def build_graph_agent(
                  print(f"[ANALYZER] Error fallback: leaving skills empty.")
                  selected_skills = []
 
+        # Enforce explicit UI skill restrictions even on parse fallback.
+        if normalized_allowlist:
+            selected_skills = [s for s in selected_skills if s in normalized_allowlist]
+            if not selected_skills:
+                selected_skills = list(normalized_allowlist)
+            analyzer_skill_selection = {
+                "source": "allowlist",
+                "selected_skill": selected_skills[0],
+                "score": None,
+            }
+
         subqueries = [sq for sq in (_sanitize_subquery_text(s) for s in subqueries) if sq]
+        if subqueries and all(_is_placeholder_subquery(s) for s in subqueries):
+            subqueries = [_sanitize_subquery_text(user_prompt) or user_prompt]
         if not subqueries:
             subqueries = [_sanitize_subquery_text(user_prompt) or user_prompt]
         logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
