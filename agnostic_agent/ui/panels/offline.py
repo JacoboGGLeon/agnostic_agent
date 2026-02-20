@@ -141,6 +141,154 @@ def _read_md_preview(path: str, max_chars: int = 2500) -> str:
     return text
 
 
+def _sqlite_quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _sqlite_list_tables(path: str) -> List[str]:
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    rows = cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def _sqlite_table_schema(path: str, table_name: str) -> List[Dict[str, Any]]:
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    q = f"PRAGMA table_info({_sqlite_quote_ident(table_name)})"
+    rows = cur.execute(q).fetchall()
+    conn.close()
+    out: List[Dict[str, Any]] = []
+    for cid, name, col_type, notnull, default_value, pk in rows:
+        out.append(
+            {
+                "cid": cid,
+                "name": name,
+                "type": col_type,
+                "not_null": bool(notnull),
+                "default": default_value,
+                "pk": bool(pk),
+            }
+        )
+    return out
+
+
+def _sqlite_table_rows(path: str, table_name: str, limit: int, offset: int = 0) -> List[Dict[str, Any]]:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    q = (
+        f"SELECT * FROM {_sqlite_quote_ident(table_name)} "
+        f"LIMIT {int(limit)} OFFSET {int(offset)}"
+    )
+    rows = cur.execute(q).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _filter_sources_for_skill(skill_name: str, sources: List[Dict[str, Any]], active_vector_db: str) -> List[Dict[str, Any]]:
+    if skill_name == "contabilidad_instantanea":
+        out = [s for s in sources if s.get("finance_target")]
+        return out
+
+    # semantic_researcher: prefer embeddings DB + markdown docs if available.
+    out: List[Dict[str, Any]] = []
+    active_name = Path(active_vector_db).name.lower() if active_vector_db else ""
+    for s in sources:
+        name = str(s.get("name", "")).lower()
+        if s.get("kind") == "db" and (name == "embeddings.db" or name == active_name):
+            out.append(s)
+        elif s.get("kind") == "md" and not s.get("finance_target"):
+            out.append(s)
+
+    # If none found for semantic, include active vector DB as fallback pseudo-source.
+    if not any(x.get("kind") == "db" for x in out) and active_vector_db:
+        p = Path(active_vector_db)
+        if p.exists():
+            reachable, detail = _check_source_reachability(p)
+            out.insert(
+                0,
+                {
+                    "name": p.name,
+                    "kind": "db",
+                    "path": str(p.resolve()),
+                    "size_kb": round(p.stat().st_size / 1024.0, 2),
+                    "root": str(p.parent.resolve()),
+                    "reachable": reachable,
+                    "semaforo": "GREEN" if reachable else "RED",
+                    "reachability_detail": detail,
+                    "finance_target": False,
+                },
+            )
+    return out
+
+
+def _render_sqlite_viewer(db_path: str, key_prefix: str) -> None:
+    st.markdown("##### SQLite Viewer")
+    try:
+        tables = _sqlite_list_tables(db_path)
+    except Exception as exc:
+        st.error(f"No se pudo abrir la DB: {exc}")
+        return
+
+    if not tables:
+        st.info("No hay tablas visibles en esta DB.")
+        return
+
+    selected_table = st.selectbox(
+        "Tabla",
+        options=tables,
+        key=f"{key_prefix}_sqlite_table",
+    )
+
+    c1, c2 = st.columns(2)
+    limit = c1.number_input("Filas", min_value=10, max_value=1000, value=100, step=10, key=f"{key_prefix}_limit")
+    offset = c2.number_input("Offset", min_value=0, max_value=500000, value=0, step=50, key=f"{key_prefix}_offset")
+
+    try:
+        schema = _sqlite_table_schema(db_path, selected_table)
+        st.caption("Esquema")
+        st.dataframe(schema, use_container_width=True, hide_index=True)
+    except Exception as exc:
+        st.warning(f"No se pudo leer esquema de {selected_table}: {exc}")
+
+    try:
+        rows = _sqlite_table_rows(db_path, selected_table, int(limit), int(offset))
+        st.caption("Datos")
+        if rows:
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("La consulta no devolvio filas.")
+    except Exception as exc:
+        st.error(f"No se pudo leer filas de {selected_table}: {exc}")
+
+
+def _render_markdown_pretty(md_path: str, key_prefix: str) -> None:
+    st.markdown("##### Markdown Viewer")
+    max_chars = st.slider(
+        "Max chars preview",
+        min_value=1000,
+        max_value=30000,
+        value=8000,
+        step=500,
+        key=f"{key_prefix}_md_chars",
+    )
+    try:
+        md_text = _read_md_preview(md_path, max_chars=max_chars)
+    except Exception as exc:
+        st.error(f"No se pudo leer markdown: {exc}")
+        return
+
+    render_pretty = st.toggle("Render markdown pretty", value=True, key=f"{key_prefix}_md_pretty")
+    if render_pretty:
+        st.markdown(md_text)
+    with st.expander("Ver markdown raw"):
+        st.code(md_text, language="markdown")
+
+
 def render_offline_tab(agent_factory):
     agent = agent_factory()
 
@@ -236,8 +384,6 @@ def render_offline_tab(agent_factory):
             c_ok.metric("Reachable", reachable_sources)
             c_ko.metric("Unreachable", total_sources - reachable_sources)
 
-            st.dataframe(session_sources, use_container_width=True, hide_index=True)
-
             finance_map = {
                 row["name"]: row["path"]
                 for row in session_sources
@@ -254,26 +400,82 @@ def render_offline_tab(agent_factory):
                     os.environ["AGNOSTIC_FIN_DICT_MD"] = finance_map["dictionary.md"]
                 st.success("Variables AGNOSTIC_FIN_* actualizadas con fuentes detectadas y reachables.")
 
-            selected_source = st.selectbox(
-                "Inspeccionar fuente",
-                options=[row["path"] for row in session_sources],
-                format_func=lambda path: f"{Path(path).name} - {path}",
-            )
-            selected_row = next((row for row in session_sources if row["path"] == selected_source), None)
-            if selected_row and selected_row["kind"] == "db":
-                try:
-                    db_rows = _db_inspect(selected_source)
-                    if db_rows:
-                        st.dataframe(db_rows, use_container_width=True, hide_index=True)
+            km_tabs = st.tabs(["General", "semantic_researcher", "contabilidad_instantanea"])
+
+            with km_tabs[0]:
+                st.dataframe(session_sources, use_container_width=True, hide_index=True)
+
+                selected_source = st.selectbox(
+                    "Inspeccionar fuente",
+                    options=[row["path"] for row in session_sources],
+                    format_func=lambda path: f"{Path(path).name} - {path}",
+                    key="km_general_source",
+                )
+                selected_row = next((row for row in session_sources if row["path"] == selected_source), None)
+                if selected_row and selected_row["kind"] == "db":
+                    _render_sqlite_viewer(selected_source, key_prefix="km_general")
+                elif selected_row:
+                    _render_markdown_pretty(selected_source, key_prefix="km_general")
+
+            with km_tabs[1]:
+                st.markdown("##### Fuentes por skill: `semantic_researcher`")
+                semantic_sources = _filter_sources_for_skill("semantic_researcher", session_sources, db_path)
+                if semantic_sources:
+                    st.dataframe(semantic_sources, use_container_width=True, hide_index=True)
+                    sem_db_sources = [s for s in semantic_sources if s.get("kind") == "db"]
+                    sem_md_sources = [s for s in semantic_sources if s.get("kind") == "md"]
+
+                    if sem_db_sources:
+                        sem_db_path = st.selectbox(
+                            "DB para semantic_researcher",
+                            options=[s["path"] for s in sem_db_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key="km_sem_db",
+                        )
+                        _render_sqlite_viewer(sem_db_path, key_prefix="km_sem")
                     else:
-                        st.info("DB sin tablas visibles.")
-                except Exception as exc:
-                    st.error(f"No se pudo inspeccionar DB: {exc}")
-            elif selected_row:
-                try:
-                    st.code(_read_md_preview(selected_source), language="markdown")
-                except Exception as exc:
-                    st.error(f"No se pudo leer markdown: {exc}")
+                        st.info("No se detecto DB para semantic_researcher.")
+
+                    if sem_md_sources:
+                        sem_md_path = st.selectbox(
+                            "Markdown para semantic_researcher",
+                            options=[s["path"] for s in sem_md_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key="km_sem_md",
+                        )
+                        _render_markdown_pretty(sem_md_path, key_prefix="km_sem")
+                else:
+                    st.info("No se detectaron fuentes para semantic_researcher.")
+
+            with km_tabs[2]:
+                st.markdown("##### Fuentes por skill: `contabilidad_instantanea`")
+                fin_sources = _filter_sources_for_skill("contabilidad_instantanea", session_sources, db_path)
+                if fin_sources:
+                    st.dataframe(fin_sources, use_container_width=True, hide_index=True)
+                    fin_db_sources = [s for s in fin_sources if s.get("kind") == "db"]
+                    fin_md_sources = [s for s in fin_sources if s.get("kind") == "md"]
+
+                    if fin_db_sources:
+                        fin_db_path = st.selectbox(
+                            "DB para contabilidad_instantanea",
+                            options=[s["path"] for s in fin_db_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key="km_fin_db",
+                        )
+                        _render_sqlite_viewer(fin_db_path, key_prefix="km_fin")
+                    else:
+                        st.info("No se detecto DB para contabilidad_instantanea.")
+
+                    if fin_md_sources:
+                        fin_md_path = st.selectbox(
+                            "Markdown para contabilidad_instantanea",
+                            options=[s["path"] for s in fin_md_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key="km_fin_md",
+                        )
+                        _render_markdown_pretty(fin_md_path, key_prefix="km_fin")
+                else:
+                    st.info("No se detectaron fuentes para contabilidad_instantanea.")
         else:
             st.info("No se detectaron fuentes de session (.db/.md) en rutas comunes.")
 
