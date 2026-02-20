@@ -649,6 +649,52 @@ def _format_knowledge_hint(knowledge_names: List[str]) -> str:
     )
 
 
+def _skill_shortcuts_enabled() -> bool:
+    """
+    Enables deterministic, skill-specific planner/analyzer shortcuts.
+    Default is OFF to keep the agent core agnostic.
+    """
+    return os.getenv("AGNOSTIC_ENABLE_SKILL_SHORTCUTS", "0").lower() in ("1", "true", "yes", "on")
+
+
+def _extract_finance_reconcile_requests(text: str) -> List[Dict[str, str]]:
+    """
+    Extrae multiples solicitudes de conciliacion desde un bloque de texto.
+    Cada elemento retorna: credito_id, balance, subquery.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return []
+
+    loc_matches = list(re.finditer(r"\b(LOC-\d{4,})\b", raw, flags=re.IGNORECASE))
+    if not loc_matches:
+        return []
+
+    rows: List[Dict[str, str]] = []
+    for i, match in enumerate(loc_matches):
+        start = match.start()
+        end = loc_matches[i + 1].start() if i + 1 < len(loc_matches) else len(raw)
+        chunk = raw[start:end].strip().strip(".")
+
+        credito_id = match.group(1).upper()
+        balance_match = re.search(
+            r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+            chunk,
+            flags=re.IGNORECASE,
+        )
+        balance = balance_match.group(1).replace(",", "") if balance_match else ""
+
+        rows.append(
+            {
+                "credito_id": credito_id,
+                "balance": balance,
+                "subquery": chunk,
+            }
+        )
+
+    return rows
+
+
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Builder del grafo LangGraph
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -817,8 +863,17 @@ def build_graph_agent(
                 # Bypass LLM invocation completely for decomposition.
                 # We assume the user's prompt is the single subquery to be solved by these skills.
                 selected_skills = allowed
-                subqueries = [user_prompt]
-                logic_form = "q1"
+                if "contabilidad_instantanea" in selected_skills:
+                    finance_requests = _extract_finance_reconcile_requests(user_prompt)
+                    if finance_requests:
+                        subqueries = [r["subquery"] for r in finance_requests]
+                        logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
+                    else:
+                        subqueries = [user_prompt]
+                        logic_form = "q1"
+                else:
+                    subqueries = [user_prompt]
+                    logic_form = "q1"
 
                 # Early return structure (construction similar to end of function)
                 subqueries_logic = ["q1"]
@@ -879,6 +934,8 @@ def build_graph_agent(
 
             # Guardrail: finance reconciliation should default to contabilidad skill in auto mode.
             if (
+                _skill_shortcuts_enabled()
+                and
                 not selected_skills
                 and skill_registry
                 and skill_registry.get_skill("contabilidad_instantanea")
@@ -928,6 +985,13 @@ def build_graph_agent(
                     "selected_skill": selected_skills[0],
                     "score": None,
                 }
+
+            # Normalize decomposition for finance prompts with multiple credits.
+            if _skill_shortcuts_enabled() and "contabilidad_instantanea" in selected_skills:
+                finance_requests = _extract_finance_reconcile_requests(user_prompt)
+                if finance_requests:
+                    subqueries = [r["subquery"] for r in finance_requests]
+                    logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
@@ -1117,10 +1181,16 @@ def build_graph_agent(
             active_knowledge_objects = [knowledge for knowledge in knowledge_selected if knowledge.get("name") in required_knowledge_names]
         else:
             active_knowledge_objects = knowledge_selected
+        planner_scope = {
+            "skill_mode": skill_mode,
+            "active_skills": list(active_skills),
+            "allowed_tools": [t.name for t in active_tools],
+            "allowed_knowledge": [k.get("name") for k in active_knowledge_objects if isinstance(k, dict)],
+        }
 
         # Deterministic semantic planner path:
         # Force a stable RAG chain: retrieval top_k=15 -> rerank top_n=3.
-        if skill_mode and "semantic_researcher" in active_skills:
+        if _skill_shortcuts_enabled() and skill_mode and "semantic_researcher" in active_skills:
             prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
             if prompt_for_extract:
                 step1_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
@@ -1165,11 +1235,12 @@ def build_graph_agent(
                     ],
                     "llm_raw_out": deterministic_plan,
                     "llm_clean_out": deterministic_plan,
+                    "_planner_scope_internal": planner_scope,
                 }
 
         # Deterministic finance planner path:
         # If the prompt looks like a 1-a-1 credit reconciliation, avoid LLM DAG drift/hallucinations.
-        should_force_finance_plan = ("contabilidad_instantanea" in active_skills)
+        should_force_finance_plan = _skill_shortcuts_enabled() and ("contabilidad_instantanea" in active_skills)
         if not should_force_finance_plan:
             p = (state.get("user_prompt") or " ".join(subqs) or "").lower()
             if re.search(r"\bloc-\d{4,}\b", p) or any(
@@ -1179,50 +1250,70 @@ def build_graph_agent(
 
         if should_force_finance_plan:
             prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
-            credito_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", prompt_for_extract)
-            if not credito_match:
-                credito_match = re.search(r"\b(LOC-\d{4,})\b", prompt_for_extract, flags=re.IGNORECASE)
-            credito_id = credito_match.group(1).upper() if credito_match else ""
-
-            balance_match = re.search(
-                r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-                prompt_for_extract,
-                flags=re.IGNORECASE,
-            )
-            balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
-
-            if credito_id:
-                call_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
-                call_obj = {
-                    "name": "reconcile_credit_accounting",
-                    "args": {"credito_id": credito_id, "balance": balance_val},
-                    "id": call_id,
-                    "type": "tool_call",
-                }
-                deterministic_plan = (
-                    f"Subquery 1: {prompt_for_extract}\n"
-                    f"DAG:\n"
-                    f"step 1: id=step_1, tool=reconcile_credit_accounting, "
-                    f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
+            finance_requests = _extract_finance_reconcile_requests(prompt_for_extract)
+            if not finance_requests:
+                credito_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", prompt_for_extract)
+                if not credito_match:
+                    credito_match = re.search(r"\b(LOC-\d{4,})\b", prompt_for_extract, flags=re.IGNORECASE)
+                credito_id = credito_match.group(1).upper() if credito_match else ""
+                balance_match = re.search(
+                    r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+                    prompt_for_extract,
+                    flags=re.IGNORECASE,
                 )
-                ai_msg = AIMessage(
-                    content=deterministic_plan,
-                    tool_calls=[call_obj],
-                    additional_kwargs={"dag_raw": deterministic_plan},
-                )
-                return {
-                    "messages": [ai_msg],
-                    "planner_trajs": [
+                balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
+                if credito_id:
+                    finance_requests = [
+                        {"credito_id": credito_id, "balance": balance_val, "subquery": prompt_for_extract}
+                    ]
+
+            if finance_requests:
+                deterministic_tool_calls: List[Dict[str, Any]] = []
+                deterministic_trajs: List[PlannerTrajectory] = []
+                plan_lines: List[str] = []
+
+                for idx, row in enumerate(finance_requests, start=1):
+                    credito_id = row.get("credito_id", "")
+                    balance_val = row.get("balance", "")
+                    subquery_txt = row.get("subquery", prompt_for_extract)
+                    call_id = f"step_{idx}_1_{str(uuid.uuid4())[:4]}"
+                    call_obj = {
+                        "name": "reconcile_credit_accounting",
+                        "args": {"credito_id": credito_id, "balance": balance_val},
+                        "id": call_id,
+                        "type": "tool_call",
+                    }
+                    deterministic_tool_calls.append(call_obj)
+                    deterministic_trajs.append(
                         PlannerTrajectory(
-                            subquery=prompt_for_extract,
+                            subquery=subquery_txt,
                             description=(
                                 "step 1: id=step_1, tool=reconcile_credit_accounting, "
                                 f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
                             ),
                         )
-                    ],
+                    )
+                    plan_lines.append(f"Subquery {idx}: {subquery_txt}")
+                    plan_lines.append("DAG:")
+                    plan_lines.append(
+                        "step 1: id=step_1, tool=reconcile_credit_accounting, "
+                        f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
+                    )
+                    if idx < len(finance_requests):
+                        plan_lines.append("")
+
+                deterministic_plan = "\n".join(plan_lines)
+                ai_msg = AIMessage(
+                    content=deterministic_plan,
+                    tool_calls=deterministic_tool_calls,
+                    additional_kwargs={"dag_raw": deterministic_plan},
+                )
+                return {
+                    "messages": [ai_msg],
+                    "planner_trajs": deterministic_trajs,
                     "llm_raw_out": deterministic_plan,
                     "llm_clean_out": deterministic_plan,
+                    "_planner_scope_internal": planner_scope,
                 }
 
         # 2. Construir Contexto
@@ -1427,6 +1518,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             "planner_trajs": plan_trajs,
             "llm_raw_out": global_llm_raw,
             "llm_clean_out": global_llm_clean,
+            "_planner_scope_internal": planner_scope,
         }
 
     # EXECUTOR HELPERS
@@ -1652,13 +1744,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
             logic_expr = an.get("propositional_logic") or "(not built)"
             payload = an.get("input_payload") or {}
             selection = state.get("_analyzer_skill_selection") or {}
+            active_skills = state.get("_active_skills_internal") or []
             lines = [
                 f"Input payload: {_pretty_json(payload)}",
                 f"Logica proposicional: {logic_expr}",
                 f"Subconsultas ({len(subqs)}):",
+                "Rol: ANALYZER elige skill.",
             ]
             for idx, sq in enumerate(subqs, start=1):
                 lines.append(f"- q{idx} = {sq}")
+            lines.append(f"Skills activas: {active_skills if active_skills else '[]'}")
             selected_skill = selection.get("selected_skill")
             selected_score = selection.get("score")
             selected_source = selection.get("source") or "unknown"
@@ -1677,7 +1772,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
             planner_trajs = state.get("planner_trajs", []) or []
             if not planner_trajs:
                 return "Planner did not build a tool plan."
+            planner_scope = state.get("_planner_scope_internal") or {}
             out_lines: List[str] = []
+            out_lines.append("Rol: PLANNER restringe tools+knowledge.")
+            if planner_scope:
+                out_lines.append(
+                    f"Scope: skills={planner_scope.get('active_skills', [])}, "
+                    f"tools={planner_scope.get('allowed_tools', [])}, "
+                    f"knowledge={planner_scope.get('allowed_knowledge', [])}"
+                )
+                out_lines.append("")
             for i, tr in enumerate(planner_trajs, start=1):
                 out_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
                 out_lines.append("DAG:")

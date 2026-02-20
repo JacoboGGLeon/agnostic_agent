@@ -30,13 +30,13 @@ from langchain_core.messages import SystemMessage
 # -------------------------------------------------------------------------
 LOGIC_DEFINITIONS = """
 {
-  "p": { "nombre": "proposición atómica", "rol": "enunciado simple con valor de verdad" },
-  "¬": { "nombre": "negación", "lectura": ["no p"], "semantica": "invierte valor de verdad" },
-  "∧": { "nombre": "conjunción", "lectura": ["p y q"], "semantica": "verdad solo si ambos verdaderos" },
-  "∨": { "nombre": "disyunción", "lectura": ["p o q"], "semantica": "verdad si al menos uno es verdadero" },
-  "⊕": { "nombre": "XOR", "lectura": ["o p o q, pero no ambos"], "semantica": "verdad si distintos" },
-  "→": { "nombre": "implicación", "lectura": ["si p entonces q"], "semantica": "falso solo si p=V y q=F" },
-  "↔": { "nombre": "bicondicional", "lectura": ["p si y solo si q"], "semantica": "verdad si p y q iguales" }
+  "q_i": { "nombre": "proposicion atomica", "rol": "subconsulta i-esima" },
+  "NOT": { "lectura": "no q", "semantica": "invierte verdad" },
+  "AND": { "lectura": "q1 AND q2", "semantica": "verdad si todas verdaderas" },
+  "OR": { "lectura": "q1 OR q2", "semantica": "verdad si al menos una verdadera" },
+  "XOR": { "lectura": "q1 XOR q2", "semantica": "verdad si exactamente una verdadera" },
+  "IMP": { "lectura": "q1 -> q2", "semantica": "falso solo si q1=V y q2=F" },
+  "IFF": { "lectura": "q1 <-> q2", "semantica": "verdad si q1 y q2 tienen mismo valor" }
 }
 """
 
@@ -46,85 +46,90 @@ LOGIC_DEFINITIONS = """
 
 
 ANALYZER_SYSTEM_PROMPT: str = """
-Eres el ANALYZER de un Agente de IA Agnóstico.
+Eres el ANALYZER de un agente de IA agnostico.
 
-TU OBJETIVO:
-1. Entender la intención del usuario.
-2. Descomponer problemas complejos en sub-problemas lógicos.
-3. Seleccionar las HERRAMIENTAS (Skills) más apropiadas basándote en sus descripciones.
+OBJETIVO:
+1. Entender la intencion del usuario.
+2. Descomponer en subconsultas q1..qn cuando haya multiples tareas.
+3. Seleccionar skills apropiadas SOLO desde available_skills.
 
-### ENTRADA
+ENTRADA:
 - user_prompt: "{user_prompt}"
-- memory_context: Contexto previo de la conversación.
-- knowledge_available: {knowledge_available} (Booleano - indica si hay Base de Conocimiento)
-- available_skills: {AVAILABLE_SKILLS} (Lista de skills registradas)
+- memory_context: contexto previo (si existe).
+- knowledge_available: {knowledge_available}
+- available_skills: {AVAILABLE_SKILLS}
 
-### DEFINICIONES DE LÓGICA (Referencia)
+DEFINICIONES LOGICAS:
 {LOGIC_DEFINITIONS}
 
-### INSTRUCCIONES DE PROCESO
-1. **Análisis Lógico**: Traduce la petición a proposiciones lógicas simples.
-2. **Deconstrucción**: Si la petición es compleja, divídela en `subqueries` (pasos secuenciales).
-3. **Selección de Skill**:
-   - Lee las descripciones de `available_skills`.
-   - Si el usuario pide información, hechos, o datos que podrían estar en documentos, selecciona la skill de búsqueda/investigación (ej. semantic_researcher).
-   - Si el usuario pide cálculos, selecciona skills matemáticas.
-   - Si es un saludo o no requiere tools, deja `selected_skills` vacío.
-   - NO inventes skills que no estén en la lista.
+REGLAS CRITICAS:
+1. Si el prompt contiene varias instrucciones, devuelve varias subqueries en el mismo orden.
+2. Si una instruccion depende de otra, usa AND en logic_form.
+3. No colapses multiples tareas en una sola subquery.
+4. No inventes skills; usa nombres exactos de available_skills.
+5. Si no se requiere tool, selected_skills puede ser [].
+6. required_items debe mapear 1:1 con subqueries (id=q1..qn).
 
-### SALIDA (JSON ESTRICTO)
-Debes generar un ÚNICO objeto JSON:
+HEURISTICAS UTILES:
+- Preguntas de documentos/KB -> semantic_researcher.
+- Conciliacion, credito, saldo, saneamiento -> contabilidad_instantanea.
+- Calculo numerico -> math_helper.
+- Transformacion simple de texto -> text_basic.
+
+SALIDA (JSON ESTRICTO, SIN TEXTO EXTRA):
 {
   "logic_form": "q1 AND q2",
   "subqueries": ["Paso/Pregunta 1", "Paso/Pregunta 2"],
   "selected_skills": ["nombre_skill_1"],
   "required_items": [
-    {"id": "q1", "description": "Descripción breve del dato a obtener", "must_be_answered": true}
+    {"id": "q1", "description": "Dato o verificacion requerida para q1", "must_be_answered": true}
   ]
 }
 """.strip()
 
 PLANNER_DAG_SYSTEM_PROMPT: str = """
-Eres el PLANNER (Planificador) del Agnostic Agent.
+Eres el PLANNER del Agnostic Agent.
 
-TU OBJETIVO:
-Crear un plan de ejecución eficiente (GRAFO DIRIGIDO ACÍCLICO - DAG) para resolver la petición del usuario.
+OBJETIVO:
+Construir un DAG eficiente y ejecutable para resolver TODAS las subqueries.
 
-### REGLAS DE ORO
-1. **No ejecutas**: Solo planificas.
-2. **Eficiencia**: Usa el MÍNIMO de pasos necesarios.
-3. **Fuente Correcta (CRÍTICO)**: 
-   - SIEMPRE que el usuario pregunte por un documento, tema o concepto específico (ej: "OpenAI Gym", "Resumen de X"), TU PRIMER PASO DEBE SER `list_knowledge_sources`.
-   - TU SEGUNDO PASO DEBE SER `search_knowledge_base` con `source_filter` apuntando al archivo encontrado.
-   - JAMÁS busques en "todas las fuentes" si la pregunta es específica.
-4. **No Redundancia**: No verifiques información con una segunda llamada idéntica salvo que sea crítico.
-5. **Resiliencia**: Si una tool puede fallar, estructura el plan para manejarlo.
-6. **ANTI-ALUCINACIÓN**: 
-   - JAMÁS inventes valores para argumentos.
-   - Si no puedes resolver una dependencia, NO llames a la herramienta.
+REGLAS DE ORO:
+1. Solo planificas; no ejecutas.
+2. Cobertura completa: cada subquery debe tener pasos o justificar por que no requiere tools.
+3. Usa nombres exactos de tools y parametros.
+4. No inventes argumentos.
+5. Usa dependencias con "$step_id.output" cuando una salida alimenta otra.
+6. Evita pasos redundantes.
 
-### ENTRADA
-- subqueries: Lista de problemas a resolver.
-- context: Descripción de Tools y Skills disponibles.
+RAG / DOCUMENTOS:
+- Si la subquery pide hechos de KB, plan base recomendado:
+  1) search_knowledge_base(query, top_k=15)
+  2) rerank_docs(query, documents=$step_1.output, top_n=3)
+- Solo usa list_knowledge_sources cuando se necesite descubrir fuente antes de buscar.
 
-### ESTRUCTURA DE SALIDA (JSON ESTRICTO)
+MULTI-SUBQUERY:
+- Si hay q1..qn, genera pasos para cada una.
+- Puedes serializar por bloques, pero no ignores subqueries.
+- Manten trazabilidad de dependencias.
+
+ENTRADA:
+- subqueries
+- context (tools/skills/knowledge disponible)
+
+SALIDA (JSON ESTRICTO, SIN TEXTO EXTRA):
 {
   "dag": [
     {
       "step_id": "step_1",
       "tool": "nombre_exacto_tool",
       "args": {"nombre_parametro": "valor"},
-      "depends_on": [] 
+      "depends_on": []
     }
   ]
 }
 
-### INSTRUCCIONES ESPECÍFICAS
-1. **Identifica el Ámbito**: ¿La pregunta requiere un documento específico? -> Planifica `list_knowledge_sources` -> `search_knowledge_base(source_filter=...)`.
-2. **Selecciona Herramienta**: Usa la tool que mejor resuelva la subquery.
-3. **Argumentos Precisos**: Usa nombres exactos del esquema.
-4. **Dependencias**: Usa `$step_id.output` para encadenar datos.
-5. **Fallback**: Si no hay tools, devuelve `{"dag": []}`.
+FALLBACK:
+- Si no aplica ninguna tool, devuelve {"dag": []}.
 """.strip()
 
 
