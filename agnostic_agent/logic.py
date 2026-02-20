@@ -1118,6 +1118,55 @@ def build_graph_agent(
         else:
             active_knowledge_objects = knowledge_selected
 
+        # Deterministic semantic planner path:
+        # Force a stable RAG chain: retrieval top_k=15 -> rerank top_n=3.
+        if skill_mode and "semantic_researcher" in active_skills:
+            prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
+            if prompt_for_extract:
+                step1_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
+                step2_id = f"step_2_1_{str(uuid.uuid4())[:4]}"
+                step1_call = {
+                    "name": "search_knowledge_base",
+                    "args": {"query": prompt_for_extract, "top_k": 15},
+                    "id": step1_id,
+                    "type": "tool_call",
+                }
+                step2_call = {
+                    "name": "rerank_docs",
+                    "args": {"query": prompt_for_extract, "documents": f"${step1_id}.output", "top_n": 3},
+                    "id": step2_id,
+                    "type": "tool_call",
+                }
+                deterministic_plan = (
+                    f"Subquery 1: {prompt_for_extract}\n"
+                    "DAG:\n"
+                    f'step 1: id=step_1, tool=search_knowledge_base, args={{"query":"{prompt_for_extract}","top_k":15}}\n'
+                    f'step 2: id=step_2, tool=rerank_docs, args={{"query":"{prompt_for_extract}","documents":"${step1_id}.output","top_n":3}}'
+                )
+                ai_msg = AIMessage(
+                    content=deterministic_plan,
+                    tool_calls=[step1_call, step2_call],
+                    additional_kwargs={"dag_raw": deterministic_plan},
+                )
+                return {
+                    "messages": [ai_msg],
+                    "planner_trajs": [
+                        PlannerTrajectory(
+                            subquery=prompt_for_extract,
+                            description=(
+                                'step 1: id=step_1, tool=search_knowledge_base, args={"query":"'
+                                + prompt_for_extract
+                                + '","top_k":15}\n'
+                                + 'step 2: id=step_2, tool=rerank_docs, args={"query":"'
+                                + prompt_for_extract
+                                + f'","documents":"${step1_id}.output","top_n":3}}'
+                            ),
+                        )
+                    ],
+                    "llm_raw_out": deterministic_plan,
+                    "llm_clean_out": deterministic_plan,
+                }
+
         # Deterministic finance planner path:
         # If the prompt looks like a 1-a-1 credit reconciliation, avoid LLM DAG drift/hallucinations.
         should_force_finance_plan = ("contabilidad_instantanea" in active_skills)

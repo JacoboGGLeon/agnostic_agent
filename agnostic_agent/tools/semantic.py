@@ -419,7 +419,7 @@ def _format_rerank_prompts(
 
 
 @tool(mode="public")
-def rerank_docs(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
+def rerank_docs(query: str, documents: List[Any], top_n: int = 3) -> List[Dict[str, Any]]:
     """
     Usa el Reranker local (vía Transformers) para ordenar documentos por relevancia.
     Soporta lista de strings O lista de objetos (dicts) retornados por search_knowledge_base.
@@ -504,7 +504,8 @@ def rerank_docs(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
         )
 
     results.sort(key=lambda x: x["score"], reverse=True)
-    return results
+    top_n = max(1, int(top_n or 3))
+    return results[:top_n]
 
 
 # ─────────────────────────────────────────────
