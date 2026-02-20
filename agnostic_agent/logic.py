@@ -444,6 +444,83 @@ def _json_default(obj: Any) -> Any:
     return str(obj)
 
 
+def _to_jsonable(obj: Any) -> Any:
+    """
+    Convierte estructuras arbitrarias a tipos JSON-safe
+    (dict/list/str/number/bool/None) preservando forma lo mejor posible.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return [_to_jsonable(v) for v in obj]
+
+    if hasattr(obj, "model_dump"):
+        try:
+            return _to_jsonable(obj.model_dump())
+        except Exception:
+            pass
+
+    if hasattr(obj, "dict"):
+        try:
+            return _to_jsonable(obj.dict())
+        except Exception:
+            pass
+
+    if hasattr(obj, "__dict__"):
+        try:
+            return _to_jsonable(vars(obj))
+        except Exception:
+            pass
+
+    return str(obj)
+
+
+def _decode_tool_content(raw: Any) -> Any:
+    """
+    Decodifica contenido de ToolMessage con tolerancia a variantes:
+    - JSON string con {"value": ...}
+    - lista/dict ya materializado
+    - bloques de contenido con campo `text`
+    """
+    if isinstance(raw, str):
+        txt = raw.strip()
+        if not txt:
+            return ""
+        try:
+            decoded = json.loads(txt)
+            if isinstance(decoded, dict) and "value" in decoded:
+                return decoded.get("value")
+            return decoded
+        except Exception:
+            return raw
+
+    if isinstance(raw, dict):
+        return raw.get("value", raw)
+
+    if isinstance(raw, list):
+        # Algunos proveedores pueden enviar bloques [{"type":"text","text":"..."}]
+        text_blocks: List[str] = []
+        for item in raw:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                text_blocks.append(item["text"])
+        if text_blocks:
+            merged = "\n".join(text_blocks).strip()
+            try:
+                decoded = json.loads(merged)
+                if isinstance(decoded, dict) and "value" in decoded:
+                    return decoded.get("value")
+                return decoded
+            except Exception:
+                return merged
+        return raw
+
+    return raw
+
+
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # 1) Utilidades: strip_think() + aultimo assistant reala
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -561,6 +638,16 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
             if not output:
                 partes.append("_(No relevant results)_")
             else:
+                js_noise = [
+                    x for x in output
+                    if isinstance(x, str) and "[object Object]" in x
+                ]
+                if js_noise and len(js_noise) == len(output):
+                    partes.append(
+                        "_(search_knowledge_base devolvio objetos no serializados "
+                        "(`[object Object]`). Revisa el contrato de salida de tools.)_"
+                    )
+                    continue
                 if output and not any(isinstance(x, dict) for x in output):
                     try:
                         raw_dump = json.dumps(output, ensure_ascii=False, default=_json_default)
@@ -1502,7 +1589,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             try:
                 tool_obj = next(t for t in tools if t.name == name)
                 args = _repair_tool_args(tool_obj, args)
-                observation = tool_obj.invoke(args)
+                observation = _to_jsonable(tool_obj.invoke(args))
             except StopIteration:
                 observation = {"error": f"Tool '{name}' no encontrada."}
             except Exception as e:
@@ -1562,17 +1649,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
             if tm is None:
                 continue
             raw = tm.content
-            try:
-                decoded = json.loads(raw)
-                output = decoded.get("value", decoded)
-            except Exception:
-                output = raw
+            output = _decode_tool_content(raw)
             runs.append(
                 {
                     "id": tc["id"],
                     "name": tc["name"],
                     "args": tc.get("args", {}) or {},
-                    "output": output,
+                    "output": _to_jsonable(output),
                 }
             )
 

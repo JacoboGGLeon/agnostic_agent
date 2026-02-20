@@ -625,6 +625,36 @@ def _auto_select_source_filter(
     return best_name
 
 
+def _normalize_search_hit(item: Any) -> Dict[str, Any]:
+    """
+    Fuerza cada resultado de búsqueda a dict JSON-safe con claves string.
+    """
+    if isinstance(item, dict):
+        base = item
+    elif hasattr(item, "model_dump"):
+        try:
+            base = item.model_dump()
+        except Exception:
+            base = {"value": str(item)}
+    elif hasattr(item, "dict"):
+        try:
+            base = item.dict()
+        except Exception:
+            base = {"value": str(item)}
+    elif hasattr(item, "__dict__"):
+        try:
+            base = vars(item)
+        except Exception:
+            base = {"value": str(item)}
+    else:
+        return {"value": str(item)}
+
+    out: Dict[str, Any] = {}
+    for k, v in base.items():
+        out[str(k)] = v
+    return out
+
+
 @tool(mode="public")
 def list_knowledge_sources() -> List[Dict[str, Any]]:
     """
@@ -695,11 +725,13 @@ def search_knowledge_base(
 
         # Attach diagnostics in every result for Inspector / Dev trace.
         if results:
+            normalized_results: List[Dict[str, Any]] = []
             for item in results:
-                if isinstance(item, dict):
-                    item["effective_source_filter"] = selected_filter
-                    item["source_filter_origin"] = selected_origin
-            return results
+                row = _normalize_search_hit(item)
+                row["effective_source_filter"] = selected_filter
+                row["source_filter_origin"] = selected_origin
+                normalized_results.append(row)
+            return normalized_results
 
         # Keep diagnostics visible even when there are no rows.
         return [
