@@ -1285,45 +1285,75 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         subq_calls.append(call_obj)
                         all_tool_calls.append(call_obj)
 
+                # Robust fallback: if no DAG steps were parsed, try native tool_calls
+                # returned by the model binding (agnostic across providers).
+                if not subq_calls:
+                    native_calls = extract_tool_calls(response) if isinstance(response, AIMessage) else []
+                    for nc in native_calls:
+                        n_name = nc.get("name")
+                        n_args = nc.get("args", {}) or {}
+                        n_id = nc.get("id") or f"step_native_{i}_{str(uuid.uuid4())[:4]}"
+                        if not n_name:
+                            continue
+                        if skill_mode and n_name not in allowed_tool_names:
+                            print(f"[PLANNER] Native tool '{n_name}' BLOCKED (not allowed by active skill).")
+                            continue
+                        try:
+                            n_args_key = json.dumps(n_args, sort_keys=True)
+                        except Exception:
+                            n_args_key = repr(n_args)
+                        dedup_key = (n_name, n_args_key)
+                        if dedup_key in seen_calls_keys:
+                            continue
+                        seen_calls_keys.add(dedup_key)
+                        call_obj = {
+                            "name": n_name,
+                            "args": n_args,
+                            "id": n_id,
+                            "type": "tool_call",
+                        }
+                        subq_calls.append(call_obj)
+                        all_tool_calls.append(call_obj)
+
                 # Build a readable DAG summary per subquery.
                 desc_lines: List[str] = []
-                if not dag_steps:
+                if subq_calls:
+                    for step_idx, call in enumerate(subq_calls, start=1):
+                        try:
+                            call_args_txt = json.dumps(
+                                call.get("args", {}),
+                                ensure_ascii=False,
+                                default=_json_default,
+                            )
+                        except Exception:
+                            call_args_txt = repr(call.get("args", {}))
+                        desc_lines.append(
+                            f"step {step_idx}: id={call.get('id', f'step_{step_idx}')}, "
+                            f"tool={call.get('name', '(none)')}, args={call_args_txt}"
+                        )
+                    if not dag_steps:
+                        desc_lines.append("Note: se usaron native tool_calls (sin DAG JSON parseable).")
+                elif not dag_steps:
                     desc_lines.append("No DAG steps were generated for this subquery.")
                 else:
-                    if subq_calls:
-                        for step_idx, call in enumerate(subq_calls, start=1):
-                            try:
-                                call_args_txt = json.dumps(
-                                    call.get("args", {}),
-                                    ensure_ascii=False,
-                                    default=_json_default,
-                                )
-                            except Exception:
-                                call_args_txt = repr(call.get("args", {}))
-                            desc_lines.append(
-                                f"step {step_idx}: id={call.get('id', f'step_{step_idx}')}, "
-                                f"tool={call.get('name', '(none)')}, args={call_args_txt}"
+                    for step_idx, step in enumerate(dag_steps, start=1):
+                        step_id = step.get("step_id", f"step_{step_idx}")
+                        step_tool = step.get("tool", "(none)")
+                        step_args = step.get("args", {})
+                        try:
+                            step_args_txt = json.dumps(
+                                step_args,
+                                ensure_ascii=False,
+                                default=_json_default,
                             )
-                    else:
-                        for step_idx, step in enumerate(dag_steps, start=1):
-                            step_id = step.get("step_id", f"step_{step_idx}")
-                            step_tool = step.get("tool", "(none)")
-                            step_args = step.get("args", {})
-                            try:
-                                step_args_txt = json.dumps(
-                                    step_args,
-                                    ensure_ascii=False,
-                                    default=_json_default,
-                                )
-                            except Exception:
-                                step_args_txt = repr(step_args)
-                            desc_lines.append(
-                                f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
-                            )
-                        if dag_steps and not subq_calls:
-                            desc_lines.append(
-                                "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
-                            )
+                        except Exception:
+                            step_args_txt = repr(step_args)
+                        desc_lines.append(
+                            f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
+                        )
+                    desc_lines.append(
+                        "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
+                    )
                 
                 plan_trajs.append(PlannerTrajectory(
                     subquery=subq,
