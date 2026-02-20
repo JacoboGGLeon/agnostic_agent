@@ -561,6 +561,13 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
             if not output:
                 partes.append("_(No relevant results)_")
             else:
+                if output and not any(isinstance(x, dict) for x in output):
+                    try:
+                        raw_dump = json.dumps(output, ensure_ascii=False, default=_json_default)
+                    except Exception:
+                        raw_dump = str(output)
+                    partes.append(f"```json\n{raw_dump}\n```")
+                    continue
                 first = output[0] if output and isinstance(output[0], dict) else {}
                 eff_filter = first.get("effective_source_filter")
                 filt_origin = first.get("source_filter_origin")
@@ -691,6 +698,35 @@ def _is_placeholder_subquery(text: str) -> bool:
         r"^pregunta\s*\d+$",
     ]
     return any(re.match(p, t) for p in placeholder_patterns)
+
+
+def _resolve_effective_skills(
+    state: Dict[str, Any],
+    skill_registry: Any | None = None,
+) -> List[str]:
+    """
+    Fuente canónica de skills activas:
+    1) _active_skills_internal (si viene del analyzer)
+    2) skills_allowlist / forced_skill (UI)
+    """
+    active = state.get("_active_skills_internal") or []
+    if isinstance(active, list) and active:
+        return [str(s) for s in active if str(s).strip()]
+
+    forced_skill = state.get("forced_skill")
+    allow = state.get("skills_allowlist") or []
+    if forced_skill and forced_skill != "Auto (Analyzer)":
+        allow = [forced_skill]
+
+    resolved: List[str] = []
+    if isinstance(allow, list):
+        for s in allow:
+            s_name = str(s).strip()
+            if not s_name or s_name == "Auto (Analyzer)":
+                continue
+            if skill_registry is None or skill_registry.get_skill(s_name):
+                resolved.append(s_name)
+    return resolved
 
 
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -1041,8 +1077,9 @@ def build_graph_agent(
         subqs = analyzer.get("subqueries") or []
         
         # 1.1 FILTRADO ESTRICTO DE TOOLS POR SKILLS
-        # Las skills activas estan en _active_skills_internal (no en AnalyzerResult oficial)
-        active_skills = state.get("_active_skills_internal") or []
+        # Las skills activas se resuelven de forma canónica:
+        # analyzer -> allowlist/forced_skill (UI) como respaldo.
+        active_skills = _resolve_effective_skills(state, skill_registry)
         skill_mode = len(active_skills) > 0
         
         # Si hay skills activas, SOLO mostramos las tools que ellas declaran
@@ -1524,7 +1561,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             logic_expr = an.get("propositional_logic") or "(not built)"
             payload = an.get("input_payload") or {}
             selection = state.get("_analyzer_skill_selection") or {}
-            active_skills = state.get("_active_skills_internal") or []
+            active_skills = _resolve_effective_skills(state, skill_registry)
             lines = [
                 f"Input payload: {_pretty_json(payload)}",
                 f"Logica proposicional: {logic_expr}",
