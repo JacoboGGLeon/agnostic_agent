@@ -1469,31 +1469,94 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         }
                         subq_calls.append(call_obj)
                         all_tool_calls.append(call_obj)
+
+                # Minimal coverage guardrail:
+                # each subquery should map to at least one step when tools are available.
+                if not subq_calls and allowed_tool_names:
+                    subq_txt = (subq or "").strip()
+                    # 1) Semantic fallback: retrieval + optional rerank.
+                    if "search_knowledge_base" in allowed_tool_names:
+                        step1_id = f"step_1_{i}_{str(uuid.uuid4())[:4]}"
+                        search_call = {
+                            "name": "search_knowledge_base",
+                            "args": {"query": subq_txt, "top_k": 15},
+                            "id": step1_id,
+                            "type": "tool_call",
+                        }
+                        subq_calls.append(search_call)
+                        all_tool_calls.append(search_call)
+                        if "rerank_docs" in allowed_tool_names:
+                            step2_id = f"step_2_{i}_{str(uuid.uuid4())[:4]}"
+                            rerank_call = {
+                                "name": "rerank_docs",
+                                "args": {"query": subq_txt, "documents": f"${step1_id}.output", "top_n": 3},
+                                "id": step2_id,
+                                "type": "tool_call",
+                            }
+                            subq_calls.append(rerank_call)
+                            all_tool_calls.append(rerank_call)
+                    # 2) Finance fallback: one credit -> one reconcile step.
+                    elif "reconcile_credit_accounting" in allowed_tool_names:
+                        credit_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", subq_txt)
+                        if not credit_match:
+                            credit_match = re.search(r"\b(LOC-\d{4,})\b", subq_txt, flags=re.IGNORECASE)
+                        credit_id = credit_match.group(1).upper() if credit_match else ""
+                        balance_match = re.search(
+                            r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+                            subq_txt,
+                            flags=re.IGNORECASE,
+                        )
+                        balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
+                        if credit_id:
+                            step_id = f"step_1_{i}_{str(uuid.uuid4())[:4]}"
+                            finance_call = {
+                                "name": "reconcile_credit_accounting",
+                                "args": {"credito_id": credit_id, "balance": balance_val},
+                                "id": step_id,
+                                "type": "tool_call",
+                            }
+                            subq_calls.append(finance_call)
+                            all_tool_calls.append(finance_call)
                 
                 # Build a readable DAG summary per subquery.
                 desc_lines: List[str] = []
                 if not dag_steps:
                     desc_lines.append("No DAG steps were generated for this subquery.")
                 else:
-                    for step_idx, step in enumerate(dag_steps, start=1):
-                        step_id = step.get("step_id", f"step_{step_idx}")
-                        step_tool = step.get("tool", "(none)")
-                        step_args = step.get("args", {})
-                        try:
-                            step_args_txt = json.dumps(
-                                step_args,
-                                ensure_ascii=False,
-                                default=_json_default,
+                    if subq_calls:
+                        for step_idx, call in enumerate(subq_calls, start=1):
+                            try:
+                                call_args_txt = json.dumps(
+                                    call.get("args", {}),
+                                    ensure_ascii=False,
+                                    default=_json_default,
+                                )
+                            except Exception:
+                                call_args_txt = repr(call.get("args", {}))
+                            desc_lines.append(
+                                f"step {step_idx}: id={call.get('id', f'step_{step_idx}')}, "
+                                f"tool={call.get('name', '(none)')}, args={call_args_txt}"
                             )
-                        except Exception:
-                            step_args_txt = repr(step_args)
-                        desc_lines.append(
-                            f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
-                        )
-                    if dag_steps and not subq_calls:
-                        desc_lines.append(
-                            "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
-                        )
+                    else:
+                        for step_idx, step in enumerate(dag_steps, start=1):
+                            step_id = step.get("step_id", f"step_{step_idx}")
+                            step_tool = step.get("tool", "(none)")
+                            step_args = step.get("args", {})
+                            try:
+                                step_args_txt = json.dumps(
+                                    step_args,
+                                    ensure_ascii=False,
+                                    default=_json_default,
+                                )
+                            except Exception:
+                                step_args_txt = repr(step_args)
+                            desc_lines.append(
+                                f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
+                            )
+                        if dag_steps and not subq_calls:
+                            desc_lines.append(
+                                "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
+                            )
                 
                 plan_trajs.append(PlannerTrajectory(
                     subquery=subq,
