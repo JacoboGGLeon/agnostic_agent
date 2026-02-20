@@ -284,12 +284,25 @@ def reconcile_credit_accounting(credito_id: str, balance: str = "") -> Dict[str,
     """
     Concilia un credito 1-a-1 y valida saldo y saneamiento.
     """
-    _ = balance
     try:
         tx_rows = _fetch_transactions(credito_id)
         saldo_total, estatus, saneamiento_calculado = _fetch_accounting(credito_id)
     except Exception as exc:
         return {"ok": False, "credito_id": credito_id, "error": str(exc)}
+
+    input_balance_raw = (balance or "").strip()
+    input_balance = None
+    input_balance_ok = None
+    input_balance_diff = None
+    input_balance_error = None
+    if input_balance_raw:
+        try:
+            input_balance = float(input_balance_raw.replace(",", ""))
+            input_balance_diff = round(saldo_total - input_balance, 2)
+            input_balance_ok = abs(input_balance_diff) < 0.01
+        except Exception as exc:
+            input_balance_error = f"No se pudo parsear balance='{input_balance_raw}': {exc}"
+            input_balance_ok = False
 
     totals = {"DESEMBOLSO": 0.0, "PAGO": 0.0, "PENALIZACION": 0.0, "DESCUENTO": 0.0}
     for tipo, monto in tx_rows:
@@ -323,20 +336,38 @@ def reconcile_credit_accounting(credito_id: str, balance: str = "") -> Dict[str,
     reserva_esperada = round(saldo_total * tasa, 2)
     diff_reserva = round(saneamiento_calculado - reserva_esperada, 2)
     saneamiento_ok = abs(diff_reserva) < 0.01
-    status = "CUADRADO (100% Match)" if saldo_ok and saneamiento_ok else "DRIFT DETECTADO"
+    all_ok = saldo_ok and saneamiento_ok and (input_balance_ok is not False)
+    status = "CUADRADO (100% Match)" if all_ok else "DRIFT DETECTADO"
 
     return {
         "ok": True,
         "credito_id": credito_id,
         "estatus": estatus,
         "status": status,
-        "validaciones": {"saldo_ok": saldo_ok, "saneamiento_ok": saneamiento_ok},
+        "validaciones": {
+            "saldo_ok": saldo_ok,
+            "saneamiento_ok": saneamiento_ok,
+            **({"input_balance_ok": input_balance_ok} if input_balance_raw else {}),
+        },
         "flujos": totals,
         "saldo": {
             "reportado": round(saldo_total, 2),
             "esperado": round(saldo_esperado, 2),
             "diferencia": diff_saldo,
         },
+        **(
+            {
+                "input_balance": {
+                    "provided": input_balance_raw,
+                    "parsed": input_balance,
+                    "diferencia_vs_reportado": input_balance_diff,
+                    "ok": input_balance_ok,
+                    **({"error": input_balance_error} if input_balance_error else {}),
+                }
+            }
+            if input_balance_raw
+            else {}
+        ),
         "saneamiento": {
             "tasa": tasa,
             "reportado": round(saneamiento_calculado, 2),

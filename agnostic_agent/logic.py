@@ -1119,18 +1119,28 @@ def build_graph_agent(
             active_knowledge_objects = knowledge_selected
 
         # Deterministic finance planner path:
-        # When contabilidad_instantanea is active, avoid LLM DAG hallucinations.
-        if skill_mode and "contabilidad_instantanea" in active_skills:
-            import re
+        # If the prompt looks like a 1-a-1 credit reconciliation, avoid LLM DAG drift/hallucinations.
+        should_force_finance_plan = ("contabilidad_instantanea" in active_skills)
+        if not should_force_finance_plan:
+            p = (state.get("user_prompt") or " ".join(subqs) or "").lower()
+            if re.search(r"\bloc-\d{4,}\b", p) or any(
+                k in p for k in ["concili", "credito", "saldo", "saneamiento", "contabilidad"]
+            ):
+                should_force_finance_plan = True
 
+        if should_force_finance_plan:
             prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
             credito_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", prompt_for_extract)
             if not credito_match:
                 credito_match = re.search(r"\b(LOC-\d{4,})\b", prompt_for_extract, flags=re.IGNORECASE)
             credito_id = credito_match.group(1).upper() if credito_match else ""
 
-            balance_match = re.search(r"(?:saldo|balance)\s*:\s*([0-9]+(?:\.[0-9]+)?)", prompt_for_extract, flags=re.IGNORECASE)
-            balance_val = balance_match.group(1) if balance_match else ""
+            balance_match = re.search(
+                r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+                prompt_for_extract,
+                flags=re.IGNORECASE,
+            )
+            balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
 
             if credito_id:
                 call_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
