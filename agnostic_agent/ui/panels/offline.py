@@ -172,13 +172,59 @@ def render_offline_tab(agent_factory):
         if not tools_map:
             st.warning("No tools loaded in agent.")
         else:
+            def _tool_group_name(tool_obj: Any) -> str:
+                fn = getattr(tool_obj, "func", None)
+                module_name = getattr(fn, "__module__", "") if fn else ""
+                if ".tools." in module_name:
+                    return module_name.split(".tools.")[-1]
+                return "misc"
+
+            def _example_payload(tool_name: str) -> Dict[str, Any]:
+                examples: Dict[str, Dict[str, Any]] = {
+                    "is_palindrome": {"text": "Anita lava la tina"},
+                    "word_count": {"text": "OpenAI Gym es un toolkit de RL"},
+                    "to_upper": {"text": "hola mundo"},
+                    "eval_math_expression": {"expression": "(10 - 4) / 2"},
+                    "sum_numbers": {"numbers": [1, 2, 3]},
+                    "average_numbers": {"numbers": [4, 6, 8]},
+                    "search_knowledge_base": {"query": "open ai gym", "top_k": 10},
+                }
+                return examples.get(tool_name, {})
+
+            def _tool_markdown_doc(tool_obj: Any) -> str:
+                name = tool_obj.name
+                args_schema = tool_obj.args or {}
+                example = _example_payload(name)
+                input_lines = []
+                for field_name, field_def in args_schema.items():
+                    ftype = field_def.get("type", "string")
+                    input_lines.append(f"- `{field_name}`: `{ftype}`")
+                if not input_lines:
+                    input_lines.append("- _(sin parámetros)_")
+
+                output_hint = "Ver salida real de la tool."
+                if name == "is_palindrome":
+                    output_hint = "`true` si el texto es palíndromo, si no `false`."
+
+                ex = json.dumps(example, ensure_ascii=False, indent=2) if example else "{}"
+                return (
+                    "#### Test Tool\n"
+                    f"**input:**\n{chr(10).join(input_lines)}\n\n"
+                    f"**output:**\n- {output_hint}\n\n"
+                    f"**ejemplo:**\n```json\n{ex}\n```"
+                )
+
             groups: Dict[str, List[Any]] = {}
             for tname, tool in tools_map.items():
-                prefix = tname.split(".")[0] if "." in tname else "General"
-                groups.setdefault(prefix, []).append(tool)
+                gname = _tool_group_name(tool)
+                groups.setdefault(gname, []).append(tool)
 
-            selected_group = st.selectbox("Grupo", list(groups.keys()))
-            tools_in_group = groups.get(selected_group, [])
+            ordered_groups = sorted(groups.keys())
+            selected_group = st.selectbox("Grupo", ["General (Todas)"] + ordered_groups)
+            if selected_group == "General (Todas)":
+                tools_in_group = sorted(tools_map.values(), key=lambda t: t.name)
+            else:
+                tools_in_group = sorted(groups.get(selected_group, []), key=lambda t: t.name)
             selected_tool_name = st.selectbox("Herramienta", [t.name for t in tools_in_group])
 
             if selected_tool_name:
@@ -191,29 +237,40 @@ def render_offline_tab(agent_factory):
                 elif tool.description:
                     st.markdown(tool.description)
 
-                st.markdown("#### Inputs")
+                st.markdown(_tool_markdown_doc(tool))
+                st.markdown("#### Test Tool")
                 args_schema = tool.args
                 inputs: Dict[str, Any] = {}
+                example_payload = _example_payload(tool.name)
 
                 if args_schema:
                     for field_name, field_def in args_schema.items():
                         ftype = field_def.get("type", "string")
                         title = field_def.get("title", field_name)
+                        default_value = example_payload.get(field_name)
 
                         if ftype == "integer":
-                            inputs[field_name] = st.number_input(f"{title} ({field_name})", value=0, step=1)
+                            initial = int(default_value) if isinstance(default_value, (int, float)) else 0
+                            inputs[field_name] = st.number_input(f"{title} ({field_name})", value=initial, step=1)
                         elif ftype == "number":
-                            inputs[field_name] = st.number_input(f"{title} ({field_name})", value=0.0)
+                            initial = float(default_value) if isinstance(default_value, (int, float)) else 0.0
+                            inputs[field_name] = st.number_input(f"{title} ({field_name})", value=initial)
                         elif ftype == "boolean":
-                            inputs[field_name] = st.checkbox(f"{title} ({field_name})")
+                            initial = bool(default_value) if isinstance(default_value, bool) else False
+                            inputs[field_name] = st.checkbox(f"{title} ({field_name})", value=initial)
                         elif ftype == "array":
-                            val_str = st.text_area(f"{title} ({field_name}) - JSON List", value="[]")
+                            initial = default_value if isinstance(default_value, list) else []
+                            val_str = st.text_area(
+                                f"{title} ({field_name}) - JSON List",
+                                value=json.dumps(initial, ensure_ascii=False),
+                            )
                             try:
                                 inputs[field_name] = json.loads(val_str)
                             except Exception:
                                 st.error(f"Invalid JSON for {field_name}")
                         else:
-                            inputs[field_name] = st.text_input(f"{title} ({field_name})")
+                            initial = str(default_value) if default_value is not None else ""
+                            inputs[field_name] = st.text_input(f"{title} ({field_name})", value=initial)
 
                 if st.button(f"Ejecutar {selected_tool_name}", type="primary"):
                     try:

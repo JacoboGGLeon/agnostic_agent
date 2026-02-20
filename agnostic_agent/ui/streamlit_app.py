@@ -98,6 +98,8 @@ if "selected_msg_id" not in st.session_state:
     st.session_state.selected_msg_id = None
 if "export_json" not in st.session_state:
     st.session_state.export_json = None
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "dark"
 
 # Init Plugin Manager
 if "plugin_manager" not in st.session_state:
@@ -147,6 +149,47 @@ def get_or_init_agent() -> Agent:
 
 # 1. Sidebar
 render_sidebar()
+
+# 1.1 Dynamic theme override
+if st.session_state.get("theme_mode", "dark") == "light":
+    st.markdown(
+        """
+<style>
+.stApp {
+  background: #f7f9fc !important;
+  color: #0d1b2a !important;
+}
+section[data-testid="stSidebar"] {
+  background: #ffffff !important;
+  border-right: 1px solid #d7dce3 !important;
+}
+.topbar {
+  background: #ffffff !important;
+  border-color: #d7dce3 !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,.08) !important;
+}
+.title, .subtitle, .badge {
+  color: #0d1b2a !important;
+}
+.bubble-user {
+  border-color: rgba(96, 61, 186, .45) !important;
+  background: linear-gradient(180deg, rgba(96, 61, 186, .12), rgba(255, 255, 255, .8)) !important;
+  color: #2f1c58 !important;
+}
+.bubble-agent {
+  border-color: rgba(237, 139, 0, .6) !important;
+  background: linear-gradient(180deg, rgba(237, 139, 0, .14), rgba(255, 255, 255, .9)) !important;
+  color: #4a2c00 !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  background: #ffffff !important;
+  border-color: #d7dce3 !important;
+  box-shadow: 0 8px 26px rgba(0,0,0,.08) !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
 # 2. Topbar
 st.markdown('<div class="topbar-offset"></div>', unsafe_allow_html=True)
