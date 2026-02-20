@@ -1325,7 +1325,6 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 
                 # Limpieza JSON
                 if "```" in content_cleaned:
-                    import re
                     content_cleaned = re.sub(r"```json\s*", "", content_cleaned)
                     content_cleaned = re.sub(r"```\s*", "", content_cleaned)
                 
