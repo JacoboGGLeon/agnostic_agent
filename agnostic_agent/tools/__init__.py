@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Importamos los módulos de tools explícitamente para llenar el registro
 # Usamos imports relativos para evitar circularidad si se importara agnostic_agent.tools antes
-from . import basic, math, semantic
+from . import basic, math, semantic, finance
 
 # Construimos el registro global agregando las tools de cada submódulo
 TOOL_REGISTRY: Dict[str, Any] = {}
@@ -34,6 +34,7 @@ def _register_module_tools(module):
 _register_module_tools(basic)
 _register_module_tools(math)
 _register_module_tools(semantic)
+_register_module_tools(finance)
 
 # Re-exportamos funciones clave para compatibilidad hacia atrás si alguien importaba directamente
 # (Aunque lo ideal es usar el registro)
@@ -50,6 +51,10 @@ embed_context_tables = semantic.embed_context_tables
 rerank_docs = semantic.rerank_docs
 judge_row_with_context = semantic.judge_row_with_context
 search_knowledge_base = semantic.search_knowledge_base
+query_transactions_db = finance.query_transactions_db
+query_accounting_db = finance.query_accounting_db
+get_saneamiento_rate = finance.get_saneamiento_rate
+reconcile_credit_accounting = finance.reconcile_credit_accounting
 
 
 def get_default_tools(enabled_names: List[str] | None = None) -> List[Any]:
