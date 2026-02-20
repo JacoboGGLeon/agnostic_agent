@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """
 Logica principal (grafo LangGraph) del Agnostic Deep Agent.
@@ -448,23 +448,20 @@ def _json_default(obj: Any) -> Any:
 # 1) Utilidades: strip_think() + aultimo assistant reala
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-# Regex mejorada: maneja cierre opcional (si el LLM se corta) y case-insensitve
-# (->s) = dot matches newline
-# <think>.*-> = contenido non-greedy
-# (->:</think>|$) = termina en cierre o fin de string
-_THINK_RE = re.compile(r"(->s)<think>.*->(->:</think>|$)\s*", flags=re.IGNORECASE)
+# Regex robusta: soporta cierre opcional (si el LLM se corta) y multilinea.
+_THINK_RE = re.compile(r"(?is)<think>.*?(?:</think>|$)\s*")
 
 def strip_think(txt: str) -> str:
     """Elimina <think>...</think> (o hasta fin de string) de forma robusta."""
     if not isinstance(txt, str):
         return ""
-    # 1. Intentar eliminar bloques completos o truncados
+    # 1. Intentar eliminar bloques completos o truncados.
     cleaned = _THINK_RE.sub("", txt).strip()
     
     # 2. Defensa en profundidad: Si limpiamos todo y queda vacio,
     # significa que el modelo solo pensA3 y no respondiA3.
     if not cleaned and txt.strip():
-        # Retornamos vacio para que el fallback del Summarizer ("AQuA te gustarAa hacer->") actAoe.
+        # Retornamos vacio para que el fallback del Summarizer se active.
         return ""
         
     return cleaned
@@ -706,12 +703,68 @@ def build_graph_agent(
         # Ajustemos para pasarle las skills disponibles si el prompt lo requiere implicitamente
         # o agreguAmoslo al user message.
         
-        # Para ser robustos, listamos las skills y las pegamos en el prompt si hay placeholder,
-        # o simplemente las agregamos al final del system prompt.
-        available_skills_txt = ""
-        if skill_registry:
-            s_list = [f"- {s.name}: {s.description}" for s in skill_registry.list_skills()]
-            available_skills_txt = "\n".join(s_list)
+        def _instruction_summary(instructions: str, max_len: int = 260) -> str:
+            if not instructions:
+                return ""
+            lines: List[str] = []
+            for ln in instructions.splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                if ln.startswith("#"):
+                    continue
+                lines.append(ln)
+                if len(" ".join(lines)) >= max_len:
+                    break
+            txt = " ".join(lines)
+            return (txt[:max_len] + "...") if len(txt) > max_len else txt
+
+        def _build_skills_catalog() -> List[Dict[str, Any]]:
+            if not skill_registry:
+                return []
+            catalog: List[Dict[str, Any]] = []
+            for s in skill_registry.list_skills():
+                catalog.append(
+                    {
+                        "name": s.name,
+                        "description": s.description or "",
+                        "tools": list(s.tools or []),
+                        "knowledge": list(s.knowledge or []),
+                        "summary": _instruction_summary(getattr(s, "instructions", "")),
+                    }
+                )
+            return catalog
+
+        def _score_skills_with_scores(prompt: str, catalog: List[Dict[str, Any]]) -> List[Tuple[str, int]]:
+            p = (prompt or "").lower()
+            scored: List[Tuple[int, str]] = []
+            for item in catalog:
+                name = str(item.get("name", "")).lower()
+                desc = str(item.get("description", "")).lower()
+                tools_txt = " ".join(item.get("tools") or []).lower()
+                summ = str(item.get("summary", "")).lower()
+                text = f"{name} {desc} {tools_txt} {summ}"
+                score = 0
+
+                for tok in re.findall(r"[a-z0-9_]{4,}", p):
+                    if tok in text:
+                        score += 1
+
+                if name == "contabilidad_instantanea" and any(k in p for k in ["credito", "concili", "saldo", "saneamiento", "desembols"]):
+                    score += 6
+                if name == "semantic_researcher" and any(k in p for k in ["document", "fuente", "segun", "investiga", "buscar", "knowledge", "pdf"]):
+                    score += 5
+                if name == "math_helper" and any(k in p for k in ["sum", "promedio", "calcula", "ecuacion", "operacion"]):
+                    score += 5
+                if name == "text_basic" and any(k in p for k in ["mayus", "palind", "contar palabras", "word count"]):
+                    score += 5
+
+                scored.append((score, item.get("name", "")))
+            scored.sort(reverse=True)
+            return [(name, score) for score, name in scored if score > 0]
+
+        skills_catalog = _build_skills_catalog()
+        available_skills_txt = json.dumps(skills_catalog, ensure_ascii=False, indent=2) if skills_catalog else "[]"
         
         # Renderizar prompt
         # El prompt nuevo tiene {user_prompt}, {knowledge_available}, {knowledge_names} y {LOGIC_DEFINITIONS}
@@ -721,8 +774,8 @@ def build_graph_agent(
                                           .replace("{LOGIC_DEFINITIONS}", LOGIC_DEFINITIONS) \
                                           .replace("{AVAILABLE_SKILLS}", available_skills_txt or "[]")
         
-        if available_skills_txt:
-            sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"
+        if skills_catalog:
+            sys_content += f"\n\nSKILLS DISPONIBLES (CATALOGO ESTRUCTURADO):\n{available_skills_txt}"
             
         # Refuerzo para latencia: si el usuario desactivA3 el pensamiento
         if cfg and not cfg.enable_thinking:
@@ -734,6 +787,11 @@ def build_graph_agent(
 
         # 2. Invocar LLM (o Bypass si hay Forced Skill)
         selected_skills = []
+        analyzer_skill_selection: Dict[str, Any] = {
+            "source": "llm",
+            "selected_skill": None,
+            "score": None,
+        }
         subqueries = [user_prompt]
         logic_form = "q1"
         
@@ -770,6 +828,11 @@ def build_graph_agent(
                     "subqueries": subqueries,
                     "subqueries_logic": subqueries_logic,
                 }
+                analyzer_skill_selection = {
+                    "source": "allowlist",
+                    "selected_skill": selected_skills[0] if selected_skills else None,
+                    "score": None,
+                }
                 analyzer_msg = AIMessage(
                     content=f"### ANALYZER (Allowlist Mode)\nSkills: {selected_skills}\nSubqueries: {subqueries}",
                     additional_kwargs={"pipeline_internal": True, "node": "analyzer"},
@@ -777,9 +840,18 @@ def build_graph_agent(
                 return {
                     "analyzer": analyzer,
                     "_active_skills_internal": selected_skills,
+                    "_analyzer_skill_selection": analyzer_skill_selection,
                     "messages": [analyzer_msg],
                 }
         # --------------------------
+
+        def _looks_like_finance_reconcile(prompt: str) -> bool:
+            import re
+            p = (prompt or "").lower()
+            if re.search(r"\bloc-\d{4,}\b", p):
+                return True
+            keywords = ["concili", "credito", "saldo", "saneamiento", "desembolsado", "contabilidad"]
+            return any(k in p for k in keywords)
 
         try:
             response = planner_llm.invoke([sys_msg, user_msg])
@@ -804,17 +876,58 @@ def build_graph_agent(
             subqueries = data.get("subqueries", [user_prompt])
             logic_form = data.get("logic_form", "q1")
             selected_skills = data.get("selected_skills", [])
+
+            # Guardrail: finance reconciliation should default to contabilidad skill in auto mode.
+            if (
+                not selected_skills
+                and skill_registry
+                and skill_registry.get_skill("contabilidad_instantanea")
+                and _looks_like_finance_reconcile(user_prompt)
+            ):
+                selected_skills = ["contabilidad_instantanea"]
+                subqueries = [user_prompt]
+                logic_form = "q1"
+                analyzer_skill_selection = {
+                    "source": "finance_guardrail",
+                    "selected_skill": "contabilidad_instantanea",
+                    "score": 999,
+                }
             
             # --- FALLBACK (skills-first, pero no siempre RAG) ---
             # Si el modelo no eligiA3 skill, forzamos una skill segura de soporte:
             # - `capabilities_menu`: muestra el menu de capacidades para que el usuario elija.
             if not selected_skills:
+                ranked = _score_skills_with_scores(user_prompt, skills_catalog)
+                if ranked:
+                    selected_skills = [ranked[0][0]]
+                    analyzer_skill_selection = {
+                        "source": "catalog",
+                        "selected_skill": ranked[0][0],
+                        "score": ranked[0][1],
+                    }
+            if not selected_skills:
                 if skill_registry and skill_registry.get_skill("capabilities_menu"):
                      selected_skills = ["capabilities_menu"]
+                     analyzer_skill_selection = {
+                         "source": "fallback_menu",
+                         "selected_skill": "capabilities_menu",
+                         "score": 0,
+                     }
                 elif knowledge_available and skill_registry and skill_registry.get_skill("semantic_researcher"):
                      # Si no existe la skill de menu, preferimos una skill restrictiva cuando hay KB.
                      selected_skills = ["semantic_researcher"]
+                     analyzer_skill_selection = {
+                         "source": "fallback_kb",
+                         "selected_skill": "semantic_researcher",
+                         "score": 0,
+                     }
             # -----------------------------------------------
+            elif selected_skills and analyzer_skill_selection.get("selected_skill") is None:
+                analyzer_skill_selection = {
+                    "source": "llm",
+                    "selected_skill": selected_skills[0],
+                    "score": None,
+                }
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
@@ -849,6 +962,7 @@ def build_graph_agent(
         return {
             "analyzer": analyzer,
             "_active_skills_internal": selected_skills,
+            "_analyzer_skill_selection": analyzer_skill_selection,
             "messages": [analyzer_msg]
         }
 
@@ -1004,6 +1118,54 @@ def build_graph_agent(
         else:
             active_knowledge_objects = knowledge_selected
 
+        # Deterministic finance planner path:
+        # When contabilidad_instantanea is active, avoid LLM DAG hallucinations.
+        if skill_mode and "contabilidad_instantanea" in active_skills:
+            import re
+
+            prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
+            credito_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", prompt_for_extract)
+            if not credito_match:
+                credito_match = re.search(r"\b(LOC-\d{4,})\b", prompt_for_extract, flags=re.IGNORECASE)
+            credito_id = credito_match.group(1).upper() if credito_match else ""
+
+            balance_match = re.search(r"(?:saldo|balance)\s*:\s*([0-9]+(?:\.[0-9]+)?)", prompt_for_extract, flags=re.IGNORECASE)
+            balance_val = balance_match.group(1) if balance_match else ""
+
+            if credito_id:
+                call_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
+                call_obj = {
+                    "name": "reconcile_credit_accounting",
+                    "args": {"credito_id": credito_id, "balance": balance_val},
+                    "id": call_id,
+                    "type": "tool_call",
+                }
+                deterministic_plan = (
+                    f"Subquery 1: {prompt_for_extract}\n"
+                    f"DAG:\n"
+                    f"step 1: id=step_1, tool=reconcile_credit_accounting, "
+                    f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
+                )
+                ai_msg = AIMessage(
+                    content=deterministic_plan,
+                    tool_calls=[call_obj],
+                    additional_kwargs={"dag_raw": deterministic_plan},
+                )
+                return {
+                    "messages": [ai_msg],
+                    "planner_trajs": [
+                        PlannerTrajectory(
+                            subquery=prompt_for_extract,
+                            description=(
+                                "step 1: id=step_1, tool=reconcile_credit_accounting, "
+                                f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
+                            ),
+                        )
+                    ],
+                    "llm_raw_out": deterministic_plan,
+                    "llm_clean_out": deterministic_plan,
+                }
+
         # 2. Construir Contexto
         # Pasamos active_skills para excluirlas del contexto (evitar recursiA3n)
         rich_context_text = _format_rich_context(
@@ -1129,7 +1291,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     t_args = step.get("args", {})
                     # RE-GENERATE ID to ensure uniqueness across consolidated subqueries
                     # The LLM often restarts at "step_1" for each subquery.
-                    original_id = step.get("step_id") or "step_->"
+                    original_id = step.get("step_id") or "step_?"
                     t_id = f"{original_id}_{i}_{str(uuid.uuid4())[:4]}"
                     
                     if t_name:
@@ -1431,6 +1593,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             subqs = an.get("subqueries") or []
             logic_expr = an.get("propositional_logic") or "(not built)"
             payload = an.get("input_payload") or {}
+            selection = state.get("_analyzer_skill_selection") or {}
             lines = [
                 f"Input payload: {_pretty_json(payload)}",
                 f"Logica proposicional: {logic_expr}",
@@ -1438,6 +1601,18 @@ Genera el DAG exclusivo para resolver: "{subq}"
             ]
             for idx, sq in enumerate(subqs, start=1):
                 lines.append(f"- q{idx} = {sq}")
+            selected_skill = selection.get("selected_skill")
+            selected_score = selection.get("score")
+            selected_source = selection.get("source") or "unknown"
+            if selected_skill:
+                if selected_score is None:
+                    lines.append(
+                        f"Skill seleccionada: {selected_skill} (score n/a, origen={selected_source})"
+                    )
+                else:
+                    lines.append(
+                        f"Skill seleccionada: {selected_skill} (score {selected_score}, origen={selected_source})"
+                    )
             return "\n".join(lines)
 
         def _build_planner_text() -> str:
@@ -1454,7 +1629,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 else:
                     for raw_line in raw_desc.splitlines():
                         line = raw_line.strip()
-                        out_lines.append(line if line.startswith("step ") else f"step ->: {line}")
+                        out_lines.append(line if line.startswith("step ") else f"step ?: {line}")
                 if i < len(planner_trajs):
                     out_lines.append("")
             return "\n".join(out_lines)
@@ -1485,11 +1660,46 @@ Genera el DAG exclusivo para resolver: "{subq}"
         def _normalize_text(s: str) -> str:
             if not isinstance(s, str):
                 return s
-            import unicodedata
-            out = s.replace("→", "->")
-            # Keep rendered output plain ASCII to avoid mojibake in non-UTF8 terminals/UIs.
-            out = unicodedata.normalize("NFKD", out).encode("ascii", "ignore").decode("ascii")
+            out = s
+            replacements = {
+                "â†’": "->",
+                "Ã¡": "á",
+                "Ã©": "é",
+                "Ã­": "í",
+                "Ã³": "ó",
+                "Ãº": "ú",
+                "Ã±": "ñ",
+                "Ã": "Á",
+                "Ã‰": "É",
+                "Ã": "Í",
+                "Ã“": "Ó",
+                "Ãš": "Ú",
+                "Ã‘": "Ñ",
+                "ðŸ“Œ": "[PIN]",
+                "ðŸ”": "[SEARCH]",
+            }
+            for bad, good in replacements.items():
+                out = out.replace(bad, good)
             return out
+
+        def _build_pipeline_markdown(title: str, final_heading: str) -> str:
+            return "\n\n".join(
+                [
+                    f"## {title}",
+                    "### ANALYZER",
+                    f"```text\n{analyzer_text}\n```",
+                    "### PLANNER",
+                    f"```text\n{planner_text}\n```",
+                    "### EXECUTOR",
+                    f"```text\n{executor_text}\n```",
+                    "### CATCHER",
+                    f"```text\n{catcher_text}\n```",
+                    "### SUMMARIZER (basado en herramientas)",
+                    f"```text\n{summarizer_text}\n```",
+                    final_heading,
+                    user_answer,
+                ]
+            )
 
         # Capabilities menu mode (support skill): respond with a deterministic menu.
         active_skills = state.get("_active_skills_internal") or []
@@ -1579,22 +1789,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 final_answer=user_answer,
             )
 
-            answer_markdown = "\n\n".join(
-                [
-                    "## Resumen del pipeline",
-                    "### ANALYZER",
-                    analyzer_text,
-                    "### PLANNER",
-                    planner_text,
-                    "### EXECUTOR",
-                    executor_text,
-                    "### CATCHER",
-                    catcher_text,
-                    "### SUMMARIZER (basado en herramientas)",
-                    summarizer_text,
-                    "### RESPUESTA FINAL (modo usuario)",
-                    user_answer,
-                ]
+            answer_markdown = _build_pipeline_markdown(
+                "Resumen del pipeline",
+                "### RESPUESTA FINAL (modo usuario)",
             )
 
             final_ai = AIMessage(
@@ -1603,22 +1800,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
             )
 
             dev_out = answer_markdown
-            deep_out = "\n\n".join(
-                [
-                    "## Resumen deep del pipeline",
-                    "### ANALYZER",
-                    analyzer_text,
-                    "### PLANNER",
-                    planner_text,
-                    "### EXECUTOR",
-                    executor_text,
-                    "### CATCHER",
-                    catcher_text,
-                    "### SUMMARIZER",
-                    summarizer_text,
-                    "### RESPUESTA FINAL",
-                    user_answer,
-                ]
+            deep_out = _build_pipeline_markdown(
+                "Resumen deep del pipeline",
+                "### RESPUESTA FINAL",
             )
 
             return {
@@ -1686,7 +1870,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         "Ver pestana 'Thinking' en el Inspector)_"
                     )
                 else:
-                    user_answer = llm_clean or "Que te gustaria hacer->"
+                    user_answer = llm_clean or "Que te gustaria hacer?"
 
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
@@ -1762,7 +1946,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 
                 # 1. Intentar extrar <think> del contenido (Texto crudo)
                 import re
-                think_pattern = re.compile(r"<think>(.*->)</think>", re.DOTALL)
+                think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
                 match = think_pattern.search(user_answer)
                 
                 reasoning_from_final = ""
@@ -1824,22 +2008,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
         user_answer = _normalize_text(user_answer)
 
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
-        sections = [
-            "## Resumen del pipeline",
-            "### ANALYZER",
-            analyzer_text,
-            "### PLANNER",
-            planner_text,
-            "### EXECUTOR",
-            executor_text,
-            "### CATCHER",
-            catcher_text,
-            "### SUMMARIZER (basado en herramientas)",
-            summarizer_text,
+        answer_markdown = _build_pipeline_markdown(
+            "Resumen del pipeline",
             "### RESPUESTA FINAL (modo usuario)",
-            user_answer,
-        ]
-        answer_markdown = "\n\n".join(sections)
+        )
 
         final_ai = AIMessage(
             content=answer_markdown,
@@ -1848,21 +2020,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         # AdemAs rellenamos dev_out / deep_out / user_out:
         dev_out = answer_markdown
-        deep_out = "\n\n".join([
-            "## Resumen deep del pipeline",
-            "### ANALYZER",
-            analyzer_text,
-            "### PLANNER",
-            planner_text,
-            "### EXECUTOR",
-            executor_text,
-            "### CATCHER",
-            catcher_text,
-            "### SUMMARIZER",
-            summarizer_text,
+        deep_out = _build_pipeline_markdown(
+            "Resumen deep del pipeline",
             "### RESPUESTA FINAL",
-            user_answer,
-        ])
+        )
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         # AGNOSTIC FIX: Strip <think> tags from user_out
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
