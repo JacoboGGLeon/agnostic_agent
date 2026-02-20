@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import unicodedata
@@ -20,8 +21,6 @@ def _default_finance_dir() -> Path:
 
 
 def _transactions_db_path() -> Path:
-    import os
-
     return Path(
         os.getenv(
             "AGNOSTIC_FIN_TRANS_DB",
@@ -31,8 +30,6 @@ def _transactions_db_path() -> Path:
 
 
 def _accounting_db_path() -> Path:
-    import os
-
     return Path(
         os.getenv(
             "AGNOSTIC_FIN_ACC_DB",
@@ -41,11 +38,28 @@ def _accounting_db_path() -> Path:
     )
 
 
+def _rules_md_path() -> Path:
+    return Path(
+        os.getenv(
+            "AGNOSTIC_FIN_RULES_MD",
+            str(_default_finance_dir() / "knowledge" / "rules.md"),
+        )
+    )
+
+
+def _dictionary_md_path() -> Path:
+    return Path(
+        os.getenv(
+            "AGNOSTIC_FIN_DICT_MD",
+            str(_default_finance_dir() / "knowledge" / "dictionary.md"),
+        )
+    )
+
+
 def _is_read_only_sql(query: str) -> bool:
     q = (query or "").strip().lower()
     if not q:
         return False
-    # Keep tool strictly read-only.
     if not q.startswith("select"):
         return False
     forbidden = ("insert ", "update ", "delete ", "drop ", "alter ", "create ", "pragma ")
@@ -94,11 +108,12 @@ def _normalize_text(value: str) -> str:
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.lower().strip()
     text = text.replace("–", "-")
+    text = text.replace("—", "-")
     text = re.sub(r"\s+", " ", text)
     return text
 
 
-_SANEAMIENTO_RATES: Dict[str, float] = {
+_SANEAMIENTO_RATES_DEFAULT: Dict[str, float] = {
     "desembolsado": 0.01,
     "vigente / al corriente": 0.01,
     "mora temprana (1-30 dias)": 0.05,
@@ -110,26 +125,122 @@ _SANEAMIENTO_RATES: Dict[str, float] = {
     "liquidado / cerrado": 0.00,
 }
 
+# Cache: evita parsear markdown en cada llamada.
+_RULES_CACHE: Dict[str, Any] = {"path": None, "mtime": None, "rates": None}
+
+
+def _strict_rules_mode() -> bool:
+    return os.getenv("AGNOSTIC_FIN_STRICT_RULES", "0").lower() in ("1", "true", "yes", "on")
+
+
+def _parse_percent_to_rate(raw: str) -> float | None:
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", raw or "")
+    if not match:
+        return None
+    return float(match.group(1)) / 100.0
+
+
+def _load_rates_from_rules_md(path: Path) -> Dict[str, float]:
+    if not path.exists():
+        return {}
+
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    rates: Dict[str, float] = {}
+
+    for line in content.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        if "Estatus" in line:
+            continue
+        if re.fullmatch(r"\|[-\s|:]+\|?", line):
+            continue
+
+        parts = [p.strip() for p in line.strip("|").split("|")]
+        if len(parts) < 3:
+            continue
+
+        estatus = parts[0]
+        rate = _parse_percent_to_rate(parts[2])
+        if rate is None:
+            continue
+
+        rates[_normalize_text(estatus)] = rate
+
+    return rates
+
+
+def _get_runtime_rates() -> Dict[str, float]:
+    rules_path = _rules_md_path()
+    mtime = rules_path.stat().st_mtime if rules_path.exists() else None
+
+    if (
+        _RULES_CACHE.get("path") == str(rules_path)
+        and _RULES_CACHE.get("mtime") == mtime
+        and isinstance(_RULES_CACHE.get("rates"), dict)
+    ):
+        return _RULES_CACHE["rates"]
+
+    parsed = _load_rates_from_rules_md(rules_path)
+    if not parsed and not _strict_rules_mode():
+        parsed = dict(_SANEAMIENTO_RATES_DEFAULT)
+
+    _RULES_CACHE["path"] = str(rules_path)
+    _RULES_CACHE["mtime"] = mtime
+    _RULES_CACHE["rates"] = parsed
+    return parsed
+
+
+@tool(mode="public")
+def finance_sources_status() -> Dict[str, Any]:
+    """
+    Reporta estado de fuentes financieras (DBs + markdown de reglas/diccionario).
+    """
+    paths = {
+        "transactions_db": _transactions_db_path(),
+        "accounting_db": _accounting_db_path(),
+        "rules_md": _rules_md_path(),
+        "dictionary_md": _dictionary_md_path(),
+    }
+    rates = _get_runtime_rates()
+    return {
+        "paths": {name: str(path) for name, path in paths.items()},
+        "exists": {name: path.exists() for name, path in paths.items()},
+        "rules_loaded_count": len(rates),
+        "rules_source": "rules.md" if _rules_md_path().exists() and rates else "fallback_default",
+        "strict_rules_mode": _strict_rules_mode(),
+    }
+
 
 @tool(mode="public")
 def get_saneamiento_rate(estatus: str) -> Dict[str, Any]:
     """
     Devuelve la tasa de saneamiento esperada para un estatus crediticio.
+    Intenta primero desde rules.md; usa fallback hardcoded si no hay reglas parseables.
     """
+    rates = _get_runtime_rates()
     key = _normalize_text(estatus)
-    rate = _SANEAMIENTO_RATES.get(key)
+    rate = rates.get(key)
+
     if rate is None:
         return {
             "found": False,
             "estatus": estatus,
             "estatus_normalized": key,
-            "known_statuses": sorted(_SANEAMIENTO_RATES.keys()),
+            "known_statuses": sorted(rates.keys()),
+            "rules_path": str(_rules_md_path()),
+            "dictionary_path": str(_dictionary_md_path()),
+            "strict_rules_mode": _strict_rules_mode(),
         }
+
     return {
         "found": True,
         "estatus": estatus,
         "estatus_normalized": key,
         "tasa_saneamiento": rate,
+        "rules_path": str(_rules_md_path()),
+        "dictionary_path": str(_dictionary_md_path()),
+        "strict_rules_mode": _strict_rules_mode(),
     }
 
 
@@ -201,7 +312,21 @@ def reconcile_credit_accounting(credito_id: str) -> Dict[str, Any]:
     if isinstance(rate_info, dict) and rate_info.get("found"):
         tasa = float(rate_info["tasa_saneamiento"])
     else:
+        if _strict_rules_mode():
+            return {
+                "ok": False,
+                "credito_id": credito_id,
+                "error": (
+                    "No fue posible resolver la tasa de saneamiento desde rules.md "
+                    f"para estatus='{estatus}' en modo estricto."
+                ),
+                "sources": {
+                    "rules_path": str(_rules_md_path()),
+                    "dictionary_path": str(_dictionary_md_path()),
+                },
+            }
         tasa = 0.0
+
     reserva_esperada = round(saldo_total * tasa, 2)
     diff_reserva = round(saneamiento_calculado - reserva_esperada, 2)
     saneamiento_ok = abs(diff_reserva) < 0.01
@@ -227,5 +352,9 @@ def reconcile_credit_accounting(credito_id: str) -> Dict[str, Any]:
             "reportado": round(saneamiento_calculado, 2),
             "esperado": reserva_esperada,
             "diferencia": diff_reserva,
+        },
+        "sources": {
+            "rules_path": str(_rules_md_path()),
+            "dictionary_path": str(_dictionary_md_path()),
         },
     }

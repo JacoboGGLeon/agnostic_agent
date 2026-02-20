@@ -53,6 +53,7 @@ judge_row_with_context = semantic.judge_row_with_context
 search_knowledge_base = semantic.search_knowledge_base
 query_transactions_db = finance.query_transactions_db
 query_accounting_db = finance.query_accounting_db
+finance_sources_status = finance.finance_sources_status
 get_saneamiento_rate = finance.get_saneamiento_rate
 reconcile_credit_accounting = finance.reconcile_credit_accounting
 
