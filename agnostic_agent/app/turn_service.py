@@ -110,9 +110,17 @@ class TurnService:
             session_id = agent_in.session_id or "default"
             user_id = None
             forced_skill = None
+            skills_allowlist = None
             if agent_in.metadata:
                 user_id = agent_in.metadata.get("user_id")
                 forced_skill = agent_in.metadata.get("forced_skill")
+                # Optional: restrict what skills the graph may consider "active".
+                # Accepts list[str] (preferred) or comma-separated str.
+                raw_allow = agent_in.metadata.get("skills_allowlist")
+                if isinstance(raw_allow, str) and raw_allow.strip():
+                    skills_allowlist = [s.strip() for s in raw_allow.split(",") if s.strip()]
+                elif isinstance(raw_allow, list):
+                    skills_allowlist = [str(s).strip() for s in raw_allow if str(s).strip()]
 
             # Knowledge selection
             knowledge_names = agent_in.knowledge_names
@@ -137,7 +145,11 @@ class TurnService:
                 "user_prompt": prompt_text,
                 "session_id": session_id,
                 "user_id": user_id,
-                "forced_skill": forced_skill, # ✅ Injected from UI
+                # Skill selection controls:
+                # - forced_skill: legacy single-skill selector (UI). Semantically: allowlist of one.
+                # - skills_allowlist: preferred multi-skill allowlist.
+                "forced_skill": forced_skill,
+                "skills_allowlist": skills_allowlist,
                 "setup_path": self.setup_path or "",
                 "setup_config": self.setup_config,
                 "knowledge_names": knowledge_names,

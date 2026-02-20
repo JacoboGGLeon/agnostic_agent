@@ -124,6 +124,9 @@ def render_online_tab(agent_factory):
 
         run_metadata = {}
         if selected_skill and selected_skill != "Auto (Analyzer)":
+            # New path: explicit allowlist of active skills.
+            run_metadata["skills_allowlist"] = [selected_skill]
+            # Legacy compatibility path.
             run_metadata["forced_skill"] = selected_skill
 
         try:
