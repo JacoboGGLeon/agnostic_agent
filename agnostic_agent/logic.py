@@ -1486,7 +1486,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             if not isinstance(s, str):
                 return s
             import unicodedata
-            out = s.replace("", "->")
+            out = s.replace("→", "->")
             # Keep rendered output plain ASCII to avoid mojibake in non-UTF8 terminals/UIs.
             out = unicodedata.normalize("NFKD", out).encode("ascii", "ignore").decode("ascii")
             return out
@@ -2060,6 +2060,5 @@ def load_logic(
         )
 
     return builder(planner_llm, tools, planner_config, skill_registry)
-
 
 

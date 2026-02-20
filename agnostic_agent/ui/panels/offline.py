@@ -319,91 +319,89 @@ def render_offline_tab(agent_factory):
             st.rerun()
 
         st.info("Sube PDFs, selecciona la DB correcta y revisa metadata por elemento.")
+        km_tabs = st.tabs(["General", "semantic_researcher", "contabilidad_instantanea"])
 
-        candidates = _discover_db_candidates()
-        default_path = _active_db_path()
-        if default_path not in candidates:
-            candidates = [default_path] + candidates
+        with km_tabs[0]:
+            candidates = _discover_db_candidates()
+            default_path = _active_db_path()
+            if default_path not in candidates:
+                candidates = [default_path] + candidates
 
-        selected_db = st.selectbox(
-            "Base vectorial (.db)",
-            options=candidates,
-            index=max(0, candidates.index(default_path)),
-            help="Selecciona el embeddings.db que quieres consultar e ingerir.",
-        )
-        custom_db = st.text_input("O ruta manual a DB", value="", placeholder="C:/ruta/a/embeddings.db")
-        db_path = str(Path(custom_db.strip())) if custom_db.strip() else str(Path(selected_db))
-        st.session_state["active_db_path"] = db_path
+            selected_db = st.selectbox(
+                "Base vectorial (.db)",
+                options=candidates,
+                index=max(0, candidates.index(default_path)),
+                help="Selecciona el embeddings.db que quieres consultar e ingerir.",
+            )
+            custom_db = st.text_input("O ruta manual a DB", value="", placeholder="C:/ruta/a/embeddings.db")
+            db_path = str(Path(custom_db.strip())) if custom_db.strip() else str(Path(selected_db))
+            st.session_state["active_db_path"] = db_path
 
-        # Unificar ruta de DB para tools y UI.
-        os.environ["AGNOSTIC_DB_PATH"] = db_path
-        os.environ["VECTOR_DB_PATH"] = db_path
+            # Unificar ruta de DB para tools y UI.
+            os.environ["AGNOSTIC_DB_PATH"] = db_path
+            os.environ["VECTOR_DB_PATH"] = db_path
 
-        docs_dir = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
-        os.makedirs(docs_dir, exist_ok=True)
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            docs_dir = os.getenv("AGNOSTIC_DOCS_DIR", os.path.join(os.getcwd(), "documents"))
+            os.makedirs(docs_dir, exist_ok=True)
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-        exists = os.path.exists(db_path)
-        st.caption(f"DB activa: `{db_path}`")
-        if exists:
-            st.success("DB encontrada.")
-        else:
-            st.warning("La DB aun no existe. Se creara al ingerir el primer PDF.")
-
-        from agnostic_agent.knowledge.vector import get_chunks_metadata, get_ingested_files, get_stats, ingest_pdf_file
-
-        if exists:
-            stats = get_stats(db_path)
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Chunks", int(stats.get("chunks", 0)))
-            col2.metric("Files", int(stats.get("files", 0)))
-            col3.metric("Vectors", int(stats.get("vector_count", 0)))
-            col4.metric("L2 Docs", int(stats.get("doc_index_count", 0)))
-
-            st.markdown("#### Archivos ingeridos")
-            files_rows = get_ingested_files(db_path)
-            if files_rows:
-                st.dataframe(files_rows, use_container_width=True, hide_index=True)
+            exists = os.path.exists(db_path)
+            st.caption(f"DB activa: `{db_path}`")
+            if exists:
+                st.success("DB encontrada.")
             else:
-                st.info("Sin registros en files_meta.")
+                st.warning("La DB aun no existe. Se creara al ingerir el primer PDF.")
 
-            st.markdown("#### Metadata por elemento (chunks_meta)")
-            max_rows = st.slider("Filas a mostrar", min_value=20, max_value=500, value=120, step=20)
-            chunk_rows = get_chunks_metadata(db_path, limit=max_rows)
-            if chunk_rows:
-                st.dataframe(chunk_rows, use_container_width=True, hide_index=True)
-            else:
-                st.info("No hay elementos en chunks_meta.")
+            from agnostic_agent.knowledge.vector import get_chunks_metadata, get_ingested_files, get_stats, ingest_pdf_file
 
-        st.markdown("#### Session Sources (DB + MD)")
-        session_sources = _discover_session_sources()
-        if session_sources:
-            total_sources = len(session_sources)
-            reachable_sources = sum(1 for row in session_sources if row.get("reachable"))
-            c_ok, c_ko = st.columns(2)
-            c_ok.metric("Reachable", reachable_sources)
-            c_ko.metric("Unreachable", total_sources - reachable_sources)
+            if exists:
+                stats = get_stats(db_path)
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Chunks", int(stats.get("chunks", 0)))
+                col2.metric("Files", int(stats.get("files", 0)))
+                col3.metric("Vectors", int(stats.get("vector_count", 0)))
+                col4.metric("L2 Docs", int(stats.get("doc_index_count", 0)))
 
-            finance_map = {
-                row["name"]: row["path"]
-                for row in session_sources
-                if row.get("finance_target") and row.get("reachable")
-            }
-            if st.button("Usar fuentes detectadas para Finance"):
-                if "contabilidad.db" in finance_map:
-                    os.environ["AGNOSTIC_FIN_ACC_DB"] = finance_map["contabilidad.db"]
-                if "transacciones.db" in finance_map:
-                    os.environ["AGNOSTIC_FIN_TRANS_DB"] = finance_map["transacciones.db"]
-                if "rules.md" in finance_map:
-                    os.environ["AGNOSTIC_FIN_RULES_MD"] = finance_map["rules.md"]
-                if "dictionary.md" in finance_map:
-                    os.environ["AGNOSTIC_FIN_DICT_MD"] = finance_map["dictionary.md"]
-                st.success("Variables AGNOSTIC_FIN_* actualizadas con fuentes detectadas y reachables.")
+                st.markdown("#### Archivos ingeridos")
+                files_rows = get_ingested_files(db_path)
+                if files_rows:
+                    st.dataframe(files_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Sin registros en files_meta.")
 
-            km_tabs = st.tabs(["General", "semantic_researcher", "contabilidad_instantanea"])
+                st.markdown("#### Metadata por elemento (chunks_meta)")
+                max_rows = st.slider("Filas a mostrar", min_value=20, max_value=500, value=120, step=20)
+                chunk_rows = get_chunks_metadata(db_path, limit=max_rows)
+                if chunk_rows:
+                    st.dataframe(chunk_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay elementos en chunks_meta.")
 
-            with km_tabs[0]:
+            st.markdown("#### Session Sources (DB + MD)")
+            session_sources = _discover_session_sources()
+            if session_sources:
+                total_sources = len(session_sources)
+                reachable_sources = sum(1 for row in session_sources if row.get("reachable"))
+                c_ok, c_ko = st.columns(2)
+                c_ok.metric("Reachable", reachable_sources)
+                c_ko.metric("Unreachable", total_sources - reachable_sources)
                 st.dataframe(session_sources, use_container_width=True, hide_index=True)
+
+                finance_map = {
+                    row["name"]: row["path"]
+                    for row in session_sources
+                    if row.get("finance_target") and row.get("reachable")
+                }
+                if st.button("Usar fuentes detectadas para Finance"):
+                    if "contabilidad.db" in finance_map:
+                        os.environ["AGNOSTIC_FIN_ACC_DB"] = finance_map["contabilidad.db"]
+                    if "transacciones.db" in finance_map:
+                        os.environ["AGNOSTIC_FIN_TRANS_DB"] = finance_map["transacciones.db"]
+                    if "rules.md" in finance_map:
+                        os.environ["AGNOSTIC_FIN_RULES_MD"] = finance_map["rules.md"]
+                    if "dictionary.md" in finance_map:
+                        os.environ["AGNOSTIC_FIN_DICT_MD"] = finance_map["dictionary.md"]
+                    st.success("Variables AGNOSTIC_FIN_* actualizadas con fuentes detectadas y reachables.")
 
                 selected_source = st.selectbox(
                     "Inspeccionar fuente",
@@ -416,100 +414,104 @@ def render_offline_tab(agent_factory):
                     _render_sqlite_viewer(selected_source, key_prefix="km_general")
                 elif selected_row:
                     _render_markdown_pretty(selected_source, key_prefix="km_general")
+            else:
+                st.info("No se detectaron fuentes de session (.db/.md) en rutas comunes.")
 
-            with km_tabs[1]:
-                st.markdown("##### Fuentes por skill: `semantic_researcher`")
-                semantic_sources = _filter_sources_for_skill("semantic_researcher", session_sources, db_path)
-                if semantic_sources:
-                    st.dataframe(semantic_sources, use_container_width=True, hide_index=True)
-                    sem_db_sources = [s for s in semantic_sources if s.get("kind") == "db"]
-                    sem_md_sources = [s for s in semantic_sources if s.get("kind") == "md"]
+            uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
+            file_description = st.text_input("Descripcion", placeholder="Ej: Manual 2024")
 
-                    if sem_db_sources:
-                        sem_db_path = st.selectbox(
-                            "DB para semantic_researcher",
-                            options=[s["path"] for s in sem_db_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key="km_sem_db",
+            if uploaded_file:
+                save_path = os.path.abspath(os.path.join(docs_dir, uploaded_file.name))
+                if not os.path.exists(save_path):
+                    with open(save_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+
+                st.success(f"Archivo listo: `{uploaded_file.name}`")
+
+                if st.button("Procesar e Ingestar", type="primary"):
+                    progress_bar = st.progress(0, text="Iniciando...")
+
+                    def _update_ui(p, msg):
+                        progress_bar.progress(int(p * 100), text=msg)
+
+                    try:
+                        result = ingest_pdf_file(
+                            pdf_path=save_path,
+                            db_path=db_path,
+                            description=file_description,
+                            progress_callback=_update_ui,
                         )
-                        _render_sqlite_viewer(sem_db_path, key_prefix="km_sem")
-                    else:
-                        st.info("No se detecto DB para semantic_researcher.")
+                        if result.get("success"):
+                            st.success(f"Ingestion completada: {result['chunks']} chunks creados.")
+                            st.json(result)
+                        else:
+                            st.error(f"Error: {result.get('error')}")
+                    except Exception as e:
+                        st.error(f"Error critico durante la ingestion: {e}")
 
-                    if sem_md_sources:
-                        sem_md_path = st.selectbox(
-                            "Markdown para semantic_researcher",
-                            options=[s["path"] for s in sem_md_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key="km_sem_md",
-                        )
-                        _render_markdown_pretty(sem_md_path, key_prefix="km_sem")
-                else:
-                    st.info("No se detectaron fuentes para semantic_researcher.")
+        with km_tabs[1]:
+            st.markdown("#### semantic_researcher")
+            active_db = _active_db_path()
+            session_sources = _discover_session_sources()
+            semantic_sources = _filter_sources_for_skill("semantic_researcher", session_sources, active_db)
+            if semantic_sources:
+                st.dataframe(semantic_sources, use_container_width=True, hide_index=True)
+                sem_db_sources = [s for s in semantic_sources if s.get("kind") == "db"]
+                sem_md_sources = [s for s in semantic_sources if s.get("kind") == "md"]
 
-            with km_tabs[2]:
-                st.markdown("##### Fuentes por skill: `contabilidad_instantanea`")
-                fin_sources = _filter_sources_for_skill("contabilidad_instantanea", session_sources, db_path)
-                if fin_sources:
-                    st.dataframe(fin_sources, use_container_width=True, hide_index=True)
-                    fin_db_sources = [s for s in fin_sources if s.get("kind") == "db"]
-                    fin_md_sources = [s for s in fin_sources if s.get("kind") == "md"]
-
-                    if fin_db_sources:
-                        fin_db_path = st.selectbox(
-                            "DB para contabilidad_instantanea",
-                            options=[s["path"] for s in fin_db_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key="km_fin_db",
-                        )
-                        _render_sqlite_viewer(fin_db_path, key_prefix="km_fin")
-                    else:
-                        st.info("No se detecto DB para contabilidad_instantanea.")
-
-                    if fin_md_sources:
-                        fin_md_path = st.selectbox(
-                            "Markdown para contabilidad_instantanea",
-                            options=[s["path"] for s in fin_md_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key="km_fin_md",
-                        )
-                        _render_markdown_pretty(fin_md_path, key_prefix="km_fin")
-                else:
-                    st.info("No se detectaron fuentes para contabilidad_instantanea.")
-        else:
-            st.info("No se detectaron fuentes de session (.db/.md) en rutas comunes.")
-
-        uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
-        file_description = st.text_input("Descripcion", placeholder="Ej: Manual 2024")
-
-        if uploaded_file:
-            save_path = os.path.abspath(os.path.join(docs_dir, uploaded_file.name))
-            if not os.path.exists(save_path):
-                with open(save_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-
-            st.success(f"Archivo listo: `{uploaded_file.name}`")
-
-            if st.button("Procesar e Ingestar", type="primary"):
-                progress_bar = st.progress(0, text="Iniciando...")
-
-                def _update_ui(p, msg):
-                    progress_bar.progress(int(p * 100), text=msg)
-
-                try:
-                    result = ingest_pdf_file(
-                        pdf_path=save_path,
-                        db_path=db_path,
-                        description=file_description,
-                        progress_callback=_update_ui,
+                if sem_db_sources:
+                    sem_db_path = st.selectbox(
+                        "DB para semantic_researcher",
+                        options=[s["path"] for s in sem_db_sources],
+                        format_func=lambda path: f"{Path(path).name} - {path}",
+                        key="km_sem_db",
                     )
-                    if result.get("success"):
-                        st.success(f"Ingestion completada: {result['chunks']} chunks creados.")
-                        st.json(result)
-                    else:
-                        st.error(f"Error: {result.get('error')}")
-                except Exception as e:
-                    st.error(f"Error critico durante la ingestion: {e}")
+                    _render_sqlite_viewer(sem_db_path, key_prefix="km_sem")
+                else:
+                    st.info("No se detecto DB para semantic_researcher.")
+
+                if sem_md_sources:
+                    sem_md_path = st.selectbox(
+                        "Markdown para semantic_researcher",
+                        options=[s["path"] for s in sem_md_sources],
+                        format_func=lambda path: f"{Path(path).name} - {path}",
+                        key="km_sem_md",
+                    )
+                    _render_markdown_pretty(sem_md_path, key_prefix="km_sem")
+            else:
+                st.info("No se detectaron fuentes para semantic_researcher.")
+
+        with km_tabs[2]:
+            st.markdown("#### contabilidad_instantanea")
+            active_db = _active_db_path()
+            session_sources = _discover_session_sources()
+            fin_sources = _filter_sources_for_skill("contabilidad_instantanea", session_sources, active_db)
+            if fin_sources:
+                st.dataframe(fin_sources, use_container_width=True, hide_index=True)
+                fin_db_sources = [s for s in fin_sources if s.get("kind") == "db"]
+                fin_md_sources = [s for s in fin_sources if s.get("kind") == "md"]
+
+                if fin_db_sources:
+                    fin_db_path = st.selectbox(
+                        "DB para contabilidad_instantanea",
+                        options=[s["path"] for s in fin_db_sources],
+                        format_func=lambda path: f"{Path(path).name} - {path}",
+                        key="km_fin_db",
+                    )
+                    _render_sqlite_viewer(fin_db_path, key_prefix="km_fin")
+                else:
+                    st.info("No se detecto DB para contabilidad_instantanea.")
+
+                if fin_md_sources:
+                    fin_md_path = st.selectbox(
+                        "Markdown para contabilidad_instantanea",
+                        options=[s["path"] for s in fin_md_sources],
+                        format_func=lambda path: f"{Path(path).name} - {path}",
+                        key="km_fin_md",
+                    )
+                    _render_markdown_pretty(fin_md_path, key_prefix="km_fin")
+            else:
+                st.info("No se detectaron fuentes para contabilidad_instantanea.")
 
     with tab_tm:
         st.markdown("### Tools Playground")
