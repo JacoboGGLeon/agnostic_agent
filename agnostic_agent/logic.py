@@ -729,6 +729,13 @@ def _resolve_effective_skills(
     return resolved
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Builder del grafo LangGraph
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -2073,6 +2080,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
         final_answer = summary.get("final_answer") or ""
         summarizer_text = summary.get("summarizer") or ""
         runs = state.get("tool_runs", []) or []
+        analyzer = state.get("analyzer") or {}
+        planner_trajs = state.get("planner_trajs", []) or []
+        executor_steps = state.get("executor_steps", []) or []
+        planner_scope = state.get("_planner_scope_internal") or {}
+        fail_fast = _env_flag("AGNOSTIC_FAIL_FAST", False)
 
         # 3) Guardrail en VALIDATOR: auto-reparaciA3n (modo sin tools)
         bad_templates = (
@@ -2097,6 +2109,43 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         all_covered = True
         reasons: List[str] = []
+        invariant_violations: List[str] = []
+
+        # Structural invariants (agnostic):
+        # proposition -> subquery -> DAG -> execution.
+        subqueries = analyzer.get("subqueries") or []
+        logic_form = (analyzer.get("propositional_logic") or "").strip()
+        active_skills_eff = _resolve_effective_skills(state, skill_registry)
+        scoped_tools = set(planner_scope.get("allowed_tools") or [])
+
+        if not subqueries:
+            invariant_violations.append("DecompositionInvariant: Analyzer no produjo subqueries.")
+        if logic_form and not re.search(r"\bq1\b", logic_form):
+            invariant_violations.append("LogicInvariant: lógica proposicional no contiene al menos q1.")
+        if subqueries and len(planner_trajs) < len(subqueries):
+            invariant_violations.append(
+                "CoverageInvariant: planner_trajs cubre menos subqueries que Analyzer."
+            )
+        if subqueries and len(executor_steps) < len(subqueries) and len(runs) > 0:
+            invariant_violations.append(
+                "CoverageInvariant: executor_steps cubre menos subqueries que Analyzer."
+            )
+        if subqueries and all(_is_placeholder_subquery(s) for s in subqueries):
+            invariant_violations.append(
+                "DecompositionInvariant: subqueries quedaron en placeholders (q1/paso/pregunta)."
+            )
+
+        if active_skills_eff and not planner_scope.get("skill_mode"):
+            invariant_violations.append(
+                "SkillScopeInvariant: hay skills activas efectivas pero Planner no activó skill_mode."
+            )
+        if scoped_tools:
+            for step in executor_steps:
+                tname = step.get("tool_name")
+                if tname and tname not in scoped_tools:
+                    invariant_violations.append(
+                        f"ToolScopeInvariant: tool ejecutada fuera de scope permitido ({tname})."
+                    )
 
         if not final_answer.strip():
             all_covered = False
@@ -2108,6 +2157,25 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 "Inconsistencia: el SUMMARIZER dice que no hubo tools, "
                 "pero tool_runs no esta vacio."
             )
+
+        if invariant_violations:
+            all_covered = False
+            reasons.extend(invariant_violations)
+
+        if fail_fast and invariant_violations:
+            fail_msg_lines = [
+                "Ejecución detenida por fail-fast: se violaron invariantes estructurales.",
+                "",
+                f"Prompt: {user_prompt}",
+                "Violaciones:",
+            ]
+            for idx, v in enumerate(invariant_violations, start=1):
+                fail_msg_lines.append(f"{idx}. {v}")
+            final_answer = "\n".join(fail_msg_lines)
+            try:
+                summary["final_answer"] = final_answer
+            except Exception:
+                pass
 
         if not reasons and all_covered:
             reasons.append("No se detectaron problemas obvios de cobertura.")
