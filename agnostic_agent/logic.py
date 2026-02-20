@@ -649,50 +649,21 @@ def _format_knowledge_hint(knowledge_names: List[str]) -> str:
     )
 
 
-def _skill_shortcuts_enabled() -> bool:
+def _sanitize_subquery_text(text: str) -> str:
     """
-    Enables deterministic, skill-specific planner/analyzer shortcuts.
-    Default is OFF to keep the agent core agnostic.
+    Normaliza subqueries para trazas legibles y estables.
     """
-    return os.getenv("AGNOSTIC_ENABLE_SKILL_SHORTCUTS", "0").lower() in ("1", "true", "yes", "on")
-
-
-def _extract_finance_reconcile_requests(text: str) -> List[Dict[str, str]]:
-    """
-    Extrae multiples solicitudes de conciliacion desde un bloque de texto.
-    Cada elemento retorna: credito_id, balance, subquery.
-    """
-    raw = (text or "").strip()
-    if not raw:
-        return []
-
-    loc_matches = list(re.finditer(r"\b(LOC-\d{4,})\b", raw, flags=re.IGNORECASE))
-    if not loc_matches:
-        return []
-
-    rows: List[Dict[str, str]] = []
-    for i, match in enumerate(loc_matches):
-        start = match.start()
-        end = loc_matches[i + 1].start() if i + 1 < len(loc_matches) else len(raw)
-        chunk = raw[start:end].strip().strip(".")
-
-        credito_id = match.group(1).upper()
-        balance_match = re.search(
-            r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-            chunk,
-            flags=re.IGNORECASE,
-        )
-        balance = balance_match.group(1).replace(",", "") if balance_match else ""
-
-        rows.append(
-            {
-                "credito_id": credito_id,
-                "balance": balance,
-                "subquery": chunk,
-            }
-        )
-
-    return rows
+    t = (text or "").strip()
+    if not t:
+        return ""
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(
+        r"\brealiza\s+la\s+concili\S*\s+del\s+cr\S*\s*$",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    ).strip()
+    return t.strip(" .")
 
 
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -781,34 +752,6 @@ def build_graph_agent(
                 )
             return catalog
 
-        def _score_skills_with_scores(prompt: str, catalog: List[Dict[str, Any]]) -> List[Tuple[str, int]]:
-            p = (prompt or "").lower()
-            scored: List[Tuple[int, str]] = []
-            for item in catalog:
-                name = str(item.get("name", "")).lower()
-                desc = str(item.get("description", "")).lower()
-                tools_txt = " ".join(item.get("tools") or []).lower()
-                summ = str(item.get("summary", "")).lower()
-                text = f"{name} {desc} {tools_txt} {summ}"
-                score = 0
-
-                for tok in re.findall(r"[a-z0-9_]{4,}", p):
-                    if tok in text:
-                        score += 1
-
-                if name == "contabilidad_instantanea" and any(k in p for k in ["credito", "concili", "saldo", "saneamiento", "desembols"]):
-                    score += 6
-                if name == "semantic_researcher" and any(k in p for k in ["document", "fuente", "segun", "investiga", "buscar", "knowledge", "pdf"]):
-                    score += 5
-                if name == "math_helper" and any(k in p for k in ["sum", "promedio", "calcula", "ecuacion", "operacion"]):
-                    score += 5
-                if name == "text_basic" and any(k in p for k in ["mayus", "palind", "contar palabras", "word count"]):
-                    score += 5
-
-                scored.append((score, item.get("name", "")))
-            scored.sort(reverse=True)
-            return [(name, score) for score, name in scored if score > 0]
-
         skills_catalog = _build_skills_catalog()
         available_skills_txt = json.dumps(skills_catalog, ensure_ascii=False, indent=2) if skills_catalog else "[]"
         
@@ -831,7 +774,7 @@ def build_graph_agent(
         # Enviamos un mensaje dummy de usuario para activar la generaciA3n
         user_msg = HumanMessage(content="Analiza mi peticiA3n y genera el JSON.")
 
-        # 2. Invocar LLM (o Bypass si hay Forced Skill)
+        # 2. Invocar LLM
         selected_skills = []
         analyzer_skill_selection: Dict[str, Any] = {
             "source": "llm",
@@ -848,65 +791,14 @@ def build_graph_agent(
             # Legacy single-skill selector: treat as allowlist of one.
             skills_allowlist = [forced_skill]
 
+        # Normalize allowlist against registry if available.
+        normalized_allowlist: List[str] = []
         if skills_allowlist:
-            # Normalize against registry if available.
-            allowed = []
             for s in skills_allowlist:
                 if not s or s == "Auto (Analyzer)":
                     continue
                 if skill_registry is None or skill_registry.get_skill(s):
-                    allowed.append(s)
-
-            if allowed:
-                print(f"[ANALYZER] Skills allowlist active: {allowed}")
-
-                # Bypass LLM invocation completely for decomposition.
-                # We assume the user's prompt is the single subquery to be solved by these skills.
-                selected_skills = allowed
-                if "contabilidad_instantanea" in selected_skills:
-                    finance_requests = _extract_finance_reconcile_requests(user_prompt)
-                    if finance_requests:
-                        subqueries = [r["subquery"] for r in finance_requests]
-                        logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
-                    else:
-                        subqueries = [user_prompt]
-                        logic_form = "q1"
-                else:
-                    subqueries = [user_prompt]
-                    logic_form = "q1"
-
-                # Early return structure (construction similar to end of function)
-                subqueries_logic = ["q1"]
-                analyzer = {
-                    "input_payload": {"user_prompt": user_prompt},
-                    "propositional_logic": logic_form,
-                    "subqueries": subqueries,
-                    "subqueries_logic": subqueries_logic,
-                }
-                analyzer_skill_selection = {
-                    "source": "allowlist",
-                    "selected_skill": selected_skills[0] if selected_skills else None,
-                    "score": None,
-                }
-                analyzer_msg = AIMessage(
-                    content=f"### ANALYZER (Allowlist Mode)\nSkills: {selected_skills}\nSubqueries: {subqueries}",
-                    additional_kwargs={"pipeline_internal": True, "node": "analyzer"},
-                )
-                return {
-                    "analyzer": analyzer,
-                    "_active_skills_internal": selected_skills,
-                    "_analyzer_skill_selection": analyzer_skill_selection,
-                    "messages": [analyzer_msg],
-                }
-        # --------------------------
-
-        def _looks_like_finance_reconcile(prompt: str) -> bool:
-            import re
-            p = (prompt or "").lower()
-            if re.search(r"\bloc-\d{4,}\b", p):
-                return True
-            keywords = ["concili", "credito", "saldo", "saneamiento", "desembolsado", "contabilidad"]
-            return any(k in p for k in keywords)
+                    normalized_allowlist.append(s)
 
         try:
             response = planner_llm.invoke([sys_msg, user_msg])
@@ -932,66 +824,22 @@ def build_graph_agent(
             logic_form = data.get("logic_form", "q1")
             selected_skills = data.get("selected_skills", [])
 
-            # Guardrail: finance reconciliation should default to contabilidad skill in auto mode.
-            if (
-                _skill_shortcuts_enabled()
-                and
-                not selected_skills
-                and skill_registry
-                and skill_registry.get_skill("contabilidad_instantanea")
-                and _looks_like_finance_reconcile(user_prompt)
-            ):
-                selected_skills = ["contabilidad_instantanea"]
-                subqueries = [user_prompt]
-                logic_form = "q1"
+            # Apply explicit UI skill constraints after LLM selection.
+            if normalized_allowlist:
+                selected_skills = [s for s in selected_skills if s in normalized_allowlist]
+                if not selected_skills:
+                    selected_skills = list(normalized_allowlist)
                 analyzer_skill_selection = {
-                    "source": "finance_guardrail",
-                    "selected_skill": "contabilidad_instantanea",
-                    "score": 999,
+                    "source": "allowlist",
+                    "selected_skill": selected_skills[0],
+                    "score": None,
                 }
-            
-            # --- FALLBACK (skills-first, pero no siempre RAG) ---
-            # Si el modelo no eligiA3 skill, forzamos una skill segura de soporte:
-            # - `capabilities_menu`: muestra el menu de capacidades para que el usuario elija.
-            if not selected_skills:
-                ranked = _score_skills_with_scores(user_prompt, skills_catalog)
-                if ranked:
-                    selected_skills = [ranked[0][0]]
-                    analyzer_skill_selection = {
-                        "source": "catalog",
-                        "selected_skill": ranked[0][0],
-                        "score": ranked[0][1],
-                    }
-            if not selected_skills:
-                if skill_registry and skill_registry.get_skill("capabilities_menu"):
-                     selected_skills = ["capabilities_menu"]
-                     analyzer_skill_selection = {
-                         "source": "fallback_menu",
-                         "selected_skill": "capabilities_menu",
-                         "score": 0,
-                     }
-                elif knowledge_available and skill_registry and skill_registry.get_skill("semantic_researcher"):
-                     # Si no existe la skill de menu, preferimos una skill restrictiva cuando hay KB.
-                     selected_skills = ["semantic_researcher"]
-                     analyzer_skill_selection = {
-                         "source": "fallback_kb",
-                         "selected_skill": "semantic_researcher",
-                         "score": 0,
-                     }
-            # -----------------------------------------------
             elif selected_skills and analyzer_skill_selection.get("selected_skill") is None:
                 analyzer_skill_selection = {
                     "source": "llm",
                     "selected_skill": selected_skills[0],
                     "score": None,
                 }
-
-            # Normalize decomposition for finance prompts with multiple credits.
-            if _skill_shortcuts_enabled() and "contabilidad_instantanea" in selected_skills:
-                finance_requests = _extract_finance_reconcile_requests(user_prompt)
-                if finance_requests:
-                    subqueries = [r["subquery"] for r in finance_requests]
-                    logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
             
             print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
             
@@ -1001,7 +849,12 @@ def build_graph_agent(
             if knowledge_available:
                  print(f"[ANALYZER] Error fallback: leaving skills empty.")
                  selected_skills = []
-        
+
+        subqueries = [sq for sq in (_sanitize_subquery_text(s) for s in subqueries) if sq]
+        if not subqueries:
+            subqueries = [_sanitize_subquery_text(user_prompt) or user_prompt]
+        logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
+
         # 4. Construir resultado
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
         
@@ -1188,134 +1041,6 @@ def build_graph_agent(
             "allowed_knowledge": [k.get("name") for k in active_knowledge_objects if isinstance(k, dict)],
         }
 
-        # Deterministic semantic planner path:
-        # Force a stable RAG chain: retrieval top_k=15 -> rerank top_n=3.
-        if _skill_shortcuts_enabled() and skill_mode and "semantic_researcher" in active_skills:
-            prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
-            if prompt_for_extract:
-                step1_id = f"step_1_1_{str(uuid.uuid4())[:4]}"
-                step2_id = f"step_2_1_{str(uuid.uuid4())[:4]}"
-                step1_call = {
-                    "name": "search_knowledge_base",
-                    "args": {"query": prompt_for_extract, "top_k": 15},
-                    "id": step1_id,
-                    "type": "tool_call",
-                }
-                step2_call = {
-                    "name": "rerank_docs",
-                    "args": {"query": prompt_for_extract, "documents": f"${step1_id}.output", "top_n": 3},
-                    "id": step2_id,
-                    "type": "tool_call",
-                }
-                deterministic_plan = (
-                    f"Subquery 1: {prompt_for_extract}\n"
-                    "DAG:\n"
-                    f'step 1: id=step_1, tool=search_knowledge_base, args={{"query":"{prompt_for_extract}","top_k":15}}\n'
-                    f'step 2: id=step_2, tool=rerank_docs, args={{"query":"{prompt_for_extract}","documents":"${step1_id}.output","top_n":3}}'
-                )
-                ai_msg = AIMessage(
-                    content=deterministic_plan,
-                    tool_calls=[step1_call, step2_call],
-                    additional_kwargs={"dag_raw": deterministic_plan},
-                )
-                return {
-                    "messages": [ai_msg],
-                    "planner_trajs": [
-                        PlannerTrajectory(
-                            subquery=prompt_for_extract,
-                            description=(
-                                'step 1: id=step_1, tool=search_knowledge_base, args={"query":"'
-                                + prompt_for_extract
-                                + '","top_k":15}\n'
-                                + 'step 2: id=step_2, tool=rerank_docs, args={"query":"'
-                                + prompt_for_extract
-                                + f'","documents":"${step1_id}.output","top_n":3}}'
-                            ),
-                        )
-                    ],
-                    "llm_raw_out": deterministic_plan,
-                    "llm_clean_out": deterministic_plan,
-                    "_planner_scope_internal": planner_scope,
-                }
-
-        # Deterministic finance planner path:
-        # If the prompt looks like a 1-a-1 credit reconciliation, avoid LLM DAG drift/hallucinations.
-        should_force_finance_plan = _skill_shortcuts_enabled() and ("contabilidad_instantanea" in active_skills)
-        if not should_force_finance_plan:
-            p = (state.get("user_prompt") or " ".join(subqs) or "").lower()
-            if re.search(r"\bloc-\d{4,}\b", p) or any(
-                k in p for k in ["concili", "credito", "saldo", "saneamiento", "contabilidad"]
-            ):
-                should_force_finance_plan = True
-
-        if should_force_finance_plan:
-            prompt_for_extract = (state.get("user_prompt") or " ".join(subqs) or "").strip()
-            finance_requests = _extract_finance_reconcile_requests(prompt_for_extract)
-            if not finance_requests:
-                credito_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", prompt_for_extract)
-                if not credito_match:
-                    credito_match = re.search(r"\b(LOC-\d{4,})\b", prompt_for_extract, flags=re.IGNORECASE)
-                credito_id = credito_match.group(1).upper() if credito_match else ""
-                balance_match = re.search(
-                    r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-                    prompt_for_extract,
-                    flags=re.IGNORECASE,
-                )
-                balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
-                if credito_id:
-                    finance_requests = [
-                        {"credito_id": credito_id, "balance": balance_val, "subquery": prompt_for_extract}
-                    ]
-
-            if finance_requests:
-                deterministic_tool_calls: List[Dict[str, Any]] = []
-                deterministic_trajs: List[PlannerTrajectory] = []
-                plan_lines: List[str] = []
-
-                for idx, row in enumerate(finance_requests, start=1):
-                    credito_id = row.get("credito_id", "")
-                    balance_val = row.get("balance", "")
-                    subquery_txt = row.get("subquery", prompt_for_extract)
-                    call_id = f"step_{idx}_1_{str(uuid.uuid4())[:4]}"
-                    call_obj = {
-                        "name": "reconcile_credit_accounting",
-                        "args": {"credito_id": credito_id, "balance": balance_val},
-                        "id": call_id,
-                        "type": "tool_call",
-                    }
-                    deterministic_tool_calls.append(call_obj)
-                    deterministic_trajs.append(
-                        PlannerTrajectory(
-                            subquery=subquery_txt,
-                            description=(
-                                "step 1: id=step_1, tool=reconcile_credit_accounting, "
-                                f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
-                            ),
-                        )
-                    )
-                    plan_lines.append(f"Subquery {idx}: {subquery_txt}")
-                    plan_lines.append("DAG:")
-                    plan_lines.append(
-                        "step 1: id=step_1, tool=reconcile_credit_accounting, "
-                        f'args={{"credito_id":"{credito_id}","balance":"{balance_val}"}}'
-                    )
-                    if idx < len(finance_requests):
-                        plan_lines.append("")
-
-                deterministic_plan = "\n".join(plan_lines)
-                ai_msg = AIMessage(
-                    content=deterministic_plan,
-                    tool_calls=deterministic_tool_calls,
-                    additional_kwargs={"dag_raw": deterministic_plan},
-                )
-                return {
-                    "messages": [ai_msg],
-                    "planner_trajs": deterministic_trajs,
-                    "llm_raw_out": deterministic_plan,
-                    "llm_clean_out": deterministic_plan,
-                    "_planner_scope_internal": planner_scope,
-                }
-
         # 2. Construir Contexto
         # Pasamos active_skills para excluirlas del contexto (evitar recursiA3n)
         rich_context_text = _format_rich_context(
@@ -1470,54 +1195,6 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         subq_calls.append(call_obj)
                         all_tool_calls.append(call_obj)
 
-                # Minimal coverage guardrail:
-                # each subquery should map to at least one step when tools are available.
-                if not subq_calls and allowed_tool_names:
-                    subq_txt = (subq or "").strip()
-                    # 1) Semantic fallback: retrieval + optional rerank.
-                    if "search_knowledge_base" in allowed_tool_names:
-                        step1_id = f"step_1_{i}_{str(uuid.uuid4())[:4]}"
-                        search_call = {
-                            "name": "search_knowledge_base",
-                            "args": {"query": subq_txt, "top_k": 15},
-                            "id": step1_id,
-                            "type": "tool_call",
-                        }
-                        subq_calls.append(search_call)
-                        all_tool_calls.append(search_call)
-                        if "rerank_docs" in allowed_tool_names:
-                            step2_id = f"step_2_{i}_{str(uuid.uuid4())[:4]}"
-                            rerank_call = {
-                                "name": "rerank_docs",
-                                "args": {"query": subq_txt, "documents": f"${step1_id}.output", "top_n": 3},
-                                "id": step2_id,
-                                "type": "tool_call",
-                            }
-                            subq_calls.append(rerank_call)
-                            all_tool_calls.append(rerank_call)
-                    # 2) Finance fallback: one credit -> one reconcile step.
-                    elif "reconcile_credit_accounting" in allowed_tool_names:
-                        credit_match = re.search(r"\b([A-Za-z]{3}-\d{4,})\b", subq_txt)
-                        if not credit_match:
-                            credit_match = re.search(r"\b(LOC-\d{4,})\b", subq_txt, flags=re.IGNORECASE)
-                        credit_id = credit_match.group(1).upper() if credit_match else ""
-                        balance_match = re.search(
-                            r"(?:saldo|balance)\s*[:=]\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-                            subq_txt,
-                            flags=re.IGNORECASE,
-                        )
-                        balance_val = balance_match.group(1).replace(",", "") if balance_match else ""
-                        if credit_id:
-                            step_id = f"step_1_{i}_{str(uuid.uuid4())[:4]}"
-                            finance_call = {
-                                "name": "reconcile_credit_accounting",
-                                "args": {"credito_id": credit_id, "balance": balance_val},
-                                "id": step_id,
-                                "type": "tool_call",
-                            }
-                            subq_calls.append(finance_call)
-                            all_tool_calls.append(finance_call)
-                
                 # Build a readable DAG summary per subquery.
                 desc_lines: List[str] = []
                 if not dag_steps:
@@ -1817,6 +1494,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             for idx, sq in enumerate(subqs, start=1):
                 lines.append(f"- q{idx} = {sq}")
             lines.append(f"Skills activas: {active_skills if active_skills else '[]'}")
+            forced_skill_local = state.get("forced_skill")
+            allowlist_local = state.get("skills_allowlist") or []
+            if forced_skill_local and forced_skill_local != "Auto (Analyzer)":
+                lines.append(f"Skill forzada (UI): {forced_skill_local}")
+            if allowlist_local:
+                lines.append(f"Skills allowlist (UI): {allowlist_local}")
             selected_skill = selection.get("selected_skill")
             selected_score = selection.get("score")
             selected_source = selection.get("source") or "unknown"
@@ -1832,6 +1515,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
             return "\n".join(lines)
 
         def _build_planner_text() -> str:
+            def _as_text_safe(value: Any) -> str:
+                if value is None:
+                    return ""
+                if isinstance(value, str):
+                    return value
+                try:
+                    return json.dumps(value, ensure_ascii=False, default=_json_default)
+                except Exception:
+                    return str(value)
+
             planner_trajs = state.get("planner_trajs", []) or []
             if not planner_trajs:
                 return "Planner did not build a tool plan."
@@ -1846,9 +1539,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 )
                 out_lines.append("")
             for i, tr in enumerate(planner_trajs, start=1):
-                out_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
+                if isinstance(tr, dict):
+                    subq_val = tr.get("subquery", "")
+                    desc_val = tr.get("description", "")
+                else:
+                    subq_val = getattr(tr, "subquery", "")
+                    desc_val = getattr(tr, "description", "")
+                    if not subq_val and not desc_val:
+                        desc_val = _as_text_safe(tr)
+                out_lines.append(f"Subquery {i}: {_as_text_safe(subq_val)}")
                 out_lines.append("DAG:")
-                raw_desc = (tr.get("description") or "").strip()
+                raw_desc = _as_text_safe(desc_val).strip()
                 if not raw_desc:
                     out_lines.append("step 1: (empty)")
                 else:
@@ -1857,6 +1558,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         out_lines.append(line if line.startswith("step ") else f"step ?: {line}")
                 if i < len(planner_trajs):
                     out_lines.append("")
+            analyzer_subqs = (state.get("analyzer") or {}).get("subqueries") or []
+            exec_steps = state.get("executor_steps", []) or []
+            if len(analyzer_subqs) != len(planner_trajs):
+                out_lines.append("")
+                out_lines.append(
+                    f"[WARN] Cobertura Analyzer->Planner inconsistente: subqueries={len(analyzer_subqs)} vs plans={len(planner_trajs)}"
+                )
+            if len(exec_steps) < len(analyzer_subqs):
+                out_lines.append(
+                    f"[WARN] Cobertura Analyzer->Executor parcial: subqueries={len(analyzer_subqs)} vs calls={len(exec_steps)}"
+                )
             return "\n".join(out_lines)
 
         def _build_executor_text() -> str:
