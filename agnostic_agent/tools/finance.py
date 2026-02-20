@@ -279,16 +279,42 @@ def _fetch_accounting(credito_id: str) -> tuple[float, str, float]:
     return float(row[0]), str(row[1]), float(row[2])
 
 
+def _normalize_credito_id(raw_credito_id: str) -> str:
+    """
+    Normaliza entradas de credito_id para tolerar formatos tabulares del planner/LLM.
+    Ejemplos:
+    - "LOC-0004" -> "LOC-0004"
+    - "0 LOC-0004" -> "LOC-0004"
+    - "credito_id=LOC-0004" -> "LOC-0004"
+    """
+    raw = (raw_credito_id or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"\b(LOC-\d{4,})\b", raw, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return raw.upper()
+
+
 @tool(mode="public")
 def reconcile_credit_accounting(credito_id: str, balance: str = "") -> Dict[str, Any]:
     """
     Concilia un credito 1-a-1 y valida saldo y saneamiento.
     """
+    normalized_credito_id = _normalize_credito_id(credito_id)
+    if not normalized_credito_id:
+        return {"ok": False, "credito_id": credito_id, "error": "credito_id vacio o invalido."}
+
     try:
-        tx_rows = _fetch_transactions(credito_id)
-        saldo_total, estatus, saneamiento_calculado = _fetch_accounting(credito_id)
+        tx_rows = _fetch_transactions(normalized_credito_id)
+        saldo_total, estatus, saneamiento_calculado = _fetch_accounting(normalized_credito_id)
     except Exception as exc:
-        return {"ok": False, "credito_id": credito_id, "error": str(exc)}
+        return {
+            "ok": False,
+            "credito_id": normalized_credito_id,
+            **({"credito_id_input": credito_id} if normalized_credito_id != credito_id else {}),
+            "error": str(exc),
+        }
 
     input_balance_raw = (balance or "").strip()
     input_balance = None
@@ -341,7 +367,8 @@ def reconcile_credit_accounting(credito_id: str, balance: str = "") -> Dict[str,
 
     return {
         "ok": True,
-        "credito_id": credito_id,
+        "credito_id": normalized_credito_id,
+        **({"credito_id_input": credito_id} if normalized_credito_id != credito_id else {}),
         "estatus": estatus,
         "status": status,
         "validaciones": {
