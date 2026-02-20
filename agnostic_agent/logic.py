@@ -902,6 +902,11 @@ def build_graph_agent(
                             input_schema = t.args_schema.schema_json()
                         except Exception:
                             input_schema = str(t.args_schema)
+                if not input_schema and hasattr(t, "args_schema") and t.args_schema:
+                    try:
+                        input_schema = t.args_schema.schema_json()
+                    except Exception:
+                        input_schema = str(t.args_schema)
                 
                 input_str = json.dumps(input_schema) if input_schema else "Any"
                 output_str = json.dumps(output_schema) if output_schema else "{}"

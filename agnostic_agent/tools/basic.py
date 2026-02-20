@@ -3,7 +3,7 @@ from __future__ import annotations
 from agnostic_agent.tools.decorators import tool
 
 
-@tool(mode="public", output_schema={"type": "string"})
+@tool(mode="public")
 def to_upper(text: str) -> str:
     """
     Convierte el texto a mayúsculas.
@@ -21,13 +21,13 @@ def to_upper(text: str) -> str:
     return text.upper()
 
 
-@tool(mode="public", output_schema={"type": "integer"})
+@tool(mode="public")
 def word_count(text: str) -> int:
     """Cuenta el número de palabras en el texto."""
     return len(text.split())
 
 
-@tool(mode="public", output_schema={"type": "boolean"})
+@tool(mode="public")
 def is_palindrome(text: str) -> bool:
     """Verifica si el texto es un palíndromo."""
     clean = "".join(c.lower() for c in text if c.isalnum())

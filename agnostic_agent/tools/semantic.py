@@ -105,7 +105,7 @@ def _embed_texts_core(inputs: List[str]) -> np.ndarray:
     return emb.cpu().numpy()
 
 
-@tool(mode="public", output_schema={"type": "array", "items": {"type": "array", "items": {"type": "number"}}})
+@tool(mode="public")
 def embed_texts(texts: List[str]) -> List[List[float]]:
     """
     Devuelve embeddings para cada texto, usando Transformers local.
@@ -142,7 +142,7 @@ def _cosine_sim_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.matmul(a_norm, b_norm.T)
 
 
-@tool
+@tool(mode="public")
 def semantic_search_in_memory(
     query: str,
     documents: List[str],
@@ -239,7 +239,7 @@ def _get_csv_embeddings(
     return payload
 
 
-@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
+@tool(mode="public")
 def context_search_in_csv(
     query: str,
     csv_path: str,
@@ -287,7 +287,7 @@ semantic_search_in_csv = context_search_in_csv
 # CONTEXTO: precálculo de embeddings de tablas
 # ─────────────────────────────────────────────
 
-@tool
+@tool(mode="public")
 def embed_context_tables(
     table_paths: List[str],
     text_columns: Dict[str, List[str]] | None = None,
@@ -418,7 +418,7 @@ def _format_rerank_prompts(
     return prompts
 
 
-@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
+@tool(mode="public")
 def rerank_docs(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     """
     Usa el Reranker local (vía Transformers) para ordenar documentos por relevancia.
@@ -511,7 +511,7 @@ def rerank_docs(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
 # JUICIO FILA + CONTEXTO (parametrías / diccionarios)
 # ─────────────────────────────────────────────
 
-@tool
+@tool(mode="public")
 def judge_row_with_context(
     row: Dict[str, Any],
     param_hits: List[Dict[str, Any]] | None = None,
@@ -624,7 +624,7 @@ def _auto_select_source_filter(
     return best_name
 
 
-@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
+@tool(mode="public")
 def list_knowledge_sources() -> List[Dict[str, Any]]:
     """
     Lists all available documents/files in the knowledge base.
@@ -641,7 +641,7 @@ def list_knowledge_sources() -> List[Dict[str, Any]]:
         return [{"error": f"Failed to list sources: {e}"}]
 
 
-@tool(mode="public", output_schema={"type": "array", "items": {"type": "object"}})
+@tool(mode="public")
 def search_knowledge_base(
     query: str,
     top_k: int = 15,
