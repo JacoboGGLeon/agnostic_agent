@@ -178,6 +178,9 @@ section[data-testid="stSidebar"] {
 div[data-testid="stChatMessage"] {
   background-color: transparent !important;
 }
+[data-testid="stChatMessageAvatarAssistant"] {
+  display: none !important;
+}
 
 /* Identificar msg de user */
 .bubble-user {

@@ -188,8 +188,63 @@ def render_offline_tab(agent_factory):
                     "sum_numbers": {"numbers": [1, 2, 3]},
                     "average_numbers": {"numbers": [4, 6, 8]},
                     "search_knowledge_base": {"query": "open ai gym", "top_k": 10},
+                    "list_knowledge_sources": {},
+                    "embed_texts": {"texts": ["open ai gym", "reinforcement learning"]},
+                    "semantic_search_in_memory": {
+                        "query": "open ai gym",
+                        "documents": [
+                            "OpenAI Gym is a toolkit for reinforcement learning.",
+                            "Breiman discusses statistical modeling cultures.",
+                        ],
+                        "top_k": 2,
+                    },
+                    "context_search_in_csv": {
+                        "query": "open ai gym",
+                        "csv_path": "2026-02-19T22-21_export.csv",
+                        "text_columns": ["file", "description"],
+                        "top_k": 5,
+                    },
+                    "embed_context_tables": {
+                        "table_paths": ["2026-02-19T22-21_export.csv"],
+                        "text_columns": {
+                            "2026-02-19T22-21_export.csv": ["file", "description"]
+                        },
+                    },
+                    "rerank_docs": {
+                        "query": "open ai gym",
+                        "documents": [
+                            {"content": "OpenAI Gym toolkit for RL experiments"},
+                            {"content": "The Two Cultures by Leo Breiman"},
+                        ],
+                    },
+                    "judge_row_with_context": {
+                        "row": {"id": "row_1", "term": "OpenAI Gym"},
+                        "param_hits": [{"text": "OpenAI Gym toolkit"}],
+                        "glossary_hits": [],
+                    },
                 }
                 return examples.get(tool_name, {})
+
+            def _normalized_field_type(
+                field_name: str,
+                field_def: Dict[str, Any],
+                example_value: Any,
+            ) -> str:
+                if isinstance(example_value, bool):
+                    return "boolean"
+                if isinstance(example_value, int) and not isinstance(example_value, bool):
+                    return "integer"
+                if isinstance(example_value, float):
+                    return "number"
+                if isinstance(example_value, list):
+                    return "array"
+                if isinstance(example_value, dict):
+                    return "object"
+
+                ftype = (field_def or {}).get("type", "string")
+                if field_name in ("text_columns", "row") and ftype == "string":
+                    return "object"
+                return ftype
 
             def _tool_markdown_doc(tool_obj: Any) -> str:
                 name = tool_obj.name
@@ -197,14 +252,15 @@ def render_offline_tab(agent_factory):
                 example = _example_payload(name)
                 input_lines = []
                 for field_name, field_def in args_schema.items():
-                    ftype = field_def.get("type", "string")
+                    ex_value = example.get(field_name)
+                    ftype = _normalized_field_type(field_name, field_def, ex_value)
                     input_lines.append(f"- `{field_name}`: `{ftype}`")
                 if not input_lines:
-                    input_lines.append("- _(sin parámetros)_")
+                    input_lines.append("- _(sin parametros)_")
 
                 output_hint = "Ver salida real de la tool."
                 if name == "is_palindrome":
-                    output_hint = "`true` si el texto es palíndromo, si no `false`."
+                    output_hint = "`true` si el texto es palindromo, si no `false`."
 
                 ex = json.dumps(example, ensure_ascii=False, indent=2) if example else "{}"
                 return (
@@ -245,9 +301,9 @@ def render_offline_tab(agent_factory):
 
                 if args_schema:
                     for field_name, field_def in args_schema.items():
-                        ftype = field_def.get("type", "string")
-                        title = field_def.get("title", field_name)
                         default_value = example_payload.get(field_name)
+                        ftype = _normalized_field_type(field_name, field_def, default_value)
+                        title = field_def.get("title", field_name)
 
                         if ftype == "integer":
                             initial = int(default_value) if isinstance(default_value, (int, float)) else 0
@@ -268,11 +324,21 @@ def render_offline_tab(agent_factory):
                                 inputs[field_name] = json.loads(val_str)
                             except Exception:
                                 st.error(f"Invalid JSON for {field_name}")
+                        elif ftype == "object":
+                            initial = default_value if isinstance(default_value, dict) else {}
+                            val_str = st.text_area(
+                                f"{title} ({field_name}) - JSON Object",
+                                value=json.dumps(initial, ensure_ascii=False, indent=2),
+                            )
+                            try:
+                                inputs[field_name] = json.loads(val_str)
+                            except Exception:
+                                st.error(f"Invalid JSON for {field_name}")
                         else:
                             initial = str(default_value) if default_value is not None else ""
                             inputs[field_name] = st.text_input(f"{title} ({field_name})", value=initial)
 
-                if st.button(f"Ejecutar {selected_tool_name}", type="primary"):
+                if st.button("Test Tool", type="primary"):
                     try:
                         with st.spinner("Ejecutando..."):
                             output = tool.invoke(inputs)

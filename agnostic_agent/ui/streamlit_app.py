@@ -159,9 +159,15 @@ if st.session_state.get("theme_mode", "dark") == "light":
   background: #f7f9fc !important;
   color: #0d1b2a !important;
 }
+body, p, span, label, li, small, strong, em, code, pre {
+  color: #0d1b2a !important;
+}
 section[data-testid="stSidebar"] {
   background: #ffffff !important;
   border-right: 1px solid #d7dce3 !important;
+}
+.stSidebar, .stSidebar * {
+  color: #0d1b2a !important;
 }
 .topbar {
   background: #ffffff !important;
@@ -170,6 +176,22 @@ section[data-testid="stSidebar"] {
 }
 .title, .subtitle, .badge {
   color: #0d1b2a !important;
+}
+.stTabs [role="tab"] {
+  color: #0d1b2a !important;
+}
+.stMarkdown, .stCaption, .stText, .stAlert, .stSelectbox label, .stRadio label, .stCheckbox label, .stTextInput label, .stTextArea label {
+  color: #0d1b2a !important;
+}
+[data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea,
+[data-baseweb="select"] * {
+  color: #0d1b2a !important;
+  background-color: #ffffff !important;
+}
+.stChatInput [data-baseweb="textarea"] textarea {
+  color: #0d1b2a !important;
+  background-color: #ffffff !important;
 }
 .bubble-user {
   border-color: rgba(96, 61, 186, .45) !important;
@@ -185,6 +207,9 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
   background: #ffffff !important;
   border-color: #d7dce3 !important;
   box-shadow: 0 8px 26px rgba(0,0,0,.08) !important;
+}
+[data-testid="stChatMessageAvatarAssistant"] {
+  display: none !important;
 }
 </style>
 """,

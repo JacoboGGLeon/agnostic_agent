@@ -50,7 +50,7 @@ def render_online_tab(agent_factory):
                         else ""
                     )
 
-                    with st.chat_message("assistant", avatar=" "):
+                    with st.chat_message("assistant"):
                         try:
                             raw_html = markdown.markdown(
                                 content or "_(sin respuesta)_", extensions=["extra"]
@@ -65,7 +65,7 @@ def render_online_tab(agent_factory):
                             <div class="bubble-agent">
                               <div style="font-size: 0.8em; opacity: 0.85; margin-bottom: 4px; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
                                 <span>Respuesta {badge_html}</span>
-                                <span style="font-size:1rem;">🤖</span>
+                                <span style="font-size:1rem;">&#129302;</span>
                               </div>
                               <div class="bubble-content">{raw_html}</div>
                             </div>
@@ -75,7 +75,7 @@ def render_online_tab(agent_factory):
 
                         meta_col, inspect_col = st.columns([1.8, 1.0])
                         with meta_col:
-                            st.caption(f"id={msg.get('id')} · tools:{len(tool_runs)}")
+                            st.caption(f"id={msg.get('id')} - tools:{len(tool_runs)}")
                         with inspect_col:
                             if st.button(
                                 "Inspect",
