@@ -1,28 +1,28 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """
-LÃ³gica principal (grafo LangGraph) del Agnostic Deep Agent.
+Logica principal (grafo LangGraph) del Agnostic Deep Agent.
 
 Sub-grafos actuales:
-- ANALYZER  â†’ descompone el prompt (rule-based sencillo por ahora).
-- PLANNER   â†’ usa Planner LLM (OpenAI-compatible) para generar tool_calls.
-- EXECUTOR  â†’ ejecuta tools reales (LangChain tools).
-- CATCHER   â†’ normaliza las salidas de tools a una lista de runs.
-- SUMMARIZERâ†’ construye:
+- ANALYZER  a descompone el prompt (rule-based sencillo por ahora).
+- PLANNER   a usa Planner LLM (OpenAI-compatible) para generar tool_calls.
+- EXECUTOR  a ejecuta tools reales (LangChain tools).
+- CATCHER   a normaliza las salidas de tools a una lista de runs.
+- SUMMARIZERa construye:
     - respuesta final en modo usuario (user_answer),
-    - resumen tÃ©cnico del pipeline (para vistas deep/dev).
-- VALIDATOR â†’ revisa si la respuesta parece cubrir todo lo pedido.
+    - resumen tAcnico del pipeline (para vistas deep/dev).
+- VALIDATOR a revisa si la respuesta parece cubrir todo lo pedido.
 
 Notas:
-- Este mÃ³dulo sigue usando TypedDict; todavÃ­a no estÃ¡ cableado
+- Este mA3dulo sigue usando TypedDict; todavAa no esta cableado
   a los modelos Pydantic de `schemas.py`.
 - Ya integra memoria y knowledge_names en el planner, y deja
   dev_out / deep_out / user_out en el estado.
-- EstÃ¡ pensado para casos donde el agente cruza:
+- EstA pensado para casos donde el agente cruza:
     * una tabla de atributos (input A, p.ej. filas de contratos),
-    * con tablas de contexto (input B, p.ej. parametrÃ­as y
+    * con tablas de contexto (input B, p.ej. parametrAas y
       diccionarios de abreviaturas/definiciones),
-    * y, opcionalmente, documentos (OCR de contratos) vÃ­a tools
+    * y, opcionalmente, documentos (OCR de contratos) vAa tools
       como context_search_in_csv + rerank_docs.
 """
 
@@ -48,9 +48,9 @@ from langchain_core.messages import (
 from .capabilities import PlannerConfig, build_planner_system_message
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Tipos de alto nivel para el "program state"
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 class AnalyzerResult(TypedDict, total=False):
     input_payload: Dict[str, Any]
@@ -87,11 +87,11 @@ class ValidatorResult(TypedDict, total=False):
 
 class State(TypedDict, total=False):
     """
-    Estado del grafo (versiÃ³n 0.2):
+    Estado del grafo (versiA3n 0.2):
 
     - messages: historial de LangChain Messages.
     - analyzer: resultado ligero del ANALYZER rule-based.
-    - planner_trajs: trazas de planificaciÃ³n del PLANNER.
+    - planner_trajs: trazas de planificaciA3n del PLANNER.
     - executor_steps: pasos efectivamente ejecutados (EXECUTOR).
     - tool_runs: lista de runs normalizados (CATCHER).
     - summary / pipeline_summary: SummaryDict de todo el pipeline.
@@ -114,8 +114,8 @@ class State(TypedDict, total=False):
     validator: Optional[ValidatorResult]
 
     # Metadatos / contexto
-    forced_skill: Optional[str] # âœ… Skill forzada desde UI
-    skills_allowlist: Optional[List[str]] # âœ… Allowlist de skills desde UI/cliente
+    forced_skill: Optional[str] # a... Skill forzada desde UI
+    skills_allowlist: Optional[List[str]] # a... Allowlist de skills desde UI/cliente
     user_prompt: Optional[str]
     session_id: Optional[str]
     knowledge_names: List[str]
@@ -131,9 +131,9 @@ class State(TypedDict, total=False):
     llm_clean_out: Optional[str]
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Planner runtime helpers (tool_calls)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def _coerce_content_str(content: Any) -> str:
     if isinstance(content, str):
@@ -163,14 +163,14 @@ def _parse_args_maybe_json(x: Any) -> dict:
 
 def _normalize_toolcalls_list(raw_calls: Any) -> List[Dict[str, Any]]:
     """
-    Normaliza mÃºltiples formatos a:
+    Normaliza mAoltiples formatos a:
       [{"id": ..., "name": ..., "args": {...}}, ...]
     """
     norm: List[Dict[str, Any]] = []
     if not raw_calls:
         return norm
 
-    # âœ… robustez: a veces viene dict o un objeto suelto
+    # a... robustez: a veces viene dict o un objeto suelto
     if isinstance(raw_calls, dict):
         raw_calls = [raw_calls]
     elif not isinstance(raw_calls, list):
@@ -212,9 +212,9 @@ def _normalize_toolcalls_list(raw_calls: Any) -> List[Dict[str, Any]]:
     return norm
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# âœ… XML fallback robusto (Qwen XML)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+# a... XML fallback robusto (Qwen XML)
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def _scan_balanced_json(s: str, i: int) -> Tuple[Optional[str], int]:
     """
@@ -343,7 +343,7 @@ def _extract_xml_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     """
     Fallback robusto para modelos con salida XML (tipo Qwen/Anthropic):
       1) intenta XML real (ElementTree) con wrapper <root>
-      2) si falla (XML roto), usa bÃºsqueda xml-ish + brace-scan
+      2) si falla (XML roto), usa busqueda xml-ish + brace-scan
     Luego normaliza a {"id","name","args"} (misma forma que el resto).
     """
     text = _coerce_content_str(getattr(ai_msg, "content", ""))
@@ -419,16 +419,16 @@ def call_planner_with_retry(
     return last_ai  # type: ignore[return-value]
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Helpers JSON para serializar salidas de tools
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def _json_default(obj: Any) -> Any:
     """
     Fallback para tipos no JSON-serializables (np.int64, sets, etc.).
     Mantiene estructura lo mejor posible en lugar de castear todo a str.
     """
-    # Numpy genÃ©ricos â†’ .item()
+    # Numpy genAricos a .item()
     try:
         import numpy as _np  # import local para no romper si no hay numpy
         if isinstance(obj, _np.generic):
@@ -436,23 +436,23 @@ def _json_default(obj: Any) -> Any:
     except Exception:
         pass
 
-    # Sets â†’ lista
+    # Sets a lista
     if isinstance(obj, (set, frozenset)):
         return list(obj)
 
-    # Ãšltimo recurso
+    # Asltimo recurso
     return str(obj)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# 1) Utilidades: strip_think() + â€œÃºltimo assistant realâ€
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+# 1) Utilidades: strip_think() + aultimo assistant reala
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 # Regex mejorada: maneja cierre opcional (si el LLM se corta) y case-insensitve
-# (?s) = dot matches newline
-# <think>.*? = contenido non-greedy
-# (?:</think>|$) = termina en cierre o fin de string
-_THINK_RE = re.compile(r"(?s)<think>.*?(?:</think>|$)\s*", flags=re.IGNORECASE)
+# (->s) = dot matches newline
+# <think>.*-> = contenido non-greedy
+# (->:</think>|$) = termina en cierre o fin de string
+_THINK_RE = re.compile(r"(->s)<think>.*->(->:</think>|$)\s*", flags=re.IGNORECASE)
 
 def strip_think(txt: str) -> str:
     """Elimina <think>...</think> (o hasta fin de string) de forma robusta."""
@@ -461,10 +461,10 @@ def strip_think(txt: str) -> str:
     # 1. Intentar eliminar bloques completos o truncados
     cleaned = _THINK_RE.sub("", txt).strip()
     
-    # 2. Defensa en profundidad: Si limpiamos todo y queda vacÃ­o,
-    # significa que el modelo solo pensÃ³ y no respondiÃ³.
+    # 2. Defensa en profundidad: Si limpiamos todo y queda vacio,
+    # significa que el modelo solo pensA3 y no respondiA3.
     if not cleaned and txt.strip():
-        # Retornamos vacÃ­o para que el fallback del Summarizer ("Â¿QuÃ© te gustarÃ­a hacer?") actÃºe.
+        # Retornamos vacio para que el fallback del Summarizer ("AQuA te gustarAa hacer->") actAoe.
         return ""
         
     return cleaned
@@ -481,7 +481,7 @@ def _is_pipeline_internal_ai(m: AnyMessage) -> bool:
     if addkw.get("pipeline_internal") is True:
         return True
 
-    # HeurÃ­stica por contenido (fallback defensivo)
+    # HeurAstica por contenido (fallback defensivo)
     txt = _coerce_content_str(getattr(m, "content", "")).lstrip()
     if txt.startswith("## Resumen del pipeline"):
         return True
@@ -494,7 +494,7 @@ def _is_pipeline_internal_ai(m: AnyMessage) -> bool:
 
 def find_last_assistant_real(messages: List[AnyMessage]) -> Optional[AIMessage]:
     """
-    Devuelve el Ãºltimo AIMessage "real" (del LLM), ignorando mensajes internos del pipeline.
+    Devuelve el ultimo AIMessage "real" (del LLM), ignorando mensajes internos del pipeline.
     """
     for m in reversed(messages or []):
         if isinstance(m, AIMessage) and not _is_pipeline_internal_ai(m):
@@ -504,9 +504,9 @@ def find_last_assistant_real(messages: List[AnyMessage]) -> Optional[AIMessage]:
     return None
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Summarizer helpers
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def _fmt_args(args: dict) -> str:
     if not args:
@@ -525,7 +525,7 @@ def _fmt_args(args: dict) -> str:
 
 def _fmt_output(tool_name: str, v: Any) -> str:
     if isinstance(v, bool):
-        return "SÃ­" if v else "No"
+        return "Si" if v else "No"
     
     # Generic robust formatter for complex objects
     if isinstance(v, (dict, list, tuple, set)):
@@ -540,16 +540,16 @@ def _fmt_output(tool_name: str, v: Any) -> str:
 def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
     """
     Resumen user-friendly basado SOLO en las salidas de herramientas.
-    Esto alimenta `summary.summarizer` y la secciÃ³n dev "SUMMARIZER (basado en herramientas)".
+    Esto alimenta `summary.summarizer` y la seccion dev "SUMMARIZER (basado en herramientas)".
     """
     if not runs:
         return (
-            "No se invocÃ³ ninguna herramienta. "
-            "No puedo responder con garantÃ­as a la pregunta sÃ³lo con razonamiento interno."
+            "No se invoco ninguna herramienta. "
+            "No puedo responder con garantias a la pregunta solo con razonamiento interno."
         )
 
     partes = [
-        "ðŸ“Œ **Resumen basado en herramientas (sin alucinaciones)**",
+        "Summary based on tools (no hallucinations)",
     ]
 
     for r in runs:
@@ -558,11 +558,11 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
         output = r["output"]
         arg_str = _fmt_args(args)
         
-        # â”€â”€â”€ SPECIAL FORMATTING FOR KNOWLEDGE SEARCH â”€â”€â”€
+        # Special formatting for semantic search results
         if tool_name == "search_knowledge_base" and isinstance(output, list):
-            partes.append(f"\n### ðŸ” Resultados de bÃºsqueda (`{arg_str}`)")
+            partes.append(f"\n### Search results (`{arg_str}`)")
             if not output:
-                partes.append("_(Sin resultados relevantes)_")
+                partes.append("_(No relevant results)_")
             else:
                 first = output[0] if output and isinstance(output[0], dict) else {}
                 eff_filter = first.get("effective_source_filter")
@@ -590,9 +590,9 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
                     
                     # Markdown Card-like format
                     card = (
-                        f"**{idx}. {src_name}** (Relevancia: {score:.2f})"
+                        f"**{idx}. {src_name}** (Score: {score:.2f})"
                         + (
-                            f" [Ãrbol {item.get('search_tree')}, L2={item.get('doc_score', 0):.2f}, L1={item.get('chunk_score', 0):.2f}]"
+                            f" [Tree {item.get('search_tree')}, L2={item.get('doc_score', 0):.2f}, L1={item.get('chunk_score', 0):.2f}]"
                             if item.get("search_tree")
                             else ""
                         )
@@ -602,14 +602,14 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
                     partes.append(card)
             continue
 
-        # â”€â”€â”€ DEFAULT FORMATTING â”€â”€â”€
+        # Default formatting
         out_str = _fmt_output(tool_name, output)
         
         # Generic formatting: Code block for large outputs if needed
         if len(out_str) > 100 or "\n" in out_str:
              partes.append(f"- `{tool_name}({arg_str})`:\n```json\n{out_str}\n```")
         else:
-             partes.append(f"- `{tool_name}({arg_str})` â†’ **{out_str}**")
+             partes.append(f"- `{tool_name}({arg_str})` -> **{out_str}**")
 
     return "\n".join(partes)
 
@@ -617,20 +617,20 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
 # build_user_answer REMOVED (Legacy hardcoded function)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# PequeÃ±os helpers de contexto (memoria / KB)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+# PequeAos helpers de contexto (memoria / KB)
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def _format_memory_context(mem: Any) -> str:
     """
     Serializa el memory_context para pasarlo al planner como SystemMessage.
 
     Pensado para cosas tipo:
-      - Ãºltimas N interacciones relevantes,
+      - Aoltimas N interacciones relevantes,
       - notas de usuario,
-      - resÃºmenes de largo plazo.
+      - resAomenes de largo plazo.
 
-    Mantenerlo breve es trabajo de memory.py; aquÃ­ sÃ³lo lo volcamos.
+    Mantenerlo breve es trabajo de memory.py; aqui solo lo volcamos.
     """
     if not mem:
         return ""
@@ -644,30 +644,30 @@ def _format_knowledge_hint(knowledge_names: List[str]) -> str:
     if not knowledge_names:
         return ""
     return (
-        "KBs disponibles para esta sesiÃ³n:\n"
+        "KBs disponibles para esta sesion:\n"
         + "\n".join(f"- {name}" for name in knowledge_names)
         + "\n\nPuedes decidir llamar a herramientas que lean o crucen estas KBs "
           "si es necesario (por ejemplo, comparar filas de una tabla con una tabla "
-          "de parÃ¡metros / reglas de calidad y emitir una tabla de juicios)."
+          "de parAmetros / reglas de calidad y emitir una tabla de juicios)."
     )
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Builder del grafo LangGraph
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 def build_graph_agent(
     planner_llm,
     tools: List[Any],
     planner_config: PlannerConfig | None = None,
-    skill_registry: Any | None = None,  # âœ… Recibimos el registro
+    skill_registry: Any | None = None,  # a... Recibimos el registro
 ):
     """
     Grafo:
 
-        START â†’ ANALYZER â†’ PLANNER
-                      â”œâ”€(tool_calls)â†’ EXECUTOR â†’ CATCHER â†’ SUMMARIZER â†’ VALIDATOR â†’ END
-                      â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â†’ SUMMARIZER â†’ VALIDATOR â†’ END
+        START a ANALYZER a PLANNER
+                      aa(tool_calls)a EXECUTOR a CATCHER a SUMMARIZER a VALIDATOR a END
+                      aaaaaaaaaaaaaaa SUMMARIZER a VALIDATOR a END
     """
     cfg = planner_config or PlannerConfig()
     base_system_msg = build_planner_system_message(cfg)
@@ -682,14 +682,14 @@ def build_graph_agent(
         last_user = user_messages[-1] if user_messages else None
         user_text = last_user.content if isinstance(last_user, HumanMessage) else ""
 
-        # ðŸ“¥ INPUTS:
+        # Y INPUTS:
         # user_prompt: Tu pregunta original (el texto que escribes en el chat).
         
         user_prompt = state.get("user_prompt") or user_text
 
-        # INPUT: active_tools (simulamos recepciÃ³n para cumplir contrato)
-        # En esta arquitectura, las tools estÃ¡n en el scope global 'tools' inyectado al builder
-        # pero para ser explÃ­citos en el input, las recuperamos del contexto si es posible
+        # INPUT: active_tools (simulamos recepciA3n para cumplir contrato)
+        # En esta arquitectura, las tools estan en el scope global 'tools' inyectado al builder
+        # pero para ser explAcitos en el input, las recuperamos del contexto si es posible
         # o simplemente usamos la lista global disponible en el closure.
         active_tools_input = tools # Global scope from closure
         
@@ -701,10 +701,10 @@ def build_graph_agent(
         from agnostic_agent.prompts import ANALYZER_SYSTEM_PROMPT, LOGIC_DEFINITIONS
         
         # Inyectar variables en el prompt
-        # Nota: available_skills podrÃ­amos inyectarlo tambiÃ©n si el prompt lo pidiera,
-        # pero el nuevo prompt simplificado confÃ­a en que el modelo 'sabe' o se le pasa en contexto.
+        # Nota: available_skills podrAamos inyectarlo tambiAn si el prompt lo pidiera,
+        # pero el nuevo prompt simplificado confAa en que el modelo 'sabe' o se le pasa en contexto.
         # Ajustemos para pasarle las skills disponibles si el prompt lo requiere implicitamente
-        # o agreguÃ©moslo al user message.
+        # o agreguAmoslo al user message.
         
         # Para ser robustos, listamos las skills y las pegamos en el prompt si hay placeholder,
         # o simplemente las agregamos al final del system prompt.
@@ -724,13 +724,13 @@ def build_graph_agent(
         if available_skills_txt:
             sys_content += f"\n\nSKILLS DISPONIBLES:\n{available_skills_txt}"
             
-        # Refuerzo para latencia: si el usuario desactivÃ³ el pensamiento
+        # Refuerzo para latencia: si el usuario desactivA3 el pensamiento
         if cfg and not cfg.enable_thinking:
             sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON block."
             
         sys_msg = SystemMessage(content=sys_content)
-        # Enviamos un mensaje dummy de usuario para activar la generaciÃ³n
-        user_msg = HumanMessage(content="Analiza mi peticiÃ³n y genera el JSON.")
+        # Enviamos un mensaje dummy de usuario para activar la generaciA3n
+        user_msg = HumanMessage(content="Analiza mi peticiA3n y genera el JSON.")
 
         # 2. Invocar LLM (o Bypass si hay Forced Skill)
         selected_skills = []
@@ -806,7 +806,7 @@ def build_graph_agent(
             selected_skills = data.get("selected_skills", [])
             
             # --- FALLBACK (skills-first, pero no siempre RAG) ---
-            # Si el modelo no eligiÃ³ skill, forzamos una skill segura de soporte:
+            # Si el modelo no eligiA3 skill, forzamos una skill segura de soporte:
             # - `capabilities_menu`: muestra el menu de capacidades para que el usuario elija.
             if not selected_skills:
                 if skill_registry and skill_registry.get_skill("capabilities_menu"):
@@ -820,7 +820,7 @@ def build_graph_agent(
             
         except Exception as e:
             print(f"[ANALYZER] Error parsing JSON: {e}. Content: {getattr(response, 'content', '')[:100]}...")
-            # Fallback simple: lista vacÃ­a
+            # Fallback simple: lista vacAa
             if knowledge_available:
                  print(f"[ANALYZER] Error fallback: leaving skills empty.")
                  selected_skills = []
@@ -828,9 +828,9 @@ def build_graph_agent(
         # 4. Construir resultado
         subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
         
-        # ðŸ“¤ OUTPUTS:
-        # subqueries: La pregunta descompuesta en pasos lÃ³gicos.
-        # propositional_logic: La relaciÃ³n entre las subconsultas.
+        # Y OUTPUTS:
+        # subqueries: La pregunta descompuesta en pasos lA3gicos.
+        # propositional_logic: La relaciA3n entre las subconsultas.
         
         analyzer: AnalyzerResult = {
             "input_payload": {"user_prompt": user_prompt},
@@ -857,14 +857,14 @@ def build_graph_agent(
         Construye el Contexto Estructurado (Rich Registry) con metadata/esquemas detallados.
         
         Compliance con Requerimientos:
-        - Skills: Lista de skills activas y expansion a ellas (cÃ³mo usar tools sobre knowledge).
+        - Skills: Lista de skills activas y expansion a ellas (cA3mo usar tools sobre knowledge).
         - Tools: Definiciones (JSON schema) y docstrings (input, descripcion, output).
         - Knowledge: Descripciones literales de la database.
         """
         lines = ["== CONTEXTO DEL SISTEMA (Capabilities) ==", ""]
 
-        # 1. SKILLS (ExpansiÃ³n y GuÃ­a)
-        lines.append("### ðŸ§© SKILLS (Estrategias Activas)")
+        # 1. SKILLS (Expansion y GuAa)
+        lines.append("### Y SKILLS (Estrategias Activas)")
         if skills_reg:
             all_skills = skills_reg.list_skills()
             if all_skills:
@@ -872,7 +872,7 @@ def build_graph_agent(
                     if exclude_skills and s.name in exclude_skills:
                         continue
                     
-                    # ExpansiÃ³n: CÃ³mo usar tools sobre knowledges
+                    # Expansion: Como usar tools sobre knowledges
                     knowledge_hint = ""
                     if s.knowledge:
                         knowledge_hint = f" -> Opera sobre Knowledge: {s.knowledge}"
@@ -894,11 +894,11 @@ def build_graph_agent(
         lines.append("")
 
         # 2. TOOLS (Schema + Docstring completo)
-        lines.append("### ðŸ›  TOOLS (Funciones ejecutables)")
+        lines.append("### Y  TOOLS (Funciones ejecutables)")
         if tools_list:
             for t in tools_list:
                 name = getattr(t, "name", "tool")
-                desc = getattr(t, "description", str(t)) # Docstring principal / DescripciÃ³n
+                desc = getattr(t, "description", str(t)) # Docstring principal / DescripciA3n
                 
                 # Metadata extendida
                 metadata = getattr(t.func if hasattr(t, 'func') else t, '_agnostic_metadata', None)
@@ -935,12 +935,12 @@ def build_graph_agent(
         lines.append("")
 
         # 3. KNOWLEDGE (Descripciones Literales)
-        lines.append("### ðŸ“š KNOWLEDGE (Bases de Datos)")
+        lines.append("### Ys KNOWLEDGE (Bases de Datos)")
         if knowledge_list:
             for knowledge in knowledge_list:
                 # knowledge es un dict que viene de la base de datos (agent.py)
                 knowledge_name = knowledge.get("name", "unknown")
-                knowledge_desc = knowledge.get("description", "Sin descripciÃ³n")
+                knowledge_desc = knowledge.get("description", "Sin descripcion")
                 
                 lines.append(f"@knowledge {{name={knowledge_name}}}")
                 lines.append(f"  Description: {knowledge_desc}") # Literal de la DB
@@ -966,11 +966,11 @@ def build_graph_agent(
         # INPUT REFINEMENT: Planner solo debe depender de subqueries y rich_context
         
         analyzer = state.get("analyzer") or {}
-        # 1. INPUT: subqueries (ExtraÃ­do explÃ­citamente del output del Analyzer)
+        # 1. INPUT: subqueries (ExtraAdo explAcitamente del output del Analyzer)
         subqs = analyzer.get("subqueries") or []
         
         # 1.1 FILTRADO ESTRICTO DE TOOLS POR SKILLS
-        # Las skills activas estÃ¡n en _active_skills_internal (no en AnalyzerResult oficial)
+        # Las skills activas estan en _active_skills_internal (no en AnalyzerResult oficial)
         active_skills = state.get("_active_skills_internal") or []
         skill_mode = len(active_skills) > 0
         
@@ -989,7 +989,7 @@ def build_graph_agent(
         
         # Filtrado estricto:
         # - Skill mode: solo tools declaradas por las skills (si no declaran tools -> 0 tools)
-        # - Sin skills: modo genÃ©rico, todas las tools disponibles
+        # - Sin skills: modo genArico, todas las tools disponibles
         if skill_mode:
             if required_tool_names:
                 active_tools = [t for t in tools if t.name in required_tool_names]
@@ -1005,7 +1005,7 @@ def build_graph_agent(
             active_knowledge_objects = knowledge_selected
 
         # 2. Construir Contexto
-        # Pasamos active_skills para excluirlas del contexto (evitar recursiÃ³n)
+        # Pasamos active_skills para excluirlas del contexto (evitar recursiA3n)
         rich_context_text = _format_rich_context(
             skill_registry, 
             active_tools, 
@@ -1019,7 +1019,7 @@ def build_graph_agent(
         # Inyectar variables
         sys_content = PLANNER_DAG_SYSTEM_PROMPT
         
-        # Si el usuario desactivÃ³ el pensamiento, forzamos al modelo en el prompt
+        # Si el usuario desactivA3 el pensamiento, forzamos al modelo en el prompt
         if cfg and not cfg.enable_thinking:
             sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON DAG block."
         
@@ -1049,7 +1049,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
         # Inyectar variables globales
         sys_content = PLANNER_DAG_SYSTEM_PROMPT
         
-        # Si el usuario desactivÃ³ el pensamiento, forzamos al modelo en el prompt
+        # Si el usuario desactivA3 el pensamiento, forzamos al modelo en el prompt
         if cfg and not cfg.enable_thinking:
             sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON DAG block."
         
@@ -1059,7 +1059,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             # En skill mode SIEMPRE re-bind para restringir superficie de tools.
             base_model = getattr(planner_llm, "bound", planner_llm)
             current_llm = base_model.bind_tools(active_tools)
-            print(f"[PLANNER] ðŸ”’ Skill Mode Active. Re-bound LLM to {len(active_tools)} tools.")
+            print(f"[PLANNER] Y Skill Mode Active. Re-bound LLM to {len(active_tools)} tools.")
         
         history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
         
@@ -1083,7 +1083,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             try:
                 print(f"[PLANNER] Planning for Subquery {i}/{len(subqs)}: {subq}")
                 
-                # Construir prompt especÃ­fico
+                # Construir prompt especAfico
                 user_msg_content = f"""CONTEXTO DISPONIBLE:
 {rich_context_text}
 
@@ -1118,10 +1118,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         dag_data = json.loads(json_str)
                         dag_steps = dag_data.get("dag", [])
                     except json.JSONDecodeError:
-                        print(f"[PLANNER] âš ï¸ JSON Decode Error for subquery {i}")
+                        print(f"[PLANNER] as i  JSON Decode Error for subquery {i}")
                 
                 # Procesar pasos del DAG
-                allowed_tool_names = {t.name for t in active_tools} if active_tools else None
+                allowed_tool_names = {t.name for t in active_tools}
                 subq_calls = []
                 
                 for step in dag_steps:
@@ -1129,22 +1129,24 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     t_args = step.get("args", {})
                     # RE-GENERATE ID to ensure uniqueness across consolidated subqueries
                     # The LLM often restarts at "step_1" for each subquery.
-                    original_id = step.get("step_id") or "step_?"
+                    original_id = step.get("step_id") or "step_->"
                     t_id = f"{original_id}_{i}_{str(uuid.uuid4())[:4]}"
                     
                     if t_name:
                         # STRICT SKILL CHECK
-                        if skill_mode and allowed_tool_names and t_name not in allowed_tool_names:
-                            print(f"[PLANNER] â›” Tool '{t_name}' BLOCKED (Not in skill).")
-                            continue
+                        if skill_mode:
+                            # In skill mode, ANY tool outside the declared allowlist is blocked.
+                            if t_name not in allowed_tool_names:
+                                print(f"[PLANNER] Tool '{t_name}' BLOCKED (not allowed by active skill).")
+                                continue
                         
                         # DEDUPLICATION CHECK
-                        # Usamos nombre + args como clave Ãºnica
+                        # Usamos nombre + args como clave Aonica
                         args_sorted = json.dumps(t_args, sort_keys=True)
                         dedup_key = (t_name, args_sorted)
                         
                         if dedup_key in seen_calls_keys:
-                            print(f"[PLANNER] âš ï¸ Duplicate call skipped: {t_name}")
+                            print(f"[PLANNER] as i  Duplicate call skipped: {t_name}")
                             continue
                         seen_calls_keys.add(dedup_key)
                         
@@ -1157,13 +1159,30 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         subq_calls.append(call_obj)
                         all_tool_calls.append(call_obj)
                 
-                # Generar descripciÃ³n para PlannerTrajectory
-                desc_lines = []
-                if not subq_calls:
-                    desc_lines.append("No tools needed or planning specific to this query.")
+                # Build a readable DAG summary per subquery.
+                desc_lines: List[str] = []
+                if not dag_steps:
+                    desc_lines.append("No DAG steps were generated for this subquery.")
                 else:
-                     for tc in subq_calls:
-                         desc_lines.append(f"Call `{tc['name']}`")
+                    for step_idx, step in enumerate(dag_steps, start=1):
+                        step_id = step.get("step_id", f"step_{step_idx}")
+                        step_tool = step.get("tool", "(none)")
+                        step_args = step.get("args", {})
+                        try:
+                            step_args_txt = json.dumps(
+                                step_args,
+                                ensure_ascii=False,
+                                default=_json_default,
+                            )
+                        except Exception:
+                            step_args_txt = repr(step_args)
+                        desc_lines.append(
+                            f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
+                        )
+                    if dag_steps and not subq_calls:
+                        desc_lines.append(
+                            "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
+                        )
                 
                 plan_trajs.append(PlannerTrajectory(
                     subquery=subq,
@@ -1171,7 +1190,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 ))
                 
             except Exception as e:
-                print(f"[PLANNER] âŒ Error planning subquery {i}: {e}")
+                print(f"[PLANNER] a Error planning subquery {i}: {e}")
                 plan_trajs.append(PlannerTrajectory(subquery=subq, description=f"Error: {e}"))
 
         # 7. Construir AIMessage final consolidado
@@ -1194,7 +1213,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
     def _resolve_dependency_arg(val: Any, results: Dict[str, Any]) -> Any:
         """
         Resuelve referencias tipo '$step_1.output' usando el diccionario de resultados previos.
-        Soporta anidaciÃ³n en listas y dicts.
+        Soporta anidaciA3n en listas y dicts.
         """
         if isinstance(val, str) and val.strip().startswith("$"):
             ref = val.strip()[1:]  # quitar $
@@ -1203,10 +1222,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
             
             if step_id in results:
                 res = results[step_id]
-                # Si piden un campo especÃ­fico (ej: $step_1.output.id)
+                # Si piden un campo especAfico (ej: $step_1.output.id)
                 if len(parts) > 1:
                     field = parts[1]
-                    # 'output' es la keyword estÃ¡ndar para el resultado completo, 
+                    # 'output' es la keyword estandar para el resultado completo, 
                     # pero si el resultado es un dict, permitimos acceso a subcampos
                     if field == "output":
                         return res
@@ -1226,8 +1245,8 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
     def _repair_tool_args(tool_obj: Any, raw_args: Any) -> Any:
         """
-        Normaliza args al esquema real de la tool para tolerar planes con claves genÃ©ricas
-        (por ejemplo: {"arg_name": "..."} para tools de un solo parÃ¡metro).
+        Normaliza args al esquema real de la tool para tolerar planes con claves genAricas
+        (por ejemplo: {"arg_name": "..."} para tools de un solo parAmetro).
         """
         if not isinstance(raw_args, dict):
             return raw_args
@@ -1241,14 +1260,14 @@ Genera el DAG exclusivo para resolver: "{subq}"
         if not expected_fields:
             return args
 
-        # Caso tÃ­pico: planner devuelve {"arg_name": ...} y la tool espera un Ãºnico campo.
+        # Caso tApico: planner devuelve {"arg_name": ...} y la tool espera un Aonico campo.
         if "arg_name" in args and "arg_name" not in expected_fields and len(expected_fields) == 1:
             target = expected_fields[0]
             args[target] = args.get("arg_name")
             args.pop("arg_name", None)
             return args
 
-        # Si el plan trae un Ãºnico campo no esperado y la tool espera solo uno, remap defensivo.
+        # Si el plan trae un Aonico campo no esperado y la tool espera solo uno, remap defensivo.
         if len(expected_fields) == 1:
             target = expected_fields[0]
             if target not in args and len(args) == 1:
@@ -1270,7 +1289,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         ai_plan = ai_msgs[-1]
         
-        # 1. Intentar sacar tool_calls explÃ­citos (LangChain attr)
+        # 1. Intentar sacar tool_calls explAcitos (LangChain attr)
         tool_calls = getattr(ai_plan, "tool_calls", None)
         
         # 2. Fallback a extractor manual
@@ -1286,7 +1305,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
         tool_msgs: List[ToolMessage] = []
         exec_steps: List[Dict[str, Any]] = []
         
-        # Diccionario local de resultados para resoluciÃ³n de dependencias
+        # Diccionario local de resultados para resoluciA3n de dependencias
         # step_id -> result
         local_results: Dict[str, Any] = {}
 
@@ -1301,9 +1320,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 args_raw = getattr(tc, "args", {}) or {}
                 t_id = getattr(tc, "id", "")
             
-            # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            # RESOLUCIÃ“N DE VARIABLES (Ambient Context)
-            # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            # RESOLUCIAN DE VARIABLES (Ambient Context)
+            # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             args = _resolve_dependency_arg(args_raw, local_results)
             
             print(f"[EXECUTOR] Running tool: {name} with resolved args: {args}")
@@ -1315,7 +1334,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             except StopIteration:
                 observation = {"error": f"Tool '{name}' no encontrada."}
             except Exception as e:
-                observation = {"error": f"ExcepciÃ³n ejecutando tool '{name}': {e!r}"}
+                observation = {"error": f"ExcepciA3n ejecutando tool '{name}': {e!r}"}
 
             # Guardar resultado para pasos posteriores
             if t_id:
@@ -1400,6 +1419,78 @@ Genera el DAG exclusivo para resolver: "{subq}"
         # Extraer analyzer al inicio para tener scope en todo el nodo
         analyzer = state.get("analyzer") or {}
 
+        def _pretty_json(value: Any) -> str:
+            try:
+                return json.dumps(value, ensure_ascii=False, indent=2, default=_json_default)
+            except Exception:
+                return repr(value)
+
+        def _build_analyzer_text(an: Dict[str, Any]) -> str:
+            if not an:
+                return "Analyzer did not run or did not leave state."
+            subqs = an.get("subqueries") or []
+            logic_expr = an.get("propositional_logic") or "(not built)"
+            payload = an.get("input_payload") or {}
+            lines = [
+                f"Input payload: {_pretty_json(payload)}",
+                f"Logica proposicional: {logic_expr}",
+                f"Subconsultas ({len(subqs)}):",
+            ]
+            for idx, sq in enumerate(subqs, start=1):
+                lines.append(f"- q{idx} = {sq}")
+            return "\n".join(lines)
+
+        def _build_planner_text() -> str:
+            planner_trajs = state.get("planner_trajs", []) or []
+            if not planner_trajs:
+                return "Planner did not build a tool plan."
+            out_lines: List[str] = []
+            for i, tr in enumerate(planner_trajs, start=1):
+                out_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
+                out_lines.append("DAG:")
+                raw_desc = (tr.get("description") or "").strip()
+                if not raw_desc:
+                    out_lines.append("step 1: (empty)")
+                else:
+                    for raw_line in raw_desc.splitlines():
+                        line = raw_line.strip()
+                        out_lines.append(line if line.startswith("step ") else f"step ->: {line}")
+                if i < len(planner_trajs):
+                    out_lines.append("")
+            return "\n".join(out_lines)
+
+        def _build_executor_text() -> str:
+            executor_steps = state.get("executor_steps", []) or []
+            if not executor_steps:
+                return "No tool execution happened for this query."
+            lines: List[str] = [f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"]
+            for idx, step in enumerate(executor_steps, start=1):
+                lines.append(f"step {idx}:")
+                lines.append(f"  tool_call_id: {step.get('tool_call_id')}")
+                lines.append(f"  name: {step.get('tool_name')}")
+                lines.append(f"  args: {_pretty_json(step.get('args', {}))}")
+            return "\n".join(lines)
+
+        def _build_catcher_text(tool_runs: List[Dict[str, Any]]) -> str:
+            if not tool_runs:
+                return "Catcher did not find tool results (tool_runs is empty)."
+            lines: List[str] = [f"Catcher recopilo {len(tool_runs)} resultados de tools."]
+            for idx, run in enumerate(tool_runs, start=1):
+                lines.append(f"resultado {idx}:")
+                lines.append(f"  tool: {run.get('name')}")
+                lines.append(f"  args: {_pretty_json(run.get('args', {}))}")
+                lines.append(f"  output_type: {type(run.get('output')).__name__}")
+            return "\n".join(lines)
+
+        def _normalize_text(s: str) -> str:
+            if not isinstance(s, str):
+                return s
+            import unicodedata
+            out = s.replace("", "->")
+            # Keep rendered output plain ASCII to avoid mojibake in non-UTF8 terminals/UIs.
+            out = unicodedata.normalize("NFKD", out).encode("ascii", "ignore").decode("ascii")
+            return out
+
         # Capabilities menu mode (support skill): respond with a deterministic menu.
         active_skills = state.get("_active_skills_internal") or []
         if "capabilities_menu" in (active_skills or []):
@@ -1416,7 +1507,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             lines: List[str] = []
             lines.append("## Menu de capacidades")
             lines.append("")
-            lines.append("Tu consulta no activÃ³ una skill especÃ­fica. Elige una skill y reintenta (o ajusta tu pregunta).")
+            lines.append("Tu consulta no activA3 una skill especAfica. Elige una skill y reintenta (o ajusta tu pregunta).")
             lines.append("")
 
             # Skills
@@ -1457,10 +1548,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     else:
                         lines.append(f"- `{nm}` ({kind})")
             else:
-                lines.append("- (No hay knowledge activo para esta sesiÃ³n)")
+                lines.append("- (No hay knowledge activo para esta sesion)")
             lines.append("")
 
-            lines.append("### CÃ³mo elegir")
+            lines.append("### Como elegir")
             lines.append("- Si quieres buscar en documentos/KB: usa `semantic_researcher`.")
             lines.append("- Si quieres calcular: usa `math_helper`.")
             lines.append("- Si quieres transformar texto: usa `text_basic`.")
@@ -1468,10 +1559,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
             user_answer = "\n".join(lines)
 
             analyzer_text = "Skill de soporte `capabilities_menu` activada (menu de capacidades)."
-            planner_text = "Planner no ejecutÃ³ tools: se devolviÃ³ menu determinista de capacidades."
-            executor_text = "No se ejecutÃ³ ninguna herramienta."
+            planner_text = "Planner no ejecuto tools: se devolvio menu determinista de capacidades."
+            executor_text = "No se ejecuto ninguna herramienta."
             catcher_text = "No hubo tool runs."
             summarizer_text = "Respuesta generada sin LLM, basada en registros locales (skills/tools/knowledge)."
+            user_answer = _normalize_text(user_answer)
+            analyzer_text = _normalize_text(analyzer_text)
+            planner_text = _normalize_text(planner_text)
+            executor_text = _normalize_text(executor_text)
+            catcher_text = _normalize_text(catcher_text)
+            summarizer_text = _normalize_text(summarizer_text)
 
             summary_dict: SummaryDict = SummaryDict(
                 analyzer=analyzer_text,
@@ -1534,17 +1631,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
             }
 
         # 2) Parche SUMMARIZER (regla de oro):
-        # Si NO hay tools (runs vacÃ­o) y el Ãºltimo AI NO tiene tool_calls,
+        # Si NO hay tools (runs vacio) y el ultimo AI NO tiene tool_calls,
         # user_out debe ser la salida directa del LLM (limpia de <think>).
         if not runs:
-            # (CÃ³digo modo sin tools, se mantiene igual)
+            # (CA3digo modo sin tools, se mantiene igual)
             last_ai = find_last_assistant_real(messages)
             last_ai_has_tools = bool(extract_tool_calls(last_ai)) if last_ai else False
 
             llm_raw = state.get("llm_raw_out") or (_coerce_content_str(getattr(last_ai, "content", "")) if last_ai else "")
             llm_clean = state.get("llm_clean_out") or strip_think(llm_raw)
 
-            # DETECTAR SI ES UN JSON DAG VACÃO (Artifact of Planner Node)
+            # DETECTAR SI ES UN JSON DAG VACAO (Artifact of Planner Node)
             is_empty_dag = False
             # Check for specific artifacts of planner_node output structure
             # It usually looks like: "\n\n--- Plan 1: ... ---\n{\n "dag": []\n}"
@@ -1555,15 +1652,15 @@ Genera el DAG exclusivo para resolver: "{subq}"
                  # FALLBACK CONVERSACIONAL
                  # El planner dijo "no necesito tools". Ahora responde al usuario.
                  fallback_sys = (
-                     "Eres un asistente servicial y agnÃ³stico.\n"
+                     "Eres un asistente servicial y agnA3stico.\n"
                      "El usuario te ha dicho algo que NO requiere herramientas externas.\n"
-                     "Responde de forma natural, Ãºtil y amable en el idioma del usuario.\n"
-                     "NO inventes informaciÃ³n."
+                     "Responde de forma natural, Aotil y amable en el idioma del usuario.\n"
+                     "NO inventes informaciA3n."
                  )
                  
                  try:
                      # Usamos el base_model (sin tools bound) para evitar loops o tool execution
-                     # planner_llm estÃ¡ en el closure de build_graph_agent
+                     # planner_llm esta en el closure de build_graph_agent
                      base_chat_model = getattr(planner_llm, "bound", planner_llm)
                      
                      fallback_reply = base_chat_model.invoke([
@@ -1582,65 +1679,22 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     "Revisa EXECUTOR/CATCHER o el registro de tools."
                 )
             else:
-                # Mejor UX: Si el modelo pensÃ³ pero no respondiÃ³ (todo era <think>), avisar.
+                # Mejor UX: Si el modelo pensA3 pero no respondiA3 (todo era <think>), avisar.
                 if not llm_clean and llm_raw and llm_raw.strip():
                     user_answer = (
-                        "_(El modelo generÃ³ un razonamiento interno pero no una respuesta final. "
-                        "Ver pestaÃ±a 'Thinking' en el Inspector)_"
+                        "_(El modelo genero un razonamiento interno pero no una respuesta final. "
+                        "Ver pestana 'Thinking' en el Inspector)_"
                     )
                 else:
-                    user_answer = llm_clean or "Â¿QuÃ© te gustarÃ­a hacer?"
+                    user_answer = llm_clean or "Que te gustaria hacer->"
 
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
-            # --- ReconstrucciÃ³n de metadatos (para simplificar, reusemos lÃ³gica) ---
-            # analyzer ya estÃ¡ definido arriba
-            subqs = analyzer.get("subqueries") or []
-            logic = analyzer.get("propositional_logic") or ""
-            input_payload = analyzer.get("input_payload") or {}
-
-            if analyzer:
-                analyzer_text_lines = [
-                    f"Input payload: {input_payload!r}",
-                    f"LÃ³gica proposicional: {logic or '(no construida)'}",
-                    f"Subconsultas ({len(subqs)}):",
-                ]
-                for s in subqs:
-                    analyzer_text_lines.append(f"- {s}")
-                analyzer_text = "\n".join(analyzer_text_lines)
-            else:
-                analyzer_text = "No se ejecutÃ³ ANALYZER o no dejÃ³ estado."
-
-            planner_trajs = state.get("planner_trajs", []) or []
-            if planner_trajs:
-                pl_lines: List[str] = []
-                for i, tr in enumerate(planner_trajs, start=1):
-                    pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
-                    desc = tr.get("description")
-                    if desc:
-                        pl_lines.append(desc)
-                planner_text = "\n".join(pl_lines)
-            else:
-                planner_text = (
-                    "No se construyÃ³ un plan de herramientas; probablemente se respondiÃ³ "
-                    "directamente (o no hubo tool_calls)."
-                )
-
-            executor_steps = state.get("executor_steps", []) or []
-            if executor_steps:
-                ex_lines: List[str] = [
-                    f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
-                ]
-                for step in executor_steps:
-                    ex_lines.append(
-                        f"- tool_call_id={step['tool_call_id']}, "
-                        f"name={step['tool_name']}, args={step['args']!r}"
-                    )
-                executor_text = "\n".join(ex_lines)
-            else:
-                executor_text = "No se ejecutÃ³ ninguna herramienta para esta consulta."
-
-            catcher_text = "Catcher no encontrÃ³ resultados de tools (runs vacÃ­o)."
+            # Rebuild pipeline metadata in pretty format.
+            analyzer_text = _build_analyzer_text(analyzer)
+            planner_text = _build_planner_text()
+            executor_text = _build_executor_text()
+            catcher_text = _build_catcher_text(runs)
             summarizer_text = "No se invocaron herramientas. Respuesta directa del modelo (passthrough)."
 
             summary_dict: SummaryDict = SummaryDict(
@@ -1653,11 +1707,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
             )
 
         else:
-            # SÃ HAY TOOLS (runs > 0)
+            # SA HAY TOOLS (runs > 0)
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
             # --- HYBRID/PROACTIVE MODE (Always) ---
-            # Ya no chequeamos cfg.policy_mode == "hybrid" porque es el Ãºnico modo.
+            # Ya no chequeamos cfg.policy_mode == "hybrid" porque es el Aonico modo.
             
             # Sintetizar con LLM (usando planner_llm)
             
@@ -1668,16 +1722,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     for s_name in analyzer["active_skills"]:
                         skill = skill_registry.get_skill(s_name)
                         if skill:
-                            skill_gen_instructions += f"\n\n--- INSTRUCCIONES ESPECÃFICAS ({s_name}) ---\n{skill.instructions}"
+                            skill_gen_instructions += f"\n\n--- INSTRUCCIONES ESPECAFICAS ({s_name}) ---\n{skill.instructions}"
 
             hybrid_sys = (
-                "Eres un asistente que responde preguntas basÃ¡ndose ESTRICTAMENTE en la informaciÃ³n provista "
+                "Eres un asistente que responde preguntas basAndose ESTRICTAMENTE en la informaciA3n provista "
                 "por las herramientas (Contexto).\n"
                 "Tu objetivo es transformar los datos crudos de las herramientas en una respuesta natural, "
-                "fluida y Ãºtil para el usuario.\n"
-                "- NO agregues informaciÃ³n externa que no estÃ© en el contexto.\n"
-                "- SI el contexto estÃ¡ vacÃ­o o no es relevante, indÃ­calo.\n"
-                "- Citas: Si es posible, menciona la fuente (ej: 'segÃºn el documento X...').\n"
+                "fluida y Aotil para el usuario.\n"
+                "- NO agregues informaciA3n externa que no estA en el contexto.\n"
+                "- SI el contexto esta vacio o no es relevante, indicalo.\n"
+                "- Citas: Si es posible, menciona la fuente (ej: 'segAon el documento X...').\n"
                 "- Responde en el mismo idioma del usuario."
             )
             
@@ -1691,7 +1745,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             
             hybrid_user_msg = (
                 f"Pregunta del usuario: {user_prompt}\n\n"
-                f"InformaciÃ³n de Herramientas (Contexto):\n{tools_summary_text}\n\n"
+                f"InformaciA3n de Herramientas (Contexto):\n{tools_summary_text}\n\n"
                 "Respuesta:"
             )
             try:
@@ -1702,13 +1756,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 ])
                 user_answer = hrm.content
                 
-                # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-                # CAPTURAR REASONING del FINAL ANSWER (agnÃ³stico)
-                # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+                # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                # CAPTURAR REASONING del FINAL ANSWER (agnA3stico)
+                # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 
                 # 1. Intentar extrar <think> del contenido (Texto crudo)
                 import re
-                think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+                think_pattern = re.compile(r"<think>(.*->)</think>", re.DOTALL)
                 match = think_pattern.search(user_answer)
                 
                 reasoning_from_final = ""
@@ -1732,7 +1786,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 if reasoning_from_final and isinstance(reasoning_from_final, str) and reasoning_from_final.strip():
                     # Mensaje con el reasoning para que el Inspector lo muestre
                     thinking_msg = AIMessage(
-                        content="",  # Contenido vacÃ­o, solo queremos el reasoning
+                        content="",  # Contenido vacio, solo queremos el reasoning
                         additional_kwargs={
                             "reasoning_content": reasoning_from_final.strip(),
                             "final_answer_thinking": True,  # Marca para identificarlo
@@ -1742,64 +1796,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     state.setdefault("messages", []).append(thinking_msg)
                     
             except Exception as e:
-                user_answer = f"(Error en sÃ­ntesis hÃ­brida: {e})\n\nResumen crudo:\n{tools_summary_text}"
+                user_answer = f"(Error en sintesis hibrida: {e})\n\nResumen crudo:\n{tools_summary_text}"
 
-            # --- ReconstrucciÃ³n de metadatos (Analyzer, Planner, Executor, Catcher) ---
-            analyzer = state.get("analyzer") or {}
-            subqs = analyzer.get("subqueries") or []
-            logic = analyzer.get("propositional_logic") or ""
-            input_payload = analyzer.get("input_payload") or {}
-            
-            # (Copia de lÃ³gica de metadatos para consistencia)
-            if analyzer:
-                analyzer_text_lines = [
-                    f"Input payload: {input_payload!r}",
-                    f"LÃ³gica proposicional: {logic or '(no construida)'}",
-                    f"Subconsultas ({len(subqs)}):",
-                ]
-                for s in subqs:
-                    analyzer_text_lines.append(f"- {s}")
-                analyzer_text = "\n".join(analyzer_text_lines)
-            else:
-                analyzer_text = "No se ejecutÃ³ ANALYZER o no dejÃ³ estado."
-
-            planner_trajs = state.get("planner_trajs", []) or []
-            if planner_trajs:
-                pl_lines: List[str] = []
-                for i, tr in enumerate(planner_trajs, start=1):
-                    pl_lines.append(f"Subquery {i}: {tr.get('subquery', '')}")
-                    desc = tr.get("description")
-                    if desc:
-                        pl_lines.append(desc)
-                planner_text = "\n".join(pl_lines)
-            else:
-                planner_text = "No se construyÃ³ un plan de herramientas."
-
-            executor_steps = state.get("executor_steps", []) or []
-            if executor_steps:
-                ex_lines_list: List[str] = [
-                    f"Se ejecutaron {len(executor_steps)} llamadas a herramientas:"
-                ]
-                for step in executor_steps:
-                    ex_lines_list.append(
-                        f"- tool_call_id={step['tool_call_id']}, "
-                        f"name={step['tool_name']}, args={step['args']!r}"
-                    )
-                executor_text = "\n".join(ex_lines_list)
-            else:
-                executor_text = "No se ejecutÃ³ ninguna herramienta para esta consulta."
-
-            if runs:
-                ca_lines_list: List[str] = [
-                    f"Catcher recopilÃ³ {len(runs)} resultados de tools."
-                ]
-                for r in runs:
-                    ca_lines_list.append(
-                        f"- {r['name']}({r['args']!r}) â†’ output tipo {type(r['output']).__name__}"
-                    )
-                catcher_text = "\n".join(ca_lines_list)
-            else:
-                catcher_text = "Catcher no encontrÃ³ resultados de tools (runs vacÃ­o)."
+            # Rebuild pipeline metadata in pretty format.
+            analyzer_text = _build_analyzer_text(analyzer)
+            planner_text = _build_planner_text()
+            executor_text = _build_executor_text()
+            catcher_text = _build_catcher_text(runs)
 
             summarizer_text = tools_summary_text
 
@@ -1811,6 +1814,14 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 summarizer=summarizer_text,
                 final_answer=user_answer,
             )
+
+        # Normalize possible mojibake/encoding artifacts in all final sections.
+        analyzer_text = _normalize_text(analyzer_text)
+        planner_text = _normalize_text(planner_text)
+        executor_text = _normalize_text(executor_text)
+        catcher_text = _normalize_text(catcher_text)
+        summarizer_text = _normalize_text(summarizer_text)
+        user_answer = _normalize_text(user_answer)
 
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
         sections = [
@@ -1835,7 +1846,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             additional_kwargs={"pipeline_internal": True, "node": "summarizer"},
         )
 
-        # AdemÃ¡s rellenamos dev_out / deep_out / user_out:
+        # AdemAs rellenamos dev_out / deep_out / user_out:
         dev_out = answer_markdown
         deep_out = "\n\n".join([
             "## Resumen deep del pipeline",
@@ -1852,12 +1863,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             "### RESPUESTA FINAL",
             user_answer,
         ])
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         # AGNOSTIC FIX: Strip <think> tags from user_out
-        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        # El user_out debe ser limpio (sin <think>) para ser agnÃ³stico:
-        # - Modelos con reasoning (Qwen3, DeepSeek) â†’ strip <think>
-        # - Modelos sin reasoning (GPT-4, etc.) â†’ no afecta
+        # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        # El user_out debe ser limpio (sin <think>) para ser agnA3stico:
+        # - Modelos con reasoning (Qwen3, DeepSeek) a strip <think>
+        # - Modelos sin reasoning (GPT-4, etc.) a no afecta
         user_out = strip_think(user_answer)
 
         return {
@@ -1869,17 +1880,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
             "user_out": user_out,
         }
 
-    # VALIDATOR (heurÃ­stica simple, preparada para LLM en el futuro)
+    # VALIDATOR (heurAstica simple, preparada para LLM en el futuro)
     def validator_node(state: State) -> Dict[str, Any]:
         """
-        PequeÃ±o validador que mira:
+        PequeAo validador que mira:
           - si hubo tools,
-          - si el Summarizer dijo "no se ejecutÃ³ ninguna herramienta",
-          - si el final_answer estÃ¡ vacÃ­o,
-          - y heurÃ­sticas ligeras sobre prompts tabulares/contratos.
+          - si el Summarizer dijo "no se ejecuto ninguna herramienta",
+          - si el final_answer esta vacio,
+          - y heurAsticas ligeras sobre prompts tabulares/contratos.
 
         Marca all_covered=False en casos sospechosos.
-        MÃ¡s adelante se puede reemplazar por un LLM que reciba:
+        MAs adelante se puede reemplazar por un LLM que reciba:
           (user_prompt, tool_runs, final_answer) y devuelva ValidatorResult.
         """
         user_prompt = state.get("user_prompt") or ""
@@ -1888,10 +1899,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
         summarizer_text = summary.get("summarizer") or ""
         runs = state.get("tool_runs", []) or []
 
-        # 3) Guardrail en VALIDATOR: auto-reparaciÃ³n (modo sin tools)
+        # 3) Guardrail en VALIDATOR: auto-reparaciA3n (modo sin tools)
         bad_templates = (
-            "no se invocÃ³ ninguna herramienta",
-            "no puedo responder con garantÃ­as",
+            "no se invoco ninguna herramienta",
+            "no puedo responder con garantias",
             "sin herramientas no puedo",
         )
         if runs == [] and any(t in final_answer.strip().lower() for t in bad_templates):
@@ -1906,7 +1917,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 except Exception:
                     pass
 
-                # tambiÃ©n reparamos user_out si estaba â€œapagadoâ€
+                # tambiAn reparamos user_out si estaba aapagadoa
                 state["user_out"] = direct
 
         all_covered = True
@@ -1914,13 +1925,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         if not final_answer.strip():
             all_covered = False
-            reasons.append("La respuesta final estÃ¡ vacÃ­a.")
+            reasons.append("La respuesta final esta vacAa.")
 
-        if "No se invocÃ³ ninguna herramienta" in summarizer_text and runs:
+        if "No se invoco ninguna herramienta" in summarizer_text and runs:
             all_covered = False
             reasons.append(
                 "Inconsistencia: el SUMMARIZER dice que no hubo tools, "
-                "pero tool_runs no estÃ¡ vacÃ­o."
+                "pero tool_runs no esta vacio."
             )
 
         if not reasons and all_covered:
@@ -1992,7 +2003,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
         ["executor", "summarizer"],
     )
     builder.add_edge("executor", "catcher")
-    builder.add_edge("catcher", "summarizer")  # âœ… Fixed: Loop to summarizer to stop infinite DAG replanning
+    builder.add_edge("catcher", "summarizer")  # a... Fixed: Loop to summarizer to stop infinite DAG replanning
     builder.add_edge("summarizer", "validator")
     builder.add_edge("validator", END)
 
@@ -2000,9 +2011,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
     return graph_app
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Logic loader (registro de grafos)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 @dataclass
 class LogicConfig:
@@ -2015,12 +2026,12 @@ def load_logic(
     tools: List[Any],
     planner_config: Optional[PlannerConfig] = None,
     logic_config: Optional[LogicConfig] = None,
-    skill_registry: Any | None = None,  # âœ… Added
+    skill_registry: Any | None = None,  # a... Added
 ) -> Any:
     """
-    Carga y ejecuta la funciÃ³n builder que construye el grafo del agente.
+    Carga y ejecuta la funciA3n builder que construye el grafo del agente.
 
-    Por defecto usa este mismo mÃ³dulo:
+    Por defecto usa este mismo mA3dulo:
         agnostic_agent.logic.build_graph_agent
     """
     cfg = logic_config or LogicConfig()
@@ -2029,7 +2040,7 @@ def load_logic(
         builder: Callable[..., Any] = globals().get(cfg.builder_fn)  # type: ignore[assignment]
         if builder is None or not callable(builder):
             raise AttributeError(
-                f"No se encontrÃ³ funciÃ³n builder '{cfg.builder_fn}' en agnostic_agent.logic."
+                f"No se encontrA3 funciA3n builder '{cfg.builder_fn}' en agnostic_agent.logic."
             )
         return builder(planner_llm, tools, planner_config, skill_registry)
 
@@ -2039,15 +2050,16 @@ def load_logic(
         mod = importlib.import_module(cfg.module)
     except ModuleNotFoundError as e:
         raise ImportError(
-            f"No se pudo importar el mÃ³dulo de lÃ³gica '{cfg.module}'."
+            f"No se pudo importar el mA3dulo de lA3gica '{cfg.module}'."
         ) from e
 
     builder = getattr(mod, cfg.builder_fn, None)
     if builder is None or not callable(builder):
         raise AttributeError(
-            f"El mÃ³dulo '{cfg.module}' no tiene una funciÃ³n callable '{cfg.builder_fn}'."
+            f"El mA3dulo '{cfg.module}' no tiene una funciA3n callable '{cfg.builder_fn}'."
         )
 
     return builder(planner_llm, tools, planner_config, skill_registry)
+
 
 

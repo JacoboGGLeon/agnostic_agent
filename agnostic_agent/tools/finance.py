@@ -12,58 +12,84 @@ from agnostic_agent.tools.decorators import tool
 
 
 def _default_finance_dir() -> Path:
-    # Repo layout expected:
-    # AVANTECK.TEAM/
-    #   - agnostic_agent/
-    #   - ais/examples/finance/
     workspace_root = Path(__file__).resolve().parents[3]
     return workspace_root / "ais" / "examples" / "finance"
 
 
+def _resolve_path(env_var: str, default_path: Path, fallback_candidates: List[Path]) -> Path:
+    env_value = os.getenv(env_var, "").strip()
+    if env_value:
+        return Path(env_value)
+    for candidate in fallback_candidates:
+        if candidate.exists():
+            return candidate
+    return default_path
+
+
 def _transactions_db_path() -> Path:
-    return Path(
-        os.getenv(
-            "AGNOSTIC_FIN_TRANS_DB",
-            str(_default_finance_dir() / "transacciones.db"),
-        )
+    default_path = _default_finance_dir() / "transacciones.db"
+    return _resolve_path(
+        "AGNOSTIC_FIN_TRANS_DB",
+        default_path,
+        [
+            Path("/content/session/transacciones.db"),
+            Path.cwd() / "session" / "transacciones.db",
+            Path.cwd() / "transacciones.db",
+            default_path,
+        ],
     )
 
 
 def _accounting_db_path() -> Path:
-    return Path(
-        os.getenv(
-            "AGNOSTIC_FIN_ACC_DB",
-            str(_default_finance_dir() / "contabilidad.db"),
-        )
+    default_path = _default_finance_dir() / "contabilidad.db"
+    return _resolve_path(
+        "AGNOSTIC_FIN_ACC_DB",
+        default_path,
+        [
+            Path("/content/session/contabilidad.db"),
+            Path.cwd() / "session" / "contabilidad.db",
+            Path.cwd() / "contabilidad.db",
+            default_path,
+        ],
     )
 
 
 def _rules_md_path() -> Path:
-    return Path(
-        os.getenv(
-            "AGNOSTIC_FIN_RULES_MD",
-            str(_default_finance_dir() / "knowledge" / "rules.md"),
-        )
+    default_path = _default_finance_dir() / "knowledge" / "rules.md"
+    return _resolve_path(
+        "AGNOSTIC_FIN_RULES_MD",
+        default_path,
+        [
+            Path("/content/session/rules.md"),
+            Path.cwd() / "session" / "rules.md",
+            Path.cwd() / "rules.md",
+            default_path,
+        ],
     )
 
 
 def _dictionary_md_path() -> Path:
-    return Path(
-        os.getenv(
-            "AGNOSTIC_FIN_DICT_MD",
-            str(_default_finance_dir() / "knowledge" / "dictionary.md"),
-        )
+    default_path = _default_finance_dir() / "knowledge" / "dictionary.md"
+    return _resolve_path(
+        "AGNOSTIC_FIN_DICT_MD",
+        default_path,
+        [
+            Path("/content/session/dictionary.md"),
+            Path.cwd() / "session" / "dictionary.md",
+            Path.cwd() / "dictionary.md",
+            default_path,
+        ],
     )
 
 
 def _is_read_only_sql(query: str) -> bool:
-    q = (query or "").strip().lower()
-    if not q:
+    lowered = (query or "").strip().lower()
+    if not lowered:
         return False
-    if not q.startswith("select"):
+    if not lowered.startswith("select"):
         return False
     forbidden = ("insert ", "update ", "delete ", "drop ", "alter ", "create ", "pragma ")
-    return not any(tok in q for tok in forbidden)
+    return not any(token in lowered for token in forbidden)
 
 
 def _run_query(db_path: Path, query: str) -> str:
@@ -71,16 +97,14 @@ def _run_query(db_path: Path, query: str) -> str:
         return "Error SQL: solo se permiten consultas SELECT de solo lectura."
     if not db_path.exists():
         return f"Error SQL: no se encontro la base de datos: {db_path}"
-
     try:
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
         cur.execute(query)
         rows = cur.fetchall()
-        columns = [d[0] for d in (cur.description or [])]
+        columns = [desc[0] for desc in (cur.description or [])]
         conn.close()
-        payload = {"columns": columns, "rows": rows}
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps({"columns": columns, "rows": rows}, ensure_ascii=False)
     except Exception as exc:
         return f"Error SQL: {exc}"
 
@@ -88,8 +112,7 @@ def _run_query(db_path: Path, query: str) -> str:
 @tool(mode="public")
 def query_transactions_db(query: str) -> str:
     """
-    Ejecuta una consulta SELECT de solo lectura sobre transacciones (Universo 1).
-    Devuelve JSON string con `columns` y `rows`.
+    Ejecuta consulta SELECT de solo lectura sobre transacciones.
     """
     return _run_query(_transactions_db_path(), query)
 
@@ -97,8 +120,7 @@ def query_transactions_db(query: str) -> str:
 @tool(mode="public")
 def query_accounting_db(query: str) -> str:
     """
-    Ejecuta una consulta SELECT de solo lectura sobre contabilidad (Universo 2).
-    Devuelve JSON string con `columns` y `rows`.
+    Ejecuta consulta SELECT de solo lectura sobre contabilidad.
     """
     return _run_query(_accounting_db_path(), query)
 
@@ -107,8 +129,8 @@ def _normalize_text(value: str) -> str:
     text = unicodedata.normalize("NFKD", value or "")
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.lower().strip()
-    text = text.replace("–", "-")
-    text = text.replace("—", "-")
+    text = text.replace("–", "-").replace("—", "-")
+    text = text.replace("â€“", "-").replace("â€”", "-")
     text = re.sub(r"\s+", " ", text)
     return text
 
@@ -125,7 +147,6 @@ _SANEAMIENTO_RATES_DEFAULT: Dict[str, float] = {
     "liquidado / cerrado": 0.00,
 }
 
-# Cache: evita parsear markdown en cada llamada.
 _RULES_CACHE: Dict[str, Any] = {"path": None, "mtime": None, "rates": None}
 
 
@@ -143,10 +164,8 @@ def _parse_percent_to_rate(raw: str) -> float | None:
 def _load_rates_from_rules_md(path: Path) -> Dict[str, float]:
     if not path.exists():
         return {}
-
     content = path.read_text(encoding="utf-8", errors="ignore")
     rates: Dict[str, float] = {}
-
     for line in content.splitlines():
         line = line.strip()
         if not line.startswith("|"):
@@ -155,36 +174,28 @@ def _load_rates_from_rules_md(path: Path) -> Dict[str, float]:
             continue
         if re.fullmatch(r"\|[-\s|:]+\|?", line):
             continue
-
-        parts = [p.strip() for p in line.strip("|").split("|")]
+        parts = [part.strip() for part in line.strip("|").split("|")]
         if len(parts) < 3:
             continue
-
-        estatus = parts[0]
         rate = _parse_percent_to_rate(parts[2])
         if rate is None:
             continue
-
-        rates[_normalize_text(estatus)] = rate
-
+        rates[_normalize_text(parts[0])] = rate
     return rates
 
 
 def _get_runtime_rates() -> Dict[str, float]:
     rules_path = _rules_md_path()
     mtime = rules_path.stat().st_mtime if rules_path.exists() else None
-
     if (
         _RULES_CACHE.get("path") == str(rules_path)
         and _RULES_CACHE.get("mtime") == mtime
         and isinstance(_RULES_CACHE.get("rates"), dict)
     ):
         return _RULES_CACHE["rates"]
-
     parsed = _load_rates_from_rules_md(rules_path)
     if not parsed and not _strict_rules_mode():
         parsed = dict(_SANEAMIENTO_RATES_DEFAULT)
-
     _RULES_CACHE["path"] = str(rules_path)
     _RULES_CACHE["mtime"] = mtime
     _RULES_CACHE["rates"] = parsed
@@ -194,7 +205,7 @@ def _get_runtime_rates() -> Dict[str, float]:
 @tool(mode="public")
 def finance_sources_status() -> Dict[str, Any]:
     """
-    Reporta estado de fuentes financieras (DBs + markdown de reglas/diccionario).
+    Reporta estado de fuentes financieras (DBs y markdown de reglas/diccionario).
     """
     paths = {
         "transactions_db": _transactions_db_path(),
@@ -216,12 +227,10 @@ def finance_sources_status() -> Dict[str, Any]:
 def get_saneamiento_rate(estatus: str) -> Dict[str, Any]:
     """
     Devuelve la tasa de saneamiento esperada para un estatus crediticio.
-    Intenta primero desde rules.md; usa fallback hardcoded si no hay reglas parseables.
     """
     rates = _get_runtime_rates()
     key = _normalize_text(estatus)
     rate = rates.get(key)
-
     if rate is None:
         return {
             "found": False,
@@ -232,7 +241,6 @@ def get_saneamiento_rate(estatus: str) -> Dict[str, Any]:
             "dictionary_path": str(_dictionary_md_path()),
             "strict_rules_mode": _strict_rules_mode(),
         }
-
     return {
         "found": True,
         "estatus": estatus,
@@ -247,10 +255,7 @@ def get_saneamiento_rate(estatus: str) -> Dict[str, Any]:
 def _fetch_transactions(credito_id: str) -> List[tuple[str, float]]:
     db = sqlite3.connect(str(_transactions_db_path()))
     cur = db.cursor()
-    cur.execute(
-        "SELECT tipo, monto FROM movimientos WHERE credito_id = ?",
-        (credito_id,),
-    )
+    cur.execute("SELECT tipo, monto FROM movimientos WHERE credito_id = ?", (credito_id,))
     rows = cur.fetchall()
     db.close()
     return [(str(tipo), float(monto)) for tipo, monto in rows]
@@ -275,36 +280,24 @@ def _fetch_accounting(credito_id: str) -> tuple[float, str, float]:
 
 
 @tool(mode="public")
-def reconcile_credit_accounting(credito_id: str) -> Dict[str, Any]:
+def reconcile_credit_accounting(credito_id: str, balance: str = "") -> Dict[str, Any]:
     """
-    Concilia un credito de forma determinista en modo 1-a-1:
-    1) Flujos (desembolsos/pagos/penalizaciones/descuentos)
-    2) Estado contable (saldo_total, estatus, saneamiento_calculado)
-    3) Validacion de saldo
-    4) Validacion de saneamiento
+    Concilia un credito 1-a-1 y valida saldo y saneamiento.
     """
+    _ = balance
     try:
         tx_rows = _fetch_transactions(credito_id)
         saldo_total, estatus, saneamiento_calculado = _fetch_accounting(credito_id)
     except Exception as exc:
         return {"ok": False, "credito_id": credito_id, "error": str(exc)}
 
-    totals = {
-        "DESEMBOLSO": 0.0,
-        "PAGO": 0.0,
-        "PENALIZACION": 0.0,
-        "DESCUENTO": 0.0,
-    }
+    totals = {"DESEMBOLSO": 0.0, "PAGO": 0.0, "PENALIZACION": 0.0, "DESCUENTO": 0.0}
     for tipo, monto in tx_rows:
         key = str(tipo).upper().strip()
         if key in totals:
             totals[key] += float(monto)
 
-    saldo_esperado = (
-        (totals["DESEMBOLSO"] - totals["PAGO"])
-        + totals["PENALIZACION"]
-        - totals["DESCUENTO"]
-    )
+    saldo_esperado = (totals["DESEMBOLSO"] - totals["PAGO"]) + totals["PENALIZACION"] - totals["DESCUENTO"]
     diff_saldo = round(saldo_total - saldo_esperado, 2)
     saldo_ok = abs(diff_saldo) < 0.01
 
@@ -330,17 +323,14 @@ def reconcile_credit_accounting(credito_id: str) -> Dict[str, Any]:
     reserva_esperada = round(saldo_total * tasa, 2)
     diff_reserva = round(saneamiento_calculado - reserva_esperada, 2)
     saneamiento_ok = abs(diff_reserva) < 0.01
-
     status = "CUADRADO (100% Match)" if saldo_ok and saneamiento_ok else "DRIFT DETECTADO"
+
     return {
         "ok": True,
         "credito_id": credito_id,
         "estatus": estatus,
         "status": status,
-        "validaciones": {
-            "saldo_ok": saldo_ok,
-            "saneamiento_ok": saneamiento_ok,
-        },
+        "validaciones": {"saldo_ok": saldo_ok, "saneamiento_ok": saneamiento_ok},
         "flujos": totals,
         "saldo": {
             "reportado": round(saldo_total, 2),
@@ -356,5 +346,7 @@ def reconcile_credit_accounting(credito_id: str) -> Dict[str, Any]:
         "sources": {
             "rules_path": str(_rules_md_path()),
             "dictionary_path": str(_dictionary_md_path()),
+            "transactions_db": str(_transactions_db_path()),
+            "accounting_db": str(_accounting_db_path()),
         },
     }

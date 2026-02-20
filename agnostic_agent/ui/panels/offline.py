@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -40,6 +41,104 @@ def _active_db_path() -> str:
     if selected:
         return str(Path(selected))
     return candidates[0] if candidates else str(Path(os.getcwd()) / "session" / "embeddings.db")
+
+
+def _discover_session_roots() -> List[Path]:
+    candidates = [
+        Path(os.getcwd()) / "session",
+        Path("/content/session"),
+        Path(os.getcwd()),
+    ]
+    out: List[Path] = []
+    seen = set()
+    for path in candidates:
+        try:
+            norm = str(path.resolve())
+        except Exception:
+            norm = str(path)
+        if norm not in seen and path.exists():
+            seen.add(norm)
+            out.append(path)
+    return out
+
+
+def _discover_session_sources() -> List[Dict[str, Any]]:
+    roots = _discover_session_roots()
+    finance_names = {"contabilidad.db", "transacciones.db", "rules.md", "dictionary.md"}
+    sources: List[Dict[str, Any]] = []
+    seen_paths = set()
+
+    for root in roots:
+        for path in list(root.glob("*.db")) + list(root.glob("*.md")):
+            norm = str(path.resolve())
+            if norm in seen_paths:
+                continue
+            seen_paths.add(norm)
+            reachable, detail = _check_source_reachability(path)
+            sources.append(
+                {
+                    "name": path.name,
+                    "kind": "db" if path.suffix.lower() == ".db" else "md",
+                    "path": norm,
+                    "size_kb": round(path.stat().st_size / 1024.0, 2),
+                    "root": str(root.resolve()),
+                    "reachable": reachable,
+                    "semaforo": "GREEN" if reachable else "RED",
+                    "reachability_detail": detail,
+                    "finance_target": path.name in finance_names,
+                }
+            )
+
+    return sorted(sources, key=lambda row: (not row["reachable"], row["kind"], row["name"]))
+
+
+def _check_source_reachability(path: Path) -> tuple[bool, str]:
+    if not path.exists():
+        return False, "path does not exist"
+
+    if path.suffix.lower() == ".db":
+        try:
+            conn = sqlite3.connect(str(path))
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            conn.close()
+            return True, "sqlite open ok"
+        except Exception as exc:
+            return False, f"sqlite open error: {exc}"
+
+    if path.suffix.lower() == ".md":
+        try:
+            _ = path.read_text(encoding="utf-8", errors="ignore")
+            return True, "markdown read ok"
+        except Exception as exc:
+            return False, f"markdown read error: {exc}"
+
+    return False, "unsupported file type"
+
+
+def _db_inspect(path: str) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    conn = sqlite3.connect(path)
+    cur = conn.cursor()
+    tables = cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    for (table_name,) in tables:
+        try:
+            count = cur.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        except Exception:
+            count = None
+        rows.append({"table": table_name, "rows": count})
+    conn.close()
+    return rows
+
+
+def _read_md_preview(path: str, max_chars: int = 2500) -> str:
+    text = Path(path).read_text(encoding="utf-8", errors="ignore")
+    text = text.strip()
+    if len(text) > max_chars:
+        return text[:max_chars] + "\n\n... (preview truncado)"
+    return text
 
 
 def render_offline_tab(agent_factory):
@@ -127,6 +226,56 @@ def render_offline_tab(agent_factory):
                 st.dataframe(chunk_rows, use_container_width=True, hide_index=True)
             else:
                 st.info("No hay elementos en chunks_meta.")
+
+        st.markdown("#### Session Sources (DB + MD)")
+        session_sources = _discover_session_sources()
+        if session_sources:
+            total_sources = len(session_sources)
+            reachable_sources = sum(1 for row in session_sources if row.get("reachable"))
+            c_ok, c_ko = st.columns(2)
+            c_ok.metric("Reachable", reachable_sources)
+            c_ko.metric("Unreachable", total_sources - reachable_sources)
+
+            st.dataframe(session_sources, use_container_width=True, hide_index=True)
+
+            finance_map = {
+                row["name"]: row["path"]
+                for row in session_sources
+                if row.get("finance_target") and row.get("reachable")
+            }
+            if st.button("Usar fuentes detectadas para Finance"):
+                if "contabilidad.db" in finance_map:
+                    os.environ["AGNOSTIC_FIN_ACC_DB"] = finance_map["contabilidad.db"]
+                if "transacciones.db" in finance_map:
+                    os.environ["AGNOSTIC_FIN_TRANS_DB"] = finance_map["transacciones.db"]
+                if "rules.md" in finance_map:
+                    os.environ["AGNOSTIC_FIN_RULES_MD"] = finance_map["rules.md"]
+                if "dictionary.md" in finance_map:
+                    os.environ["AGNOSTIC_FIN_DICT_MD"] = finance_map["dictionary.md"]
+                st.success("Variables AGNOSTIC_FIN_* actualizadas con fuentes detectadas y reachables.")
+
+            selected_source = st.selectbox(
+                "Inspeccionar fuente",
+                options=[row["path"] for row in session_sources],
+                format_func=lambda path: f"{Path(path).name} - {path}",
+            )
+            selected_row = next((row for row in session_sources if row["path"] == selected_source), None)
+            if selected_row and selected_row["kind"] == "db":
+                try:
+                    db_rows = _db_inspect(selected_source)
+                    if db_rows:
+                        st.dataframe(db_rows, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("DB sin tablas visibles.")
+                except Exception as exc:
+                    st.error(f"No se pudo inspeccionar DB: {exc}")
+            elif selected_row:
+                try:
+                    st.code(_read_md_preview(selected_source), language="markdown")
+                except Exception as exc:
+                    st.error(f"No se pudo leer markdown: {exc}")
+        else:
+            st.info("No se detectaron fuentes de session (.db/.md) en rutas comunes.")
 
         uploaded_file = st.file_uploader("Subir documento PDF", type=["pdf"])
         file_description = st.text_input("Descripcion", placeholder="Ej: Manual 2024")
