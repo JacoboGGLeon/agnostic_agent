@@ -14,6 +14,20 @@ from agnostic_agent.memory import read_memory, write_memory
 from agnostic_agent.knowledge import select_knowledge_bases, KnowledgeBase
 from agnostic_agent.app.errors import AgnosticAgentError, TurnExecutionError
 
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            import json
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    return str(value)
+
 class TurnService:
     """
     Service responsible for executing a single turn of the agent conversation.
@@ -169,11 +183,11 @@ class TurnService:
                 m for m in out_state.get("messages", []) if isinstance(m, AIMessage)
             ]
             last_ai = ai_messages[-1] if ai_messages else None
-            last_ai_text = last_ai.content if last_ai is not None else ""
+            last_ai_text = _safe_text(last_ai.content if last_ai is not None else "")
 
-            dev_text_state = out_state.get("dev_out")
-            deep_text_state = out_state.get("deep_out")
-            user_text_state = out_state.get("user_out")
+            dev_text_state = _safe_text(out_state.get("dev_out"))
+            deep_text_state = _safe_text(out_state.get("deep_out"))
+            user_text_state = _safe_text(out_state.get("user_out"))
 
             raw_summary: Dict[str, Any] = (
                 out_state.get("pipeline_summary")
@@ -182,7 +196,7 @@ class TurnService:
             )
             
             summary_obj = AgentSummary(**raw_summary) if raw_summary else None
-            summary_user_answer = summary_obj.final_answer or "" if summary_obj else ""
+            summary_user_answer = _safe_text(summary_obj.final_answer or "") if summary_obj else ""
 
             raw_runs = out_state.get("tool_runs", []) or []
             tool_runs: List[ToolRun] = []

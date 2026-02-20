@@ -872,23 +872,29 @@ def build_graph_agent(
 
         try:
             response = planner_llm.invoke([sys_msg, user_msg])
-            content = response.content
+            raw_content = getattr(response, "content", "")
+            if isinstance(raw_content, dict):
+                data = raw_content
+                content = ""
+            else:
+                content = _coerce_content_str(raw_content)
+                data = None
             
             # 3. Parseo Robusto de JSON
             # Limpiar bloques markdown ```json ... ```
-            if "```" in content:
+            if data is None and "```" in content:
                 import re
                 content = re.sub(r"```json\s*", "", content)
                 content = re.sub(r"```\s*", "", content)
             
             # Additional cleanup for Qwen sometimes returning descriptive text before JSON
-            content = content.strip()
-            if not content.startswith("{") and "{" in content:
-                 content = content[content.find("{"):]
-                 if "}" in content:
-                      content = content[:content.rfind("}")+1]
-
-            data = json.loads(content)
+            if data is None:
+                content = content.strip()
+                if not content.startswith("{") and "{" in content:
+                     content = content[content.find("{"):]
+                     if "}" in content:
+                          content = content[:content.rfind("}")+1]
+                data = json.loads(content)
             
             subqueries = data.get("subqueries", [user_prompt])
             logic_form = data.get("logic_form", "q1")
