@@ -1,4 +1,4 @@
-﻿---
+---
 name: "semantic_researcher"
 description: "RAG (Retrieval-Augmented Generation) System: Busca en la base de conocimiento vectorial y genera respuestas fundamentadas con citas."
 tools: ["list_knowledge_sources", "search_knowledge_base", "rerank_docs"]
