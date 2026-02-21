@@ -157,17 +157,17 @@ if st.session_state.get("theme_mode", "dark") == "light":
 <style>
 .stApp {
   background: #f7f9fc !important;
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 body, p, span, label, li, small, strong, em, code, pre {
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 section[data-testid="stSidebar"] {
   background: #ffffff !important;
   border-right: 1px solid #d7dce3 !important;
 }
 .stSidebar, .stSidebar * {
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 .topbar {
   background: #ffffff !important;
@@ -175,33 +175,33 @@ section[data-testid="stSidebar"] {
   box-shadow: 0 6px 20px rgba(0,0,0,.08) !important;
 }
 .title, .subtitle, .badge {
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 .stTabs [role="tab"] {
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 .stMarkdown, .stCaption, .stText, .stAlert, .stSelectbox label, .stRadio label, .stCheckbox label, .stTextInput label, .stTextArea label {
-  color: #0d1b2a !important;
+  color: #ffffff !important;
 }
 [data-baseweb="input"] input,
 [data-baseweb="textarea"] textarea,
 [data-baseweb="select"] * {
-  color: #0d1b2a !important;
-  background-color: #ffffff !important;
+  color: #ffffff !important;
+  background-color: #1f2f4a !important;
 }
 .stChatInput [data-baseweb="textarea"] textarea {
-  color: #0d1b2a !important;
-  background-color: #ffffff !important;
+  color: #ffffff !important;
+  background-color: #1f2f4a !important;
 }
 .bubble-user {
   border-color: rgba(96, 61, 186, .45) !important;
   background: linear-gradient(180deg, rgba(96, 61, 186, .12), rgba(255, 255, 255, .8)) !important;
-  color: #2f1c58 !important;
+  color: #ffffff !important;
 }
 .bubble-agent {
   border-color: rgba(237, 139, 0, .6) !important;
   background: linear-gradient(180deg, rgba(237, 139, 0, .14), rgba(255, 255, 255, .9)) !important;
-  color: #4a2c00 !important;
+  color: #ffffff !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] {
   background: #ffffff !important;
