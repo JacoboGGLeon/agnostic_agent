@@ -166,6 +166,10 @@ section[data-testid="stSidebar"] {
   background: #ffffff !important;
   border-right: 1px solid #d7dce3 !important;
 }
+div[data-testid="column"]:has(#right-inspector-anchor) {
+  background: #ffffff !important;
+  border-left: 1px solid #d7dce3 !important;
+}
 .stSidebar, .stSidebar * {
   color: #0d1b2a !important;
 }

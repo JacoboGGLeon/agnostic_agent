@@ -58,6 +58,19 @@ section[data-testid="stSidebar"] {
   border-right: 1px solid rgba(73, 165, 230, .28);
 }
 
+/* Right inspector sidebar (mirrors left sidebar style) */
+div[data-testid="column"]:has(#right-inspector-anchor) {
+  background: rgba(7, 33, 70, .86);
+  border-left: 1px solid rgba(73, 165, 230, .28);
+  border-radius: 14px;
+  padding: 12px;
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
 .topbar-offset {
   height: 2.75rem;
 }
