@@ -58,17 +58,38 @@ section[data-testid="stSidebar"] {
   border-right: 1px solid rgba(73, 165, 230, .28);
 }
 
-/* Right inspector sidebar (mirrors left sidebar style) */
+/* Right inspector sidebar (visual twin of left sidebar) */
 div[data-testid="column"]:has(#right-inspector-anchor) {
   background: rgba(7, 33, 70, .86);
   border-left: 1px solid rgba(73, 165, 230, .28);
-  border-radius: 14px;
-  padding: 12px;
+  padding: 14px 14px 18px 14px;
   position: sticky;
-  top: 76px;
+  top: 0;
   align-self: start;
-  max-height: calc(100vh - 96px);
+  min-height: calc(100vh - 8px);
   overflow-y: auto;
+}
+
+div[data-testid="column"]:has(#right-inspector-anchor) .stButton > button {
+  margin-top: 2px;
+}
+
+.right-inspector-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 2px 16px 2px;
+}
+
+.right-inspector-head img {
+  width: 116px;
+  height: auto;
+}
+
+.right-inspector-title {
+  font-weight: 800;
+  font-size: 30px;
+  line-height: 1.05;
 }
 
 .topbar-offset {

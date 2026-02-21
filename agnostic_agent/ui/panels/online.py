@@ -25,9 +25,9 @@ def render_online_tab(agent_factory):
         st.session_state.inspector_right_open = True
 
     if st.session_state.inspector_right_open:
-        feed_col, insp_col = st.columns([2.15, 0.85], gap="large")
+        feed_col, insp_col = st.columns([2.05, 0.95], gap="large")
     else:
-        feed_col, insp_col = st.columns([2.9, 0.1], gap="small")
+        feed_col, insp_col = st.columns([2.92, 0.08], gap="small")
 
     with feed_col:
         with st.container(border=True):
@@ -106,6 +106,15 @@ def render_online_tab(agent_factory):
             st.rerun()
 
         if st.session_state.inspector_right_open:
+            st.markdown(
+                """
+                <div class="right-inspector-head">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
+                  <div class="right-inspector-title">Agentic Lab · Inspector</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             render_inspector()
 
     # Row 2: [Skill selector + input]
