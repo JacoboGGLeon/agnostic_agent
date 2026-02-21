@@ -183,6 +183,18 @@ section[data-testid="stSidebar"] {
 .stMarkdown, .stCaption, .stText, .stAlert, .stSelectbox label, .stRadio label, .stCheckbox label, .stTextInput label, .stTextArea label {
   color: #0d1b2a !important;
 }
+.stButton > button,
+.stDownloadButton > button {
+  color: #ffffff !important;
+}
+code {
+  color: #f8fbff !important;
+}
+pre,
+pre code,
+code[class*="language-"] {
+  color: #f8fbff !important;
+}
 [data-baseweb="input"] input,
 [data-baseweb="textarea"] textarea,
 [data-baseweb="select"] * {

@@ -17,18 +17,14 @@ from agnostic_agent.ui.panels.helpers import (
 
 
 def render_inspector():
-    if not st.session_state.get("show_inspector", True):
-        st.info("Inspector oculto. Actívalo en la barra lateral.")
-        return
-
     # Streamlit does not support "opening a div and then rendering widgets inside it".
     # Use a real container so the box actually wraps all content.
     with st.container(border=True):
-        st.markdown("### 🔎 Inspector")
+        st.markdown("### Inspector")
 
         a_msgs = assistant_messages()
         if not a_msgs:
-            st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
+            st.info("Aun no hay respuestas del agente. Escribe algo para empezar.")
             return
 
         ids = [m["id"] for m in a_msgs]
@@ -37,8 +33,8 @@ def render_inspector():
             m = find_message_by_id(mid) or {}
             out = m.get("out") or {}
             text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
-            text = (text[:60] + "…") if len(text) > 60 else text
-            return f"id={mid} · {text or '(sin texto)'}"
+            text = (text[:60] + "...") if len(text) > 60 else text
+            return f"id={mid} - {text or '(sin texto)'}"
 
         if st.session_state.selected_msg_id not in ids:
             st.session_state.selected_msg_id = ids[-1]
@@ -68,11 +64,11 @@ def render_inspector():
 
         tab_specs: List[Tuple[str, str]] = []
         if st.session_state.get("show_thinking_tab", True):
-            tab_specs.append(("🧠 Thinking", "thinking"))
+            tab_specs.append(("Thinking", "thinking"))
         if st.session_state.get("show_deep_tab", True):
-            tab_specs.append(("🧠 Deep", "deep"))
+            tab_specs.append(("Deep", "deep"))
         if st.session_state.get("show_dev_tab", True):
-            tab_specs.append(("🔍 Dev", "dev"))
+            tab_specs.append(("Dev", "dev"))
 
         if not tab_specs:
             return
@@ -84,20 +80,20 @@ def render_inspector():
                     card_code(
                         "Pensamiento (thinking)",
                         thinking,
-                        icon="🧠",
+                        icon="mind",
                         hint="reasoning_content",
                     )
                 elif tab_key == "deep":
-                    content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
+                    content_to_show = deep_txt if deep_txt else "_(vacio / sin resumen)_"
                     card_md(
                         "Vista profunda (deep_out / summary)",
                         content_to_show,
-                        icon="🧠",
+                        icon="deep",
                         hint="pipeline",
                     )
                 elif tab_key == "dev":
                     render_tool_runs(tool_runs)
-                    with st.expander("🧬 raw_state (debug)", expanded=False):
+                    with st.expander("raw_state (debug)", expanded=False):
                         if isinstance(raw_state, dict) and raw_state:
                             st.json(raw_state)
                         else:

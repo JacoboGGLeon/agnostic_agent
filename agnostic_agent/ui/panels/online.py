@@ -20,8 +20,14 @@ from agnostic_agent.ui.panels.inspector import render_inspector
 
 
 def render_online_tab(agent_factory):
-    # Row 1: [Online Chat box][Inspector box]
-    feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
+    # Row 1: [Online Chat box][Inspector right sidebar]
+    if "inspector_right_open" not in st.session_state:
+        st.session_state.inspector_right_open = True
+
+    if st.session_state.inspector_right_open:
+        feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
+    else:
+        feed_col, insp_col = st.columns([2.85, 0.15], gap="small")
 
     with feed_col:
         with st.container(border=True):
@@ -93,7 +99,13 @@ def render_online_tab(agent_factory):
                                 st.rerun()
 
     with insp_col:
-        render_inspector()
+        toggle_label = "Collapse >" if st.session_state.inspector_right_open else "< Expand"
+        if st.button(toggle_label, key="toggle_inspector_right", use_container_width=True):
+            st.session_state.inspector_right_open = not st.session_state.inspector_right_open
+            st.rerun()
+
+        if st.session_state.inspector_right_open:
+            render_inspector()
 
     # Row 2: [Skill selector + input]
     st.markdown("---")

@@ -21,13 +21,12 @@ def render_sidebar():
         )
 
         st.markdown("#### Inspector")
-        show_inspector = st.toggle("Activar Inspector", value=True, key="show_inspector")
-
-        if show_inspector:
-            st.caption("Vistas:")
-            st.checkbox("Thinking", value=True, key="show_thinking_tab")
-            st.checkbox("Deep", value=True, key="show_deep_tab")
-            st.checkbox("Dev", value=True, key="show_dev_tab")
+        # Inspector is now always active (rendered as right sidebar in Online view).
+        st.session_state["show_inspector"] = True
+        st.caption("Vistas:")
+        st.checkbox("Thinking", value=True, key="show_thinking_tab")
+        st.checkbox("Deep", value=True, key="show_deep_tab")
+        st.checkbox("Dev", value=True, key="show_dev_tab")
 
         st.divider()
 
