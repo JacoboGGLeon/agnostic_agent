@@ -24,6 +24,13 @@ def render_online_tab(agent_factory):
     if "inspector_right_open" not in st.session_state:
         st.session_state.inspector_right_open = True
 
+    # Top-bar-like trigger (outside inspector body)
+    st.markdown('<div id="inspector-top-toggle-anchor"></div>', unsafe_allow_html=True)
+    top_label = "Hide OInspector" if st.session_state.inspector_right_open else "Show OInspector"
+    if st.button(top_label, key="toggle_inspector_right_top"):
+        st.session_state.inspector_right_open = not st.session_state.inspector_right_open
+        st.rerun()
+
     if st.session_state.inspector_right_open:
         feed_col, insp_col = st.columns([2.05, 0.95], gap="large")
     else:
@@ -100,11 +107,6 @@ def render_online_tab(agent_factory):
 
     with insp_col:
         st.markdown('<div id="right-inspector-anchor"></div>', unsafe_allow_html=True)
-        toggle_label = "Collapse >" if st.session_state.inspector_right_open else "<"
-        if st.button(toggle_label, key="toggle_inspector_right", use_container_width=True):
-            st.session_state.inspector_right_open = not st.session_state.inspector_right_open
-            st.rerun()
-
         if st.session_state.inspector_right_open:
             st.markdown(
                 """

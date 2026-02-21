@@ -87,6 +87,22 @@ div[data-testid="column"]:has(#right-inspector-anchor) .stButton > button {
   margin-top: 2px;
 }
 
+/* Top trigger for right inspector (toolbar-like placement) */
+div[data-testid="element-container"]:has(#inspector-top-toggle-anchor) {
+  position: fixed;
+  top: 8px;
+  right: 108px;
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  margin: 0;
+}
+
+div[data-testid="element-container"]:has(#inspector-top-toggle-anchor) + div .stButton > button,
+div[data-testid="element-container"]:has(#inspector-top-toggle-anchor) .stButton > button {
+  min-width: 168px;
+}
+
 .right-inspector-head {
   display: flex;
   flex-direction: column;

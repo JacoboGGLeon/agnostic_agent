@@ -173,6 +173,9 @@ div[data-testid="column"]:has(#right-inspector-anchor) {
 div[data-testid="column"]:has(#right-inspector-anchor) .right-inspector-title {
   color: #0d1b2a !important;
 }
+div[data-testid="column"]:has(#right-inspector-anchor) .right-inspector-divider {
+  background: #d7dce3 !important;
+}
 .stSidebar, .stSidebar * {
   color: #0d1b2a !important;
 }
