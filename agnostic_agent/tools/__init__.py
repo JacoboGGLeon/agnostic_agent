@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Importamos los módulos de tools explícitamente para llenar el registro
 # Usamos imports relativos para evitar circularidad si se importara agnostic_agent.tools antes
-from . import basic, math, semantic, finance
+from . import basic, math, semantic, finance, introspection
 
 # Construimos el registro global agregando las tools de cada submódulo
 TOOL_REGISTRY: Dict[str, Any] = {}
@@ -35,6 +35,7 @@ _register_module_tools(basic)
 _register_module_tools(math)
 _register_module_tools(semantic)
 _register_module_tools(finance)
+_register_module_tools(introspection)
 
 # Re-exportamos funciones clave para compatibilidad hacia atrás si alguien importaba directamente
 # (Aunque lo ideal es usar el registro)

@@ -130,6 +130,10 @@ class State(TypedDict, total=False):
     llm_raw_out: Optional[str]
     llm_clean_out: Optional[str]
 
+    # Internal runtime scope propagated across nodes
+    _active_skills_internal: Optional[List[str]]
+    _planner_scope_internal: Optional[Dict[str, Any]]
+
 
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Planner runtime helpers (tool_calls)

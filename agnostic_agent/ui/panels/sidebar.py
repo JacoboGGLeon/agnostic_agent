@@ -61,8 +61,16 @@ def render_sidebar():
 
         st.markdown("#### Models")
 
-        llm_name = os.getenv("LLM_SERVED_NAME", "custom-llm-model")
-        emb_name = os.getenv("EMB_SERVED_NAME", "custom-embedding-model")
+        llm_name = (
+            os.getenv("LLM_SERVED_NAME")
+            or os.getenv("LLM_MODEL_ID")
+            or "custom-llm-model"
+        )
+        emb_name = (
+            os.getenv("EMB_SERVED_NAME")
+            or os.getenv("EMB_MODEL_ID")
+            or "custom-embedding-model"
+        )
 
         st.text_input("Model Name", value=llm_name, disabled=True, key="planner_model_name_display")
         st.caption("Embedding Server")
