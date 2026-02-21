@@ -15,7 +15,7 @@ NOTA:
 """
 
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 import os
 import sys
 import subprocess
@@ -27,9 +27,12 @@ import pathlib
 
 from huggingface_hub import snapshot_download
 from langchain_core.messages import SystemMessage
-from langchain_qwq import ChatQwenVllm as ChatGenVllm
-# Note: langchain_qwq might be a specific driver. If we want true agnosticism we might want ChatOpenAI,
-# but sticking to the existing driver for now to avoid breaking changes, just wrapping it.
+try:
+    from langchain_qwq import ChatQwenVllm as ChatGenVllm
+    HAS_LANGCHAIN_QWQ = True
+except Exception:
+    from langchain_openai import ChatOpenAI as ChatGenVllm
+    HAS_LANGCHAIN_QWQ = False
 
 
 # ─────────────────────────────────────────────
@@ -489,7 +492,7 @@ def build_planner_system_message(
     cfg = config or PlannerConfig()
     return SystemMessage(content=cfg.system_text)
 
-def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatGenVllm:
+def build_planner_llm(config: Optional[PlannerConfig] = None) -> Any:
     """
     Construye el LLM planner apuntando al endpoint vLLM (VLLM_API_BASE).
     No asume tools; se configuran fuera con .bind_tools().
@@ -500,10 +503,20 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> ChatGenVllm:
     if "VLLM_LLM_API_BASE" in os.environ and "VLLM_API_BASE" not in os.environ:
         os.environ["VLLM_API_BASE"] = os.environ["VLLM_LLM_API_BASE"]
 
+    if HAS_LANGCHAIN_QWQ:
+        return ChatGenVllm(
+            model=cfg.model_name,
+            temperature=cfg.temperature,
+            enable_thinking=cfg.enable_thinking,
+            request_timeout=cfg.request_timeout,
+            openai_api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
+        )
+
+    # Fallback for environments without langchain_qwq (e.g. local/OpenAI stack).
     return ChatGenVllm(
         model=cfg.model_name,
         temperature=cfg.temperature,
-        enable_thinking=cfg.enable_thinking,
-        request_timeout=cfg.request_timeout,
-        openai_api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
+        timeout=cfg.request_timeout,
+        api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
+        base_url=os.environ.get("VLLM_API_BASE"),
     )

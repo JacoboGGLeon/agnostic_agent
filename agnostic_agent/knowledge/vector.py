@@ -297,11 +297,19 @@ def embed_texts(texts: List[str], batch_size: int = 8) -> np.ndarray:
         try:
             client = get_vllm_client()
             all_vecs = []
+            requested_dimensions = os.getenv("OPENAI_EMBED_DIMENSIONS", "").strip()
+            embed_kwargs: Dict[str, Any] = {}
+            if requested_dimensions.isdigit():
+                embed_kwargs["dimensions"] = int(requested_dimensions)
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
                 batch = [t.replace("\n", " ") for t in batch] 
                 
-                resp = client.embeddings.create(input=batch, model=EMB_MODEL_REPO)
+                resp = client.embeddings.create(
+                    input=batch,
+                    model=EMB_MODEL_REPO,
+                    **embed_kwargs,
+                )
                 vecs = [d.embedding for d in resp.data]
                 all_vecs.append(np.array(vecs, dtype="float32"))
             

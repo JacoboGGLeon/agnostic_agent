@@ -2,7 +2,10 @@ import datetime
 import html
 from typing import List
 
-import markdown
+try:
+    import markdown
+except Exception:
+    markdown = None
 import streamlit as st
 
 from agnostic_agent.ui.panels.helpers import (
@@ -52,9 +55,12 @@ def render_online_tab(agent_factory):
 
                     with st.chat_message("assistant"):
                         try:
-                            raw_html = markdown.markdown(
-                                content or "_(sin respuesta)_", extensions=["extra"]
-                            )
+                            if markdown is not None:
+                                raw_html = markdown.markdown(
+                                    content or "_(sin respuesta)_", extensions=["extra"]
+                                )
+                            else:
+                                raise RuntimeError("markdown package is not available")
                         except Exception:
                             raw_html = html.escape(content or "_(sin respuesta)_").replace(
                                 "\n", "<br>"

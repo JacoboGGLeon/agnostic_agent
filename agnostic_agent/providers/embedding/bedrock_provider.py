@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from agnostic_agent.core.contracts.embedding_provider import EmbeddingProvider
 from agnostic_agent.app.errors import ProviderError
 import json
@@ -10,15 +10,34 @@ try:
 except ImportError:
     HAS_BOTO3 = False
 
+def _resolve_bedrock_region(config: Dict[str, Any], default_region: str = "us-east-1") -> str:
+    if not HAS_BOTO3:
+        return (
+            config.get("region_name")
+            or config.get("region")
+            or os.getenv("AWS_REGION")
+            or os.getenv("AWS_DEFAULT_REGION")
+            or default_region
+        )
+    session_region = boto3.session.Session().region_name
+    return (
+        config.get("region_name")
+        or config.get("region")
+        or os.getenv("AWS_REGION")
+        or os.getenv("AWS_DEFAULT_REGION")
+        or session_region
+        or default_region
+    )
+
 class BedrockEmbeddingProvider(EmbeddingProvider):
     def __init__(self, config: Dict[str, Any]):
         if not HAS_BOTO3:
              raise ProviderError("boto3 package is required for BedrockEmbeddingProvider", provider="bedrock")
 
         self.config = config
-        self.region_name = config.get("region_name") or os.getenv("AWS_REGION", "us-east-1")
+        self.region_name = _resolve_bedrock_region(config)
         self.model = config.get("model", "amazon.titan-embed-text-v1")
-        self._dimension = config.get("dimension", 1536) # Defaults to Titan v1 dim
+        self._dimension: Optional[int] = config.get("dimension")
 
         try:
             self.client = boto3.client("bedrock-runtime", region_name=self.region_name)
@@ -27,7 +46,7 @@ class BedrockEmbeddingProvider(EmbeddingProvider):
 
     @property
     def dimension(self) -> int:
-        return self._dimension
+        return int(self._dimension or 0)
 
     def embed_query(self, text: str) -> List[float]:
         return self.embed_documents([text])[0]
@@ -45,7 +64,15 @@ class BedrockEmbeddingProvider(EmbeddingProvider):
                      contentType="application/json"
                  )
                  response_body = json.loads(response.get("body").read())
-                 results.append(response_body.get("embedding"))
+                 emb = response_body.get("embedding")
+                 if not isinstance(emb, list):
+                     raise ProviderError(
+                         f"Unexpected embedding response shape: {type(emb).__name__}",
+                         provider="bedrock",
+                     )
+                 if self._dimension is None:
+                     self._dimension = len(emb)
+                 results.append(emb)
              except Exception as e:
                  raise ProviderError(f"Bedrock embedding failed for text snippet: {e}", provider="bedrock")
         return results
