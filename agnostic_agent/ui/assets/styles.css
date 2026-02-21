@@ -1,4 +1,10 @@
 :root {
+  --sidebar-w: 336px;
+  --sidebar-pad-x: 16px;
+  --sidebar-pad-y: 16px;
+  --sidebar-head-top: 6px;
+  --sidebar-head-gap: 8px;
+  --sidebar-head-bottom: 14px;
   --bg: #041731;
   --panel: rgba(255, 255, 255, .07);
   --panel2: rgba(255, 255, 255, .10);
@@ -56,18 +62,25 @@
 section[data-testid="stSidebar"] {
   background: rgba(7, 33, 70, .86);
   border-right: 1px solid rgba(73, 165, 230, .28);
+  width: var(--sidebar-w) !important;
+  min-width: var(--sidebar-w) !important;
+  max-width: var(--sidebar-w) !important;
 }
 
 /* Right inspector sidebar (visual twin of left sidebar) */
 div[data-testid="column"]:has(#right-inspector-anchor) {
   background: rgba(7, 33, 70, .86);
   border-left: 1px solid rgba(73, 165, 230, .28);
-  padding: 14px 14px 18px 14px;
+  width: var(--sidebar-w) !important;
+  min-width: var(--sidebar-w) !important;
+  max-width: var(--sidebar-w) !important;
+  padding: var(--sidebar-pad-y) var(--sidebar-pad-x) calc(var(--sidebar-pad-y) + 6px) var(--sidebar-pad-x);
   position: sticky;
   top: 0;
   align-self: start;
   min-height: calc(100vh - 8px);
   overflow-y: auto;
+  margin-left: auto;
 }
 
 div[data-testid="column"]:has(#right-inspector-anchor) .stButton > button {
@@ -77,19 +90,25 @@ div[data-testid="column"]:has(#right-inspector-anchor) .stButton > button {
 .right-inspector-head {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 6px 2px 16px 2px;
+  gap: var(--sidebar-head-gap);
+  margin: var(--sidebar-head-top) 2px var(--sidebar-head-bottom) 2px;
 }
 
 .right-inspector-head img {
-  width: 116px;
+  width: 140px;
   height: auto;
 }
 
 .right-inspector-title {
   font-weight: 800;
-  font-size: 30px;
+  font-size: 32px;
   line-height: 1.05;
+}
+
+.right-inspector-divider {
+  height: 1px;
+  margin: 10px 2px 14px 2px;
+  background: rgba(73, 165, 230, .28);
 }
 
 .topbar-offset {

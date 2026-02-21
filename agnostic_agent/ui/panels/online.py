@@ -110,12 +110,13 @@ def render_online_tab(agent_factory):
                 """
                 <div class="right-inspector-head">
                   <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
-                  <div class="right-inspector-title">Agentic Lab · Inspector</div>
+                  <div class="right-inspector-title">Agentic Lab · OInspector</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            render_inspector()
+            st.markdown('<div class="right-inspector-divider"></div>', unsafe_allow_html=True)
+            render_inspector(show_title=False, boxed=False)
 
     # Row 2: [Skill selector + input]
     st.markdown("---")

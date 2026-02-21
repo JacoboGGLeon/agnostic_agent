@@ -16,11 +16,15 @@ from agnostic_agent.ui.panels.helpers import (
 )
 
 
-def render_inspector():
-    # Streamlit does not support "opening a div and then rendering widgets inside it".
-    # Use a real container so the box actually wraps all content.
-    with st.container(border=True):
-        st.markdown("### Inspector")
+def render_inspector(show_title: bool = True, boxed: bool = True):
+    if boxed:
+        root_ctx = st.container(border=True)
+    else:
+        root_ctx = st.container()
+
+    with root_ctx:
+        if show_title:
+            st.markdown("### Inspector")
 
         a_msgs = assistant_messages()
         if not a_msgs:
