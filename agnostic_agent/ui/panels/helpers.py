@@ -2,8 +2,77 @@ import streamlit as st
 import html
 import markdown
 import json
+import re
 from typing import Dict, Any, List, Optional
 from agnostic_agent.agent import Agent
+
+def sanitize_display_text(text: Any) -> str:
+    """
+    Removes frontend artifacts like [object Object] from rendered text.
+    Keeps UI clean even if upstream providers/serializers leak JS-like strings.
+    """
+    if text is None:
+        return ""
+    out = text if isinstance(text, str) else str(text)
+    out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+    out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+def _count_subqueries(text: str) -> int:
+    if not text:
+        return 0
+    return len(re.findall(r"(?im)^Subquery\s+\d+\s*:", text))
+
+def _build_planner_from_raw_state(raw_state: Dict[str, Any]) -> str:
+    planner_trajs = raw_state.get("planner_trajs") or []
+    if not isinstance(planner_trajs, list) or not planner_trajs:
+        return ""
+
+    lines: List[str] = ["Rol: PLANNER restringe tools+knowledge."]
+    scope = raw_state.get("_planner_scope_internal") or {}
+    if isinstance(scope, dict) and scope:
+        skills = scope.get("active_skills", [])
+        tools = scope.get("allowed_tools", [])
+        knowledge = scope.get("allowed_knowledge", [])
+        lines.append(f"Scope: skills={skills}, tools={tools}, knowledge={knowledge}")
+        lines.append("")
+
+    for index, traj in enumerate(planner_trajs, start=1):
+        if isinstance(traj, dict):
+            subquery = _safe_text(traj.get("subquery", ""))
+            description = _safe_text(traj.get("description", "")).strip()
+        else:
+            subquery = _safe_text(getattr(traj, "subquery", ""))
+            description = _safe_text(getattr(traj, "description", "")).strip()
+
+        lines.append(f"Subquery {index}: {subquery}")
+        lines.append("DAG:")
+        if not description:
+            lines.append("step 1: (empty)")
+        else:
+            for raw_line in description.splitlines():
+                line = sanitize_display_text(raw_line).strip()
+                if not line:
+                    continue
+                if line.startswith("step "):
+                    lines.append(line)
+                else:
+                    lines.append(f"step ?: {line}")
+        if index < len(planner_trajs):
+            lines.append("")
+
+    return sanitize_display_text("\n".join(lines))
 
 def normalize_output(raw: Any) -> Dict[str, Any]:
     if raw is None:
@@ -21,14 +90,14 @@ def as_text(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, str):
-        return v.strip()
+        return sanitize_display_text(v)
     if isinstance(v, dict):
         for k in ("final_answer", "text", "content", "answer", "user_out"):
             vv = v.get(k)
             if isinstance(vv, str) and vv.strip():
-                return vv.strip()
+                return sanitize_display_text(vv)
         return ""
-    return str(v).strip()
+    return sanitize_display_text(v)
 
 def strip_user_prefix(text: str) -> str:
     if not text:
@@ -85,19 +154,33 @@ def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
     return ""
 
 def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str) -> str:
+    planner_from_state = ""
+    expected_subqueries = 0
+    summary: Dict[str, Any] = {}
+    if isinstance(raw_state, dict):
+        planner_from_state = _build_planner_from_raw_state(raw_state)
+        planner_trajs = raw_state.get("planner_trajs") or []
+        expected_subqueries = len(planner_trajs) if isinstance(planner_trajs, list) else 0
+        summary = raw_state.get("summary") or raw_state.get("pipeline_summary") or {}
+
     if deep_out_text:
-        return deep_out_text
-    if not isinstance(raw_state, dict):
+        cleaned = sanitize_display_text(deep_out_text)
+        if expected_subqueries > 0 and _count_subqueries(cleaned) < expected_subqueries and planner_from_state:
+            deep_out_text = ""
+        else:
+            return cleaned
+
+    if not summary or not isinstance(summary, dict):
         return ""
-    summary = raw_state.get("summary") or raw_state.get("pipeline_summary")
-    if not isinstance(summary, dict):
-        return ""
+
     parts = []
     for k in ["analyzer", "planner", "executor", "catcher", "summarizer", "final_answer"]:
         v = summary.get(k, "")
+        if k == "planner" and planner_from_state:
+            v = planner_from_state
         if isinstance(v, str) and v.strip():
             parts.append(f"**{k.upper()}**\n\n{v.strip()}")
-    return "\n\n---\n\n".join(parts) if parts else ""
+    return sanitize_display_text("\n\n---\n\n".join(parts) if parts else "")
 
 def extract_tool_runs(out: Dict[str, Any], raw_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if isinstance(raw_state, dict):
