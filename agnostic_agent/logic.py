@@ -2360,6 +2360,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
         catcher_text = _normalize_text(catcher_text)
         summarizer_text = _normalize_text(summarizer_text)
         user_answer = _normalize_text(user_answer)
+        
         if isinstance(summary_dict, dict):
             summary_dict["analyzer"] = analyzer_text
             summary_dict["planner"] = planner_text
@@ -2367,6 +2368,14 @@ Genera el DAG exclusivo para resolver: "{subq}"
             summary_dict["catcher"] = catcher_text
             summary_dict["summarizer"] = summarizer_text
             summary_dict["final_answer"] = user_answer
+        elif summary_dict:
+            summary_dict.analyzer = analyzer_text
+            summary_dict.planner = planner_text
+            summary_dict.executor = executor_text
+            summary_dict.catcher = catcher_text
+            summary_dict.summarizer = summarizer_text
+            summary_dict.final_answer = user_answer
+
 
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
         answer_markdown = _build_pipeline_markdown(
