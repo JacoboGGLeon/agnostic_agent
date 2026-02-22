@@ -14,6 +14,11 @@ def sanitize_display_text(text: Any) -> str:
     if text is None:
         return ""
     out = text if isinstance(text, str) else str(text)
+    for _ in range(3):
+        decoded = html.unescape(out)
+        if decoded == out:
+            break
+        out = decoded
     out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
     out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
@@ -65,7 +70,9 @@ def _build_planner_from_raw_state(raw_state: Dict[str, Any]) -> str:
                 line = sanitize_display_text(raw_line).strip()
                 if not line:
                     continue
-                if line.startswith("step "):
+                if line.lower().startswith("note:"):
+                    lines.append(line)
+                elif line.startswith("step "):
                     lines.append(line)
                 else:
                     lines.append(f"step ?: {line}")

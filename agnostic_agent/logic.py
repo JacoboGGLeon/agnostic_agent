@@ -29,6 +29,7 @@ Notas:
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Callable, Tuple
 import json
+import html
 import os
 import re
 import uuid
@@ -1933,7 +1934,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         line = raw_line.strip()
                         if _is_object_object_line(line):
                             continue
-                        out_lines.append(line if line.startswith("step ") else f"step ?: {line}")
+                        if line.lower().startswith("note:"):
+                            out_lines.append(line)
+                        elif line.startswith("step "):
+                            out_lines.append(line)
+                        else:
+                            out_lines.append(f"step ?: {line}")
                 if i < len(planner_trajs):
                     out_lines.append("")
             analyzer_subqs = (state.get("analyzer") or {}).get("subqueries") or []
@@ -1976,6 +1982,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
             if not isinstance(s, str):
                 return s
             out = s
+            # Decode HTML entities that may arrive escaped by upstream providers/loggers.
+            for _ in range(3):
+                decoded = html.unescape(out)
+                if decoded == out:
+                    break
+                out = decoded
             replacements = {
                 "â†’": "->",
                 "Ã¡": "á",
@@ -2027,6 +2039,23 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     _fenced_block(summarizer_text, "text"),
                     final_heading,
                     user_answer,
+                ]
+            )
+
+        def _build_deep_markdown() -> str:
+            def _section(title: str, body: str) -> str:
+                body_text = body if isinstance(body, str) else _pretty_json(body)
+                return f"### {title}\n```text\n{body_text}\n```"
+
+            return "\n\n".join(
+                [
+                    "## Resumen deep del pipeline",
+                    _section("ANALYZER", analyzer_text),
+                    _section("PLANNER", planner_text),
+                    _section("EXECUTOR", executor_text),
+                    _section("CATCHER", catcher_text),
+                    _section("SUMMARIZER", summarizer_text),
+                    _section("RESPUESTA FINAL", user_answer),
                 ]
             )
 
@@ -2129,10 +2158,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             )
 
             dev_out = answer_markdown
-            deep_out = _build_pipeline_markdown(
-                "Resumen deep del pipeline",
-                "### RESPUESTA FINAL",
-            )
+            deep_out = _build_deep_markdown()
 
             return {
                 "messages": [final_ai],
@@ -2355,10 +2381,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         # AdemAs rellenamos dev_out / deep_out / user_out:
         dev_out = answer_markdown
-        deep_out = _build_pipeline_markdown(
-            "Resumen deep del pipeline",
-            "### RESPUESTA FINAL",
-        )
+        deep_out = _build_deep_markdown()
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         # AGNOSTIC FIX: Strip <think> tags from user_out
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
