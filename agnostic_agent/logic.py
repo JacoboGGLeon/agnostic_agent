@@ -2237,6 +2237,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 else:
                     user_answer = llm_clean or "Que te gustaria hacer?"
 
+            user_answer = _normalize_text(user_answer)
             tools_summary_text = summarize_tool_runs(user_prompt, runs)
             
             # Rebuild pipeline metadata in pretty format.
