@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agnostic_agent"
+version = "0.3.0"
+description = "Agnostic Agent with pluggable providers and skills"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "langchain",
+    "langchain-core",
+    "langchain-openai",
+    "langgraph",
+    "typing_extensions",
+    "pydantic>=2.7.0",
+    "pyyaml>=6.0",
+    "streamlit",
+    "markdown",
+    "sqlite-vec",
+    "pandas",
+    "numpy",
+    "pymupdf",
+    "transformers",
+    "torch",
+    "openai",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "types-PyYAML",
+    "types-requests",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "unit",
+    "integration",
+    "smoke",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true

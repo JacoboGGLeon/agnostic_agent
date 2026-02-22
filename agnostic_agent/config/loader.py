@@ -54,8 +54,8 @@ def load_config(profile: Optional[str] = None, config_dir: Optional[Union[str, P
     config_data = load_yaml_config(base_dir / "config.yaml")
 
     # 2. Profile Config
-    env_profile = os.getenv("AGNOSTIC_PROFILE", "dev")
-    active_profile = profile or env_profile
+    env_profile = os.getenv("AGNOSTIC_PROFILE")
+    active_profile = profile if profile is not None else env_profile
     
     if active_profile:
         profile_path = base_dir / "profiles" / f"{active_profile}.yaml"

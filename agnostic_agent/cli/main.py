@@ -21,20 +21,20 @@ def parse_args():
     return parser.parse_args()
 
 def run_once(agent: Agent, prompt: str, session_id: str):
-    print(f"🤖 User: {prompt}")
+    print(f"User: {prompt}")
     try:
         result = agent.run_turn({
             "user_prompt": prompt,
             "session_id": session_id
         })
         user_out = result.get("user_out", {}).get("final_answer", "")
-        print(f"🤖 Agent: {user_out}")
+        print(f"Agent: {user_out}")
         
         if settings.debug:
             print(f"\n[DEBUG] Tool Runs: {len(result.get('dev_out', {}).get('tool_runs', []))}")
             
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         if settings.debug:
             import traceback
             traceback.print_exc()

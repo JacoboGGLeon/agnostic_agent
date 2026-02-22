@@ -1,5 +1,6 @@
 import importlib
 import logging
+import os
 from typing import Dict, Any, List, Type
 from pathlib import Path
 from agnostic_agent.core.contracts.plugin import Plugin
@@ -18,6 +19,7 @@ class PluginManager:
         
     def load_plugins(self):
         """Load all enabled plugins from configuration."""
+        strict_mode = os.getenv("AGNOSTIC_STRICT_PLUGINS", "false").lower() == "true"
         # Config structure:
         # plugins:
         #   tool:
@@ -38,6 +40,10 @@ class PluginManager:
                     logger.info(f"Loaded plugin: {category}.{name}")
                 except Exception as e:
                     logger.error(f"Failed to load plugin {name}: {e}")
+                    if strict_mode:
+                        raise ConfigurationError(
+                            f"Strict plugin mode enabled and plugin failed to load: {category}.{name}: {e}"
+                        ) from e
                     
     def _load_plugin(self, name: str, category: str, path: str, config: Dict[str, Any]) -> Plugin:
         module = None
@@ -100,7 +106,7 @@ class PluginManager:
             # plugin.type might be 'ui.panel', 'tool', etc.
             # Registry map keys should match
             registry = registry_map.get(plugin.type)
-            if registry:
+            if registry is not None:
                 plugin.register(registry)
 
     def get_ui_plugins(self, location: str = None) -> List[Plugin]:
