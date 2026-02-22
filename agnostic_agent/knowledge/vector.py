@@ -239,8 +239,8 @@ _EMBEDDER_CACHE: Dict[str, Any] = {}
 
 def get_vllm_client():
     from openai import OpenAI
-    api_base = os.getenv("VLLM_EMB_URL", "http://localhost:8001/v1")
-    api_key = os.getenv("VLLM_API_KEY", "EMPTY")
+    api_base = os.getenv("VLLM_EMB_API_BASE") or os.getenv("VLLM_EMB_URL", "http://localhost:8001/v1")
+    api_key = os.getenv("VLLM_API_KEY") or os.getenv("OPENAI_API_KEY", "EMPTY")
     return OpenAI(base_url=api_base, api_key=api_key)
 
 def check_vllm_embedding_available() -> bool:

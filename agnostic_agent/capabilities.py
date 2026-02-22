@@ -144,6 +144,10 @@ class VllmConfig:
     enable_reasoning: bool = _str_to_bool(os.getenv("VLLM_ENABLE_REASONING", "1"))
     reasoning_parser: Optional[str] = os.getenv("VLLM_REASONING_PARSER", "qwen3")
 
+    # Flags para arrancar (o no) servidores
+    # Nota: algunos flujos solo necesitan embeddings; esto permite no levantar el LLM.
+    start_llm_server: bool = _str_to_bool(os.getenv("VLLM_START_LLM_SERVER", "1"))
+
     # Flags para arrancar (o no) servidores extra
     start_emb_server: bool = _str_to_bool(os.getenv("VLLM_START_EMB_SERVER", "0"))
     start_rerank_server: bool = _str_to_bool(os.getenv("VLLM_START_RERANK_SERVER", "0"))
@@ -151,17 +155,17 @@ class VllmConfig:
 
 @dataclass
 class VllmServers:
-    llm_proc: subprocess.Popen
+    llm_proc: Optional[subprocess.Popen] = None
     emb_proc: Optional[subprocess.Popen] = None
     rerank_proc: Optional[subprocess.Popen] = None
-    llm_log_path: str = ""
+    llm_log_path: Optional[str] = None
     emb_log_path: Optional[str] = None
     rerank_log_path: Optional[str] = None
 
 
 @dataclass
 class VllmEndpoints:
-    llm_base_url: str
+    llm_base_url: Optional[str] = None
     emb_base_url: Optional[str] = None
     rerank_base_url: Optional[str] = None
 
@@ -279,26 +283,30 @@ def start_local_vllm_servers(
     """
     cfg = config or VllmConfig()
 
-    # LLM – flags alineados a vLLM + langchain driver
-    llm_extra_flags: list[str] = [
-        "--enable-auto-tool-choice",
-        "--tool-call-parser",
-        cfg.tool_call_parser,
-    ]
-    if cfg.enable_reasoning and cfg.reasoning_parser:
-        llm_extra_flags += ["--reasoning-parser", cfg.reasoning_parser]
+    llm_proc: Optional[subprocess.Popen] = None
+    llm_log: Optional[str] = None
 
-    llm_proc, llm_log = _launch_vllm_server(
-        name="language",
-        model_dir=model_paths.llm_dir,
-        host=cfg.host,
-        port=cfg.llm_port,
-        served_model_name=cfg.llm_served_name,
-        gpu_util=cfg.llm_gpu_util,
-        max_model_len=cfg.llm_max_len,
-        max_num_seqs=cfg.llm_max_num_seqs,
-        extra_flags=llm_extra_flags,
-    )
+    if cfg.start_llm_server:
+        # LLM – flags alineados a vLLM + langchain driver
+        llm_extra_flags: list[str] = [
+            "--enable-auto-tool-choice",
+            "--tool-call-parser",
+            cfg.tool_call_parser,
+        ]
+        if cfg.enable_reasoning and cfg.reasoning_parser:
+            llm_extra_flags += ["--reasoning-parser", cfg.reasoning_parser]
+
+        llm_proc, llm_log = _launch_vllm_server(
+            name="language",
+            model_dir=model_paths.llm_dir,
+            host=cfg.host,
+            port=cfg.llm_port,
+            served_model_name=cfg.llm_served_name,
+            gpu_util=cfg.llm_gpu_util,
+            max_model_len=cfg.llm_max_len,
+            max_num_seqs=cfg.llm_max_num_seqs,
+            extra_flags=llm_extra_flags,
+        )
 
     emb_proc = None
     emb_log = None
@@ -328,12 +336,14 @@ def start_local_vllm_servers(
             max_num_seqs=cfg.rerank_max_num_seqs,
         )
 
-    llm_base = f"http://{cfg.host}:{cfg.llm_port}/v1"
+    llm_base = f"http://{cfg.host}:{cfg.llm_port}/v1" if cfg.start_llm_server else None
     emb_base = f"http://{cfg.host}:{cfg.emb_port}/v1" if cfg.start_emb_server else None
     rerank_base = f"http://{cfg.host}:{cfg.rerank_port}/v1" if cfg.start_rerank_server else None
 
-    print("\n⏳ Esperando LLM server...")
-    ok_llm = _wait_until_ready(f"{llm_base}/models", llm_proc, llm_log)
+    ok_llm = True
+    if cfg.start_llm_server and llm_proc is not None and llm_log is not None and llm_base is not None:
+        print("\n⏳ Esperando LLM server...")
+        ok_llm = _wait_until_ready(f"{llm_base}/models", llm_proc, llm_log)
 
     ok_emb = True
     if cfg.start_emb_server and emb_proc is not None and emb_log is not None:
@@ -349,8 +359,9 @@ def start_local_vllm_servers(
         raise SystemExit("❌ Algún servidor vLLM no quedó listo. Revisa logs.")
 
     print("\n✅ Servidores vLLM listos.")
-    print("\n📋 Modelos en LLM server:")
-    print(_url_open_no_proxy(f"{llm_base}/models"))
+    if llm_base is not None:
+        print("\n📋 Modelos en LLM server:")
+        print(_url_open_no_proxy(f"{llm_base}/models"))
     if emb_base is not None:
         print("\n📋 Modelos en Embedding server:")
         print(_url_open_no_proxy(f"{emb_base}/models"))
@@ -359,24 +370,31 @@ def start_local_vllm_servers(
         print(_url_open_no_proxy(f"{rerank_base}/models"))
 
     if set_env:
-        os.environ["VLLM_LLM_API_BASE"] = llm_base
-        os.environ["VLLM_API_BASE"] = llm_base
+        if llm_base is not None:
+            os.environ["VLLM_LLM_API_BASE"] = llm_base
+            os.environ["VLLM_API_BASE"] = llm_base
         if emb_base is not None:
             os.environ["VLLM_EMB_API_BASE"] = emb_base
+            # Compatibilidad con agnostic_agent/knowledge/vector.py
+            os.environ["VLLM_EMB_URL"] = os.environ.get("VLLM_EMB_URL", emb_base)
         if rerank_base is not None:
             os.environ["VLLM_RERANK_API_BASE"] = rerank_base
 
         # Clave dummy: vLLM ignora el valor, sólo requiere que exista.
         os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "EMPTY")
+        os.environ["VLLM_API_KEY"] = os.environ.get("VLLM_API_KEY", os.environ["OPENAI_API_KEY"])
         os.environ["LLM_SERVED_NAME"] = cfg.llm_served_name
         os.environ["EMB_SERVED_NAME"] = cfg.emb_served_name
         os.environ["RERANK_SERVED_NAME"] = cfg.rerank_served_name
 
         print("\n🌐 Bases URL registradas en ENV:")
-        print("VLLM_API_BASE       =", os.environ["VLLM_API_BASE"])
-        print("VLLM_LLM_API_BASE   =", os.environ["VLLM_LLM_API_BASE"])
+        if "VLLM_API_BASE" in os.environ:
+            print("VLLM_API_BASE       =", os.environ["VLLM_API_BASE"])
+        if "VLLM_LLM_API_BASE" in os.environ:
+            print("VLLM_LLM_API_BASE   =", os.environ["VLLM_LLM_API_BASE"])
         if emb_base is not None:
             print("VLLM_EMB_API_BASE   =", os.environ["VLLM_EMB_API_BASE"])
+            print("VLLM_EMB_URL        =", os.environ["VLLM_EMB_URL"])
         if rerank_base is not None:
             print("VLLM_RERANK_API_BASE=", os.environ["VLLM_RERANK_API_BASE"])
 
