@@ -2,10 +2,7 @@ import datetime
 import html
 from typing import List
 
-try:
-    import markdown
-except Exception:
-    markdown = None
+import markdown
 import streamlit as st
 
 from agnostic_agent.ui.panels.helpers import (
@@ -20,22 +17,8 @@ from agnostic_agent.ui.panels.inspector import render_inspector
 
 
 def render_online_tab(agent_factory):
-    # Row 1: [Online Chat box][Inspector right sidebar-like panel]
-    if "inspector_right_open" not in st.session_state:
-        st.session_state.inspector_right_open = True
-
-    # Trigger below top bar: open/close right inspector
-    _, trigger_col_r = st.columns([0.96, 0.04], gap="small")
-    with trigger_col_r:
-        if st.button("Inspector", key="toggle_inspector_right_icon", use_container_width=True):
-            st.session_state.inspector_right_open = not st.session_state.inspector_right_open
-            st.rerun()
-
-    if st.session_state.inspector_right_open:
-        feed_col, insp_col = st.columns([2.05, 0.95], gap="large")
-    else:
-        feed_col = st.container()
-        insp_col = None
+    # Row 1: [Online Chat box][Inspector box]
+    feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
 
     with feed_col:
         with st.container(border=True):
@@ -69,12 +52,9 @@ def render_online_tab(agent_factory):
 
                     with st.chat_message("assistant"):
                         try:
-                            if markdown is not None:
-                                raw_html = markdown.markdown(
-                                    content or "_(sin respuesta)_", extensions=["extra"]
-                                )
-                            else:
-                                raise RuntimeError("markdown package is not available")
+                            raw_html = markdown.markdown(
+                                content or "_(sin respuesta)_", extensions=["extra"]
+                            )
                         except Exception:
                             raw_html = html.escape(content or "_(sin respuesta)_").replace(
                                 "\n", "<br>"
@@ -105,20 +85,9 @@ def render_online_tab(agent_factory):
                                 st.session_state.selected_msg_id = msg.get("id")
                                 st.toast(f"Inspector -> id={msg.get('id')}")
                                 st.rerun()
-    if insp_col is not None:
-        with insp_col:
-            st.markdown('<div id="right-inspector-anchor"></div>', unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div class="right-inspector-head">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
-                  <div class="right-inspector-title">Agentic Lab - Inspector</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown('<div class="right-inspector-divider"></div>', unsafe_allow_html=True)
-            render_inspector(show_title=False, boxed=False)
+
+    with insp_col:
+        render_inspector()
 
     # Row 2: [Skill selector + input]
     st.markdown("---")
@@ -195,4 +164,3 @@ def render_online_tab(agent_factory):
 
         st.session_state.selected_msg_id = aid
         st.rerun()
-

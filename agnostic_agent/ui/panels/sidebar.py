@@ -21,12 +21,13 @@ def render_sidebar():
         )
 
         st.markdown("#### Inspector")
-        # Inspector is now always active (rendered as right sidebar in Online view).
-        st.session_state["show_inspector"] = True
-        st.caption("Vistas:")
-        st.checkbox("Thinking", value=True, key="show_thinking_tab")
-        st.checkbox("Deep", value=True, key="show_deep_tab")
-        st.checkbox("Dev", value=True, key="show_dev_tab")
+        show_inspector = st.toggle("Activar Inspector", value=True, key="show_inspector")
+
+        if show_inspector:
+            st.caption("Vistas:")
+            st.checkbox("Thinking", value=True, key="show_thinking_tab")
+            st.checkbox("Deep", value=True, key="show_deep_tab")
+            st.checkbox("Dev", value=True, key="show_dev_tab")
 
         st.divider()
 
@@ -60,16 +61,8 @@ def render_sidebar():
 
         st.markdown("#### Models")
 
-        llm_name = (
-            os.getenv("LLM_SERVED_NAME")
-            or os.getenv("LLM_MODEL_ID")
-            or "custom-llm-model"
-        )
-        emb_name = (
-            os.getenv("EMB_SERVED_NAME")
-            or os.getenv("EMB_MODEL_ID")
-            or "custom-embedding-model"
-        )
+        llm_name = os.getenv("LLM_SERVED_NAME", "custom-llm-model")
+        emb_name = os.getenv("EMB_SERVED_NAME", "custom-embedding-model")
 
         st.text_input("Model Name", value=llm_name, disabled=True, key="planner_model_name_display")
         st.caption("Embedding Server")
