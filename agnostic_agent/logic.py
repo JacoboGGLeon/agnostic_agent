@@ -165,6 +165,27 @@ def _parse_args_maybe_json(x: Any) -> dict:
     return {}
 
 
+def _canonical_tool_name(name: Any) -> str:
+    """
+    Normaliza nombres de tools provenientes de distintos proveedores:
+    - functions.reconcile_credit_accounting -> reconcile_credit_accounting
+    - tools.reconcile_credit_accounting -> reconcile_credit_accounting
+    - namespace.path.tool -> tool (fallback conservador por ultimo segmento)
+    """
+    if name is None:
+        return ""
+    raw = str(name).strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    for prefix in ("functions.", "function.", "tools.", "tool."):
+        if lowered.startswith(prefix):
+            return raw[len(prefix):].strip()
+    if "." in raw:
+        return raw.split(".")[-1].strip()
+    return raw
+
+
 def _normalize_toolcalls_list(raw_calls: Any) -> List[Dict[str, Any]]:
     """
     Normaliza mAoltiples formatos a:
@@ -205,11 +226,12 @@ def _normalize_toolcalls_list(raw_calls: Any) -> List[Dict[str, Any]]:
             id_ = getattr(c, "id", None) or getattr(c, "tool_call_id", None)
 
         args = _parse_args_maybe_json(args_raw)
-        if name:
+        norm_name = _canonical_tool_name(name)
+        if norm_name:
             norm.append(
                 {
                     "id": id_ or f"call_{uuid.uuid4().hex}",
-                    "name": name,
+                    "name": norm_name,
                     "args": args,
                 }
             )
@@ -1342,7 +1364,8 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 subq_calls = []
                 
                 for step in dag_steps:
-                    t_name = step.get("tool")
+                    t_name_raw = step.get("tool")
+                    t_name = _canonical_tool_name(t_name_raw)
                     t_args = step.get("args", {})
                     # RE-GENERATE ID to ensure uniqueness across consolidated subqueries
                     # The LLM often restarts at "step_1" for each subquery.
@@ -1354,7 +1377,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         if skill_mode:
                             # In skill mode, ANY tool outside the declared allowlist is blocked.
                             if t_name not in allowed_tool_names:
-                                print(f"[PLANNER] Tool '{t_name}' BLOCKED (not allowed by active skill).")
+                                print(
+                                    f"[PLANNER] Tool '{t_name_raw}' normalized as '{t_name}' BLOCKED "
+                                    "(not allowed by active skill)."
+                                )
                                 continue
                         
                         # DEDUPLICATION CHECK
@@ -1381,13 +1407,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 if not subq_calls:
                     native_calls = extract_tool_calls(response) if isinstance(response, AIMessage) else []
                     for nc in native_calls:
-                        n_name = nc.get("name")
+                        n_name_raw = nc.get("name")
+                        n_name = _canonical_tool_name(n_name_raw)
                         n_args = nc.get("args", {}) or {}
                         n_id = nc.get("id") or f"step_native_{i}_{str(uuid.uuid4())[:4]}"
                         if not n_name:
                             continue
                         if skill_mode and n_name not in allowed_tool_names:
-                            print(f"[PLANNER] Native tool '{n_name}' BLOCKED (not allowed by active skill).")
+                            print(
+                                f"[PLANNER] Native tool '{n_name_raw}' normalized as '{n_name}' BLOCKED "
+                                "(not allowed by active skill)."
+                            )
                             continue
                         try:
                             n_args_key = json.dumps(n_args, sort_keys=True)
@@ -1575,20 +1605,21 @@ Genera el DAG exclusivo para resolver: "{subq}"
         for tc in tool_calls:
             # Soportar dict o objeto ToolCall
             if isinstance(tc, dict):
-                name = tc.get("name")
+                name_raw = tc.get("name")
                 args_raw = tc.get("args", {}) or {}
                 t_id = tc.get("id")
             else:
-                name = getattr(tc, "name", "")
+                name_raw = getattr(tc, "name", "")
                 args_raw = getattr(tc, "args", {}) or {}
                 t_id = getattr(tc, "id", "")
+            name = _canonical_tool_name(name_raw)
             
             # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             # RESOLUCIAN DE VARIABLES (Ambient Context)
             # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             args = _resolve_dependency_arg(args_raw, local_results)
             
-            print(f"[EXECUTOR] Running tool: {name} with resolved args: {args}")
+            print(f"[EXECUTOR] Running tool: {name} (raw: {name_raw}) with resolved args: {args}")
 
             try:
                 tool_obj = next(t for t in tools if t.name == name)

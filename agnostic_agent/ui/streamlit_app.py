@@ -196,6 +196,28 @@ section[data-testid="stSidebar"] {
 [data-testid="stToolbar"] *, header[data-testid="stHeader"] * {
   color: #dbe7ff !important;
 }
+.stApp .stButton > button,
+.stApp .stDownloadButton > button,
+.stApp button[kind="secondary"] {
+  background: #0a4fb3 !important;
+  color: #ffffff !important;
+  border: 1px solid #0a4fb3 !important;
+}
+.stApp .stButton > button:hover,
+.stApp .stDownloadButton > button:hover,
+.stApp button[kind="secondary"]:hover {
+  background: #083e8d !important;
+  border-color: #083e8d !important;
+  color: #ffffff !important;
+}
+.stApp .stButton > button:focus,
+.stApp .stDownloadButton > button:focus,
+.stApp button[kind="secondary"]:focus {
+  box-shadow: 0 0 0 0.2rem rgba(10, 79, 179, 0.28) !important;
+}
+[data-testid="stBaseButton-secondary"] * {
+  color: #ffffff !important;
+}
 [data-baseweb="input"] input,
 [data-baseweb="textarea"] textarea,
 [data-baseweb="select"] * {
