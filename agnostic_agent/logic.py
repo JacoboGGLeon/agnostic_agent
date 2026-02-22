@@ -1841,6 +1841,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 except Exception:
                     return str(value)
 
+            def _looks_like_js_object_repr(value: Any) -> bool:
+                txt = _as_text_safe(value).strip().lower()
+                if not txt:
+                    return False
+                compact = re.sub(r"\s+", "", txt)
+                return "objectobject" in compact
+
             def _normalize_scope_values(values: Any) -> List[str]:
                 if values is None:
                     return []
@@ -1851,14 +1858,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     txt = _as_text_safe(item).strip()
                     if not txt:
                         continue
-                    if txt in ("[object Object]", ",[object Object],"):
+                    if _looks_like_js_object_repr(txt):
                         continue
                     normalized.append(txt)
                 return normalized
 
             def _is_object_object_line(line: str) -> bool:
-                compact = (line or "").strip().replace(" ", "")
-                return compact in ("[objectObject]", ",[objectObject],")
+                return _looks_like_js_object_repr(line)
 
             planner_trajs = state.get("planner_trajs", []) or []
             if not planner_trajs:
@@ -1961,6 +1967,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
             }
             for bad, good in replacements.items():
                 out = out.replace(bad, good)
+            # Defensive cleanup for residual JS stringified object markers.
+            out = re.sub(r"(?im)^\s*,?\s*\[object\s*object\]\s*,?\s*$", "", out)
+            out = re.sub(r"\n{3,}", "\n\n", out)
             return out
 
         def _build_pipeline_markdown(title: str, final_heading: str) -> str:
@@ -2350,6 +2359,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
         executor_steps = state.get("executor_steps", []) or []
         planner_scope = state.get("_planner_scope_internal") or {}
         fail_fast = _env_flag("AGNOSTIC_FAIL_FAST", False)
+        input_object_count = len(_extract_top_level_json_objects(user_prompt))
 
         # 3) Guardrail en VALIDATOR: auto-reparaciA3n (modo sin tools)
         bad_templates = (
@@ -2395,6 +2405,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
             invariant_violations.append(
                 "CoverageInvariant: executor_steps cubre menos subqueries que Analyzer."
             )
+        if input_object_count > 1 and len(runs) < input_object_count:
+            invariant_violations.append(
+                "CoverageInvariant: el prompt contiene "
+                f"{input_object_count} objetos JSON y solo se ejecutaron {len(runs)} tools."
+            )
         if subqueries and all(_is_placeholder_subquery(s) for s in subqueries):
             invariant_violations.append(
                 "DecompositionInvariant: subqueries quedaron en placeholders (q1/paso/pregunta)."
@@ -2426,6 +2441,19 @@ Genera el DAG exclusivo para resolver: "{subq}"
         if invariant_violations:
             all_covered = False
             reasons.extend(invariant_violations)
+            coverage_partial = any("CoverageInvariant:" in v for v in invariant_violations)
+            if coverage_partial:
+                warning = (
+                    "Advertencia: cobertura parcial detectada; la respuesta puede estar incompleta "
+                    f"(objetos_detectados={input_object_count}, tools_ejecutadas={len(runs)})."
+                )
+                current_answer = final_answer if isinstance(final_answer, str) else ""
+                if warning not in current_answer:
+                    final_answer = f"{warning}\n\n{current_answer}".strip()
+                    try:
+                        summary["final_answer"] = final_answer
+                    except Exception:
+                        pass
 
         if fail_fast and invariant_violations:
             fail_msg_lines = [
