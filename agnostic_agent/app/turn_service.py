@@ -80,6 +80,14 @@ class TurnService:
         for m in self._state.get("messages", []):
             if isinstance(m, ToolMessage):
                 continue
+            if isinstance(m, AIMessage):
+                tc = getattr(m, "tool_calls", None)
+                if isinstance(tc, list) and tc:
+                    continue
+                addkw = getattr(m, "additional_kwargs", {}) or {}
+                tc2 = addkw.get("tool_calls") if isinstance(addkw, dict) else None
+                if isinstance(tc2, list) and tc2:
+                    continue
             msgs.append(m)
         return msgs
 

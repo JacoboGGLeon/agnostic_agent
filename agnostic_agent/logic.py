@@ -782,11 +782,11 @@ def _format_knowledge_hint(knowledge_names: List[str]) -> str:
     )
 
 
-def _sanitize_subquery_text(text: str) -> str:
+def _sanitize_subquery_text(text: Any) -> str:
     """
     Normaliza subqueries para trazas legibles y estables.
     """
-    t = (text or "").strip()
+    t = _coerce_content_str(text).strip()
     if not t:
         return ""
     t = re.sub(r"\s+", " ", t)
@@ -799,8 +799,8 @@ def _sanitize_subquery_text(text: str) -> str:
     return t.strip(" .")
 
 
-def _is_placeholder_subquery(text: str) -> bool:
-    t = (text or "").strip().lower()
+def _is_placeholder_subquery(text: Any) -> bool:
+    t = _coerce_content_str(text).strip().lower()
     if not t:
         return True
     placeholder_patterns = [
@@ -847,6 +847,17 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_ai_with_tool_calls(m: AnyMessage) -> bool:
+    """
+    Detecta AIMessage que contiene tool_calls (nativos o en additional_kwargs).
+    Estos mensajes no deben reenviarse como historial a proveedores OpenAI porque
+    exigen ToolMessage correspondiente para cada tool_call_id.
+    """
+    if not isinstance(m, AIMessage):
+        return False
+    return bool(extract_tool_calls(m))
 
 
 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -1010,6 +1021,10 @@ def build_graph_agent(
                 data = json.loads(content)
             
             subqueries = data.get("subqueries", [user_prompt])
+            if isinstance(subqueries, str):
+                subqueries = [subqueries]
+            elif not isinstance(subqueries, list):
+                subqueries = [subqueries]
             logic_form = data.get("logic_form", "q1")
             selected_skills = data.get("selected_skills", [])
 
@@ -1276,7 +1291,11 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
 
         # 4. Invocar Planner LLM (Pasando historia relevante)
         # Filtramos solo mensajes reales (Human/AI) para no saturar con mensajes internos del pipeline
-        history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
+        history = [
+            m for m in msgs
+            if not _is_pipeline_internal_ai(m)
+            and not _is_ai_with_tool_calls(m)
+        ]
         
         tool_calls = []
         llm_raw_out = ""
@@ -1301,7 +1320,11 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             current_llm = base_model.bind_tools(active_tools)
             print(f"[PLANNER] Y Skill Mode Active. Re-bound LLM to {len(active_tools)} tools.")
         
-        history = [m for m in msgs if not _is_pipeline_internal_ai(m)]
+        history = [
+            m for m in msgs
+            if not _is_pipeline_internal_ai(m)
+            and not _is_ai_with_tool_calls(m)
+        ]
         
         all_tool_calls: List[Dict[str, Any]] = []
         plan_trajs: List[PlannerTrajectory] = []
