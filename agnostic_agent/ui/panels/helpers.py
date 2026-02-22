@@ -234,7 +234,12 @@ def card_md(title: str, body_md: str, icon: str = "⬛", hint: str = "") -> None
 def card_code(title: str, code_text: str, icon: str = "🧠", hint: str = "reasoning_content") -> None:
     # Some providers/loggers already HTML-escape text (e.g. &quot;, &#x27;).
     # If we escape again, the UI shows entities literally. Unescape first, then escape once.
-    raw = html.unescape(code_text or "")
+    raw = code_text or ""
+    for _ in range(3):
+        decoded = html.unescape(raw)
+        if decoded == raw:
+            break
+        raw = decoded
     safe = html.escape(raw)
     hint_html = f'<span class="hint">{html.escape(hint)}</span>' if hint else ""
     content = safe if safe.strip() else html.escape("_(no viene thinking en este turno)_")
