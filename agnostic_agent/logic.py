@@ -813,6 +813,49 @@ def _is_placeholder_subquery(text: Any) -> bool:
     return any(re.match(p, t) for p in placeholder_patterns)
 
 
+def _extract_top_level_json_objects(text: Any) -> List[str]:
+    """
+    Extrae objetos JSON de primer nivel desde texto libre.
+    Es agnostico al dominio y tolerante a contenido alrededor.
+    """
+    source = _coerce_content_str(text)
+    if not source:
+        return []
+
+    items: List[str] = []
+    depth = 0
+    in_str = False
+    escape = False
+    start = -1
+    for idx, ch in enumerate(source):
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = idx
+            depth += 1
+            continue
+        if ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    chunk = source[start : idx + 1].strip()
+                    if chunk:
+                        items.append(chunk)
+                    start = -1
+    return items
+
+
 def _resolve_effective_skills(
     state: Dict[str, Any],
     skill_registry: Any | None = None,
@@ -1066,6 +1109,18 @@ def build_graph_agent(
             }
 
         subqueries = [sq for sq in (_sanitize_subquery_text(s) for s in subqueries) if sq]
+        # Generic decomposition fallback:
+        # If LLM returned one long subquery but user prompt contains multiple JSON objects,
+        # split it into one subquery per object to improve planner/executor coverage.
+        if len(subqueries) == 1:
+            prompt_text = _coerce_content_str(user_prompt)
+            object_chunks = _extract_top_level_json_objects(prompt_text)
+            if len(object_chunks) > 1:
+                prefix = prompt_text.split("{", 1)[0].strip()
+                if prefix:
+                    subqueries = [f"{prefix} {obj}".strip() for obj in object_chunks]
+                else:
+                    subqueries = object_chunks
         if subqueries and all(_is_placeholder_subquery(s) for s in subqueries):
             subqueries = [_sanitize_subquery_text(user_prompt) or user_prompt]
         if not subqueries:
@@ -1899,6 +1954,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 "Ã‘": "Ñ",
                 "ðŸ“Œ": "[PIN]",
                 "ðŸ”": "[SEARCH]",
+                ",[object Object],": "",
+                "[object Object]": "",
+                ", [object Object],": "",
+                "[objectObject]": "",
             }
             for bad, good in replacements.items():
                 out = out.replace(bad, good)
