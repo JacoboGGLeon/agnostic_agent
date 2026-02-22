@@ -159,7 +159,10 @@ if st.session_state.get("theme_mode", "dark") == "light":
   background: #f7f9fc !important;
   color: #0d1b2a !important;
 }
-body, p, span, label, li, small, strong, em, code, pre {
+.topbar-offset {
+  height: 0.35rem !important;
+}
+.stApp p, .stApp span, .stApp label, .stApp li, .stApp small, .stApp strong, .stApp em, .stApp pre {
   color: #0d1b2a !important;
 }
 section[data-testid="stSidebar"] {
@@ -182,6 +185,16 @@ section[data-testid="stSidebar"] {
 }
 .stMarkdown, .stCaption, .stText, .stAlert, .stSelectbox label, .stRadio label, .stCheckbox label, .stTextInput label, .stTextArea label {
   color: #0d1b2a !important;
+}
+.stApp code, .stApp :not(pre) > code {
+  color: #0b1f3a !important;
+  background: #e9eff8 !important;
+  border: 1px solid #d2dceb !important;
+  border-radius: 6px !important;
+  padding: 0.1rem 0.3rem !important;
+}
+[data-testid="stToolbar"] *, header[data-testid="stHeader"] * {
+  color: #dbe7ff !important;
 }
 [data-baseweb="input"] input,
 [data-baseweb="textarea"] textarea,
