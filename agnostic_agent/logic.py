@@ -1848,7 +1848,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 if not txt:
                     return False
                 compact = re.sub(r"\s+", "", txt)
-                return "objectobject" in compact
+                return "[objectobject]" in compact or "objectobject" in compact
 
             def _normalize_scope_values(values: Any) -> List[str]:
                 if values is None:
@@ -1971,6 +1971,8 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 out = out.replace(bad, good)
             # Defensive cleanup for residual JS stringified object markers.
             out = re.sub(r"(?im)^\s*,?\s*\[object\s*object\]\s*,?\s*$", "", out)
+            out = re.sub(r"(?im)^\s*step\s*\?:\s*,?\s*\[object\s*object\]\s*,?\s*$", "", out)
+            out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
             out = re.sub(r"\n{3,}", "\n\n", out)
             return out
 
@@ -2242,7 +2244,6 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 
                 # 1. Intentar extrar <think> del contenido (Texto crudo)
-                import re
                 think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
                 match = think_pattern.search(user_answer)
                 
