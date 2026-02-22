@@ -1398,6 +1398,26 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
 
         # LOOP PRINCIPAL: Query-by-Query
         seen_calls_keys = set()
+
+        def _invoke_planner_subquery_with_retry(
+            llm_obj: Any,
+            sys_content_local: str,
+            history_local: List[AnyMessage],
+            user_msg_local: HumanMessage,
+            retries: int,
+        ) -> AIMessage:
+            last_exc: Optional[Exception] = None
+            attempts = max(1, retries + 1)
+            for _ in range(attempts):
+                try:
+                    return llm_obj.invoke(
+                        [SystemMessage(content=sys_content_local)] + history_local[:-1] + [user_msg_local]
+                    )
+                except Exception as e:  # pragma: no cover - depends on provider/network
+                    last_exc = e
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("Planner invocation failed without exception detail.")
         
         for i, subq in enumerate(subqs, start=1):
             try:
@@ -1412,8 +1432,14 @@ Genera el DAG exclusivo para resolver: "{subq}"
 """
                 user_msg = HumanMessage(content=user_msg_content)
                 
-                # Enviar [sys, ...history, user]
-                response = current_llm.invoke([SystemMessage(content=sys_content)] + history[:-1] + [user_msg])
+                # Enviar [sys, ...history, user] con reintentos agnósticos a proveedor
+                response = _invoke_planner_subquery_with_retry(
+                    llm_obj=current_llm,
+                    sys_content_local=sys_content,
+                    history_local=history,
+                    user_msg_local=user_msg,
+                    retries=cfg.max_retries,
+                )
                 
                 current_raw = response.content
                 global_llm_raw += f"\n\n--- Subquery {i}: {subq} ---\n{current_raw}"
@@ -1848,6 +1874,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 if not txt:
                     return False
                 compact = re.sub(r"\s+", "", txt)
+                if "[objectobject]" in compact or "objectobject" in compact:
+                    return True
+                # Handle quoted variants: ",[object Object]," or "'[object Object]'"
+                compact = compact.replace('"', "").replace("'", "")
                 return "[objectobject]" in compact or "objectobject" in compact
 
             def _normalize_scope_values(values: Any) -> List[str]:
@@ -1969,9 +1999,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
             }
             for bad, good in replacements.items():
                 out = out.replace(bad, good)
-            # Defensive cleanup for residual JS stringified object markers.
-            out = re.sub(r"(?im)^\s*,?\s*\[object\s*object\]\s*,?\s*$", "", out)
-            out = re.sub(r"(?im)^\s*step\s*\?:\s*,?\s*\[object\s*object\]\s*,?\s*$", "", out)
+            # Defensive cleanup for residual JS stringified object markers anywhere.
+            out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+            # Remove now-empty synthetic planner lines.
             out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
             out = re.sub(r"\n{3,}", "\n\n", out)
             return out
