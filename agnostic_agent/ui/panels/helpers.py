@@ -19,7 +19,13 @@ def sanitize_display_text(text: Any) -> str:
         if decoded == out:
             break
         out = decoded
-    out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+
+    # 🚨 AGGRESSIVE JS ARTIFACT CLEANUP 🚨
+    for _ in range(2):
+        out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+        out = out.replace("[object Object]", "")
+        out = out.replace("[objectObject]", "")
+    
     out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
