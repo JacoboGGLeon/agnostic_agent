@@ -166,6 +166,16 @@ section[data-testid="stSidebar"] {
   background: #ffffff !important;
   border-right: 1px solid #d7dce3 !important;
 }
+div[data-testid="column"]:has(#right-inspector-anchor) {
+  background: #ffffff !important;
+  border-left: 1px solid #d7dce3 !important;
+}
+div[data-testid="column"]:has(#right-inspector-anchor) .right-inspector-title {
+  color: #0d1b2a !important;
+}
+div[data-testid="column"]:has(#right-inspector-anchor) .right-inspector-divider {
+  background: #d7dce3 !important;
+}
 .stSidebar, .stSidebar * {
   color: #0d1b2a !important;
 }
@@ -182,6 +192,18 @@ section[data-testid="stSidebar"] {
 }
 .stMarkdown, .stCaption, .stText, .stAlert, .stSelectbox label, .stRadio label, .stCheckbox label, .stTextInput label, .stTextArea label {
   color: #0d1b2a !important;
+}
+.stButton > button,
+.stDownloadButton > button {
+  color: #ffffff !important;
+}
+code {
+  color: #f8fbff !important;
+}
+pre,
+pre code,
+code[class*="language-"] {
+  color: #f8fbff !important;
 }
 [data-baseweb="input"] input,
 [data-baseweb="textarea"] textarea,
