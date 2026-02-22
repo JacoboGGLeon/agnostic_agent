@@ -20,21 +20,22 @@ from agnostic_agent.ui.panels.inspector import render_inspector
 
 
 def render_online_tab(agent_factory):
-    # Row 1: [Online Chat box][Inspector right sidebar]
+    # Row 1: [Online Chat box][Inspector right sidebar-like panel]
     if "inspector_right_open" not in st.session_state:
         st.session_state.inspector_right_open = True
 
-    # Top-bar-like trigger (outside inspector body)
-    st.markdown('<div id="inspector-top-toggle-anchor"></div>', unsafe_allow_html=True)
-    top_label = "Hide OInspector" if st.session_state.inspector_right_open else "Show OInspector"
-    if st.button(top_label, key="toggle_inspector_right_top"):
-        st.session_state.inspector_right_open = not st.session_state.inspector_right_open
-        st.rerun()
+    # Trigger below top bar: open/close right inspector
+    _, trigger_col_r = st.columns([0.96, 0.04], gap="small")
+    with trigger_col_r:
+        if st.button("Inspector", key="toggle_inspector_right_icon", use_container_width=True):
+            st.session_state.inspector_right_open = not st.session_state.inspector_right_open
+            st.rerun()
 
     if st.session_state.inspector_right_open:
         feed_col, insp_col = st.columns([2.05, 0.95], gap="large")
     else:
-        feed_col, insp_col = st.columns([2.92, 0.08], gap="small")
+        feed_col = st.container()
+        insp_col = None
 
     with feed_col:
         with st.container(border=True):
@@ -104,15 +105,14 @@ def render_online_tab(agent_factory):
                                 st.session_state.selected_msg_id = msg.get("id")
                                 st.toast(f"Inspector -> id={msg.get('id')}")
                                 st.rerun()
-
-    with insp_col:
-        st.markdown('<div id="right-inspector-anchor"></div>', unsafe_allow_html=True)
-        if st.session_state.inspector_right_open:
+    if insp_col is not None:
+        with insp_col:
+            st.markdown('<div id="right-inspector-anchor"></div>', unsafe_allow_html=True)
             st.markdown(
                 """
                 <div class="right-inspector-head">
                   <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA"/>
-                  <div class="right-inspector-title">Agentic Lab · OInspector</div>
+                  <div class="right-inspector-title">Agentic Lab - Inspector</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -195,3 +195,4 @@ def render_online_tab(agent_factory):
 
         st.session_state.selected_msg_id = aid
         st.rerun()
+
