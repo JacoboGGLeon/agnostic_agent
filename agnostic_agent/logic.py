@@ -2153,7 +2153,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
             )
 
             final_ai = AIMessage(
-                content=answer_markdown,
+                content=user_answer,
                 additional_kwargs={"pipeline_internal": True, "node": "summarizer"},
             )
 
@@ -2180,32 +2180,42 @@ Genera el DAG exclusivo para resolver: "{subq}"
             llm_raw = state.get("llm_raw_out") or (_coerce_content_str(getattr(last_ai, "content", "")) if last_ai else "")
             llm_clean = state.get("llm_clean_out") or strip_think(llm_raw)
 
-            # DETECTAR SI ES UN JSON DAG VACAO (Artifact of Planner Node)
-            is_empty_dag = False
+            # DETECTAR SI ES UN INTENTO DE DAG (Artifact of Planner Node)
+            is_dag_attempt = False
             # Check for specific artifacts of planner_node output structure
-            # It usually looks like: "\n\n--- Plan 1: ... ---\n{\n "dag": []\n}"
-            if '"dag": []' in llm_clean or "'dag': []" in llm_clean:
-                 is_empty_dag = True
+            if '"dag":' in llm_clean or "'dag':" in llm_clean:
+                 is_dag_attempt = True
             
-            if is_empty_dag:
+            if is_dag_attempt:
                  # FALLBACK CONVERSACIONAL
-                 # El planner dijo "no necesito tools". Ahora responde al usuario.
+                 # El planner intento usar tools pero se bloquearon o dijo "no necesito tools". 
+                 # Ahora responde al usuario con el historial.
                  fallback_sys = (
                      "Eres un asistente servicial y agnA3stico.\n"
-                     "El usuario te ha dicho algo que NO requiere herramientas externas.\n"
+                     "El usuario te ha dicho algo que NO requiere herramientas externas, o bien "
+                     "las herramientas que intentaste usar no estan permitidas en el contexto actual.\n"
                      "Responde de forma natural, Aotil y amable en el idioma del usuario.\n"
                      "NO inventes informaciA3n."
                  )
                  
                  try:
                      # Usamos el base_model (sin tools bound) para evitar loops o tool execution
-                     # planner_llm esta en el closure de build_graph_agent
                      base_chat_model = getattr(planner_llm, "bound", planner_llm)
                      
-                     fallback_reply = base_chat_model.invoke([
-                        SystemMessage(content=fallback_sys),
-                        HumanMessage(content=user_prompt)
-                     ])
+                     # Pasamos el historial limpio para dar contexto (hasta antes de la respuesta actual)
+                     history_clean = []
+                     for m in messages:
+                         if m == last_ai:
+                             continue
+                         if isinstance(m, HumanMessage):
+                             history_clean.append(m)
+                         elif isinstance(m, AIMessage):
+                             if not getattr(m, "additional_kwargs", {}).get("pipeline_internal"):
+                                 history_clean.append(m)
+                     
+                     fallback_reply = base_chat_model.invoke(
+                        [SystemMessage(content=fallback_sys)] + history_clean
+                     )
                      fallback_content = getattr(fallback_reply, "content", "")
                      # Strip thinking locally just in case
                      user_answer = strip_think(fallback_content)
@@ -2383,14 +2393,6 @@ Genera el DAG exclusivo para resolver: "{subq}"
             "### RESPUESTA FINAL (modo usuario)",
         )
 
-        final_ai = AIMessage(
-            content=answer_markdown,
-            additional_kwargs={"pipeline_internal": True, "node": "summarizer"},
-        )
-
-        # AdemAs rellenamos dev_out / deep_out / user_out:
-        dev_out = answer_markdown
-        deep_out = _build_deep_markdown()
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         # AGNOSTIC FIX: Strip <think> tags from user_out
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -2398,6 +2400,15 @@ Genera el DAG exclusivo para resolver: "{subq}"
         # - Modelos con reasoning (Qwen3, DeepSeek) a strip <think>
         # - Modelos sin reasoning (GPT-4, etc.) a no afecta
         user_out = strip_think(user_answer)
+
+        final_ai = AIMessage(
+            content=user_out,
+            additional_kwargs={"pipeline_internal": True, "node": "summarizer"},
+        )
+
+        # AdemAs rellenamos dev_out / deep_out / user_out:
+        dev_out = answer_markdown
+        deep_out = _build_deep_markdown()
 
         return {
             "messages": [final_ai],
