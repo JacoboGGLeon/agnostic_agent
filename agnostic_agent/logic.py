@@ -1786,6 +1786,25 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 except Exception:
                     return str(value)
 
+            def _normalize_scope_values(values: Any) -> List[str]:
+                if values is None:
+                    return []
+                if not isinstance(values, list):
+                    values = [values]
+                normalized: List[str] = []
+                for item in values:
+                    txt = _as_text_safe(item).strip()
+                    if not txt:
+                        continue
+                    if txt in ("[object Object]", ",[object Object],"):
+                        continue
+                    normalized.append(txt)
+                return normalized
+
+            def _is_object_object_line(line: str) -> bool:
+                compact = (line or "").strip().replace(" ", "")
+                return compact in ("[objectObject]", ",[objectObject],")
+
             planner_trajs = state.get("planner_trajs", []) or []
             if not planner_trajs:
                 return "Planner did not build a tool plan."
@@ -1793,10 +1812,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
             out_lines: List[str] = []
             out_lines.append("Rol: PLANNER restringe tools+knowledge.")
             if planner_scope:
+                scope_skills = _normalize_scope_values(planner_scope.get("active_skills", []))
+                scope_tools = _normalize_scope_values(planner_scope.get("allowed_tools", []))
+                scope_knowledge = _normalize_scope_values(planner_scope.get("allowed_knowledge", []))
                 out_lines.append(
-                    f"Scope: skills={planner_scope.get('active_skills', [])}, "
-                    f"tools={planner_scope.get('allowed_tools', [])}, "
-                    f"knowledge={planner_scope.get('allowed_knowledge', [])}"
+                    f"Scope: skills={scope_skills}, "
+                    f"tools={scope_tools}, "
+                    f"knowledge={scope_knowledge}"
                 )
                 out_lines.append("")
             for i, tr in enumerate(planner_trajs, start=1):
@@ -1816,6 +1838,8 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 else:
                     for raw_line in raw_desc.splitlines():
                         line = raw_line.strip()
+                        if _is_object_object_line(line):
+                            continue
                         out_lines.append(line if line.startswith("step ") else f"step ?: {line}")
                 if i < len(planner_trajs):
                     out_lines.append("")
@@ -1881,19 +1905,24 @@ Genera el DAG exclusivo para resolver: "{subq}"
             return out
 
         def _build_pipeline_markdown(title: str, final_heading: str) -> str:
+            def _fenced_block(text: str, lang: str = "text") -> str:
+                body = text if isinstance(text, str) else _pretty_json(text)
+                # 4-backtick fences avoid accidental closure when body contains ```json blocks.
+                return f"````{lang}\n{body}\n````"
+
             return "\n\n".join(
                 [
                     f"## {title}",
                     "### ANALYZER",
-                    f"```text\n{analyzer_text}\n```",
+                    _fenced_block(analyzer_text, "text"),
                     "### PLANNER",
-                    f"```text\n{planner_text}\n```",
+                    _fenced_block(planner_text, "text"),
                     "### EXECUTOR",
-                    f"```text\n{executor_text}\n```",
+                    _fenced_block(executor_text, "text"),
                     "### CATCHER",
-                    f"```text\n{catcher_text}\n```",
+                    _fenced_block(catcher_text, "text"),
                     "### SUMMARIZER (basado en herramientas)",
-                    f"```text\n{summarizer_text}\n```",
+                    _fenced_block(summarizer_text, "text"),
                     final_heading,
                     user_answer,
                 ]
