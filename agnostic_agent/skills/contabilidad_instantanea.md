@@ -20,9 +20,8 @@ Reglas de ejecucion:
 - Reporta `CUADRADO (100% Match)` solo si coinciden:
 1. saldo esperado vs saldo reportado
 2. reserva esperada vs saneamiento reportado
-- Para paridad estricta con reglas documentales, usa `AGNOSTIC_FIN_STRICT_RULES=1` (sin fallback hardcoded).
 
-Formato de respuesta recomendado:
+Formato de respuesta obligatorio:
 1. Resultado general (`CUADRADO` o `DRIFT DETECTADO`)
 2. Diferencia de saldo
 3. Diferencia de saneamiento

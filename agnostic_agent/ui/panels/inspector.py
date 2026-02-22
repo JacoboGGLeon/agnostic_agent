@@ -5,6 +5,7 @@ from agnostic_agent.ui.panels.helpers import (
     assistant_messages,
     as_text,
     card_code,
+    card_md,
     extract_summary_deep,
     extract_thinking,
     extract_tool_runs,
@@ -88,7 +89,7 @@ def render_inspector():
                     )
                 elif tab_key == "deep":
                     content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
-                    card_code(
+                    card_md(
                         "Vista profunda (deep_out / summary)",
                         content_to_show,
                         icon="🧠",
