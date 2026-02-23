@@ -133,9 +133,21 @@ class TurnService:
             user_id = None
             forced_skill = None
             skills_allowlist = None
+            conversation_history_enabled = True
             if agent_in.metadata:
                 user_id = agent_in.metadata.get("user_id")
                 forced_skill = agent_in.metadata.get("forced_skill")
+                raw_history_enabled = agent_in.metadata.get("conversation_history_enabled", True)
+                if isinstance(raw_history_enabled, str):
+                    conversation_history_enabled = raw_history_enabled.strip().lower() in {
+                        "1",
+                        "true",
+                        "yes",
+                        "y",
+                        "on",
+                    }
+                else:
+                    conversation_history_enabled = bool(raw_history_enabled)
                 # Optional: restrict what skills the graph may consider "active".
                 # Accepts list[str] (preferred) or comma-separated str.
                 raw_allow = agent_in.metadata.get("skills_allowlist")
@@ -155,7 +167,7 @@ class TurnService:
             memory_context = read_memory(session_id=session_id)
 
             # State construction
-            prev_messages = self._clean_prev_messages()
+            prev_messages = self._clean_prev_messages() if conversation_history_enabled else []
             state_in: State = {
                 "messages": prev_messages + [HumanMessage(content=prompt_text)],
                 "analyzer": None,

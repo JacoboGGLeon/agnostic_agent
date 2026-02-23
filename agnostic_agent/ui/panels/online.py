@@ -123,6 +123,9 @@ def render_online_tab(agent_factory):
         )
 
         run_metadata = {}
+        run_metadata["conversation_history_enabled"] = bool(
+            st.session_state.get("conversation_history_enabled", True)
+        )
         if selected_skill and selected_skill != "Auto (Analyzer)":
             # New path: explicit allowlist of active skills.
             run_metadata["skills_allowlist"] = [selected_skill]

@@ -66,6 +66,13 @@ def render_sidebar():
             st.checkbox("Deep", value=True, key="show_deep_tab")
             st.checkbox("Dev", value=True, key="show_dev_tab")
 
+        st.toggle(
+            "Historial en conversación",
+            value=True,
+            key="conversation_history_enabled",
+            help="Si se desactiva, cada turno se ejecuta sin arrastrar mensajes previos del chat.",
+        )
+
         st.divider()
 
         st.caption(f"Mensajes: {len(st.session_state.messages)}")
