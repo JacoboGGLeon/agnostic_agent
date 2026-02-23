@@ -705,8 +705,9 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
                         
                     score = item.get("score", 0.0)
                     src_path = item.get("source_path", "unknown")
-                    # Extract basename for cleaner display
+                    # Extract basename and escape underscores to prevent Streamlit Markdown React crashes [object Object]
                     src_name = os.path.basename(src_path) if src_path else "unknown object"
+                    src_name = src_name.replace("_", r"\_")
                     
                     raw_md = item.get("md", "")
                     if isinstance(raw_md, str):
