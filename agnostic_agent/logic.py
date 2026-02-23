@@ -1415,10 +1415,11 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                         [SystemMessage(content=sys_content_local)] + history_local[:-1] + [user_msg_local]
                     )
                     content_str = str(getattr(resp, "content", ""))
-                    if "Error: No generations found in stream" in content_str:
-                        raise RuntimeError(f"API generated empty stream error instead of raising: {content_str}")
+                    if "generations found in stream" in content_str.lower():
+                        raise ValueError(f"Provider returned empty stream string: {content_str}")
                     return resp
-                except Exception as e:  # pragma: no cover - depends on provider/network
+
+                except Exception as e:
                     last_exc = e
             if last_exc is not None:
                 raise last_exc
