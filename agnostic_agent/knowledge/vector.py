@@ -432,7 +432,7 @@ def init_db(db_path: str):
         "CREATE INDEX IF NOT EXISTS idx_chunks_meta_source_path ON chunks_meta(source_path);"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_chunks_meta_source_page ON chunks_meta(source_path, page);"
+        "CREATE INDEX IF NOT EXISTS idx_chunks_meta_source_page ON chunks_meta(source_path, json_extract(locator, '$.page_start'));"
     )
     conn.commit()
     conn.close()
