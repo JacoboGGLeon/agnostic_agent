@@ -1411,9 +1411,13 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
             attempts = max(1, retries + 1)
             for _ in range(attempts):
                 try:
-                    return llm_obj.invoke(
+                    resp = llm_obj.invoke(
                         [SystemMessage(content=sys_content_local)] + history_local[:-1] + [user_msg_local]
                     )
+                    content_str = str(getattr(resp, "content", ""))
+                    if "Error: No generations found in stream" in content_str:
+                        raise RuntimeError(f"API generated empty stream error instead of raising: {content_str}")
+                    return resp
                 except Exception as e:  # pragma: no cover - depends on provider/network
                     last_exc = e
             if last_exc is not None:

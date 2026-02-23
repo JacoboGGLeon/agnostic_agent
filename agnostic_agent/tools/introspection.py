@@ -301,11 +301,13 @@ def read_knowledge(source_path: str, db_path: Optional[str] = None) -> Dict[str,
         chunk_preview = []
         if "chunks_meta" in tables:
             page_rows = conn.execute(
-                "SELECT page, COUNT(*) as n FROM chunks_meta WHERE source_path = ? GROUP BY page ORDER BY page LIMIT 20",
+                "SELECT json_extract(locator, '$.page_start') as page, COUNT(*) as n FROM chunks_meta WHERE source_path = ? "
+                "GROUP BY json_extract(locator, '$.page_start') ORDER BY json_extract(locator, '$.page_start') LIMIT 20",
                 (source_full,),
             ).fetchall()
             chunk_preview = conn.execute(
-                "SELECT chunk_id, page, substr(md, 1, 220) FROM chunks_meta WHERE source_path = ? ORDER BY rowid DESC LIMIT 5",
+                "SELECT chunk_pk, json_extract(locator, '$.page_start'), substr(json_extract(content, '$.text'), 1, 220) "
+                "FROM chunks_meta WHERE source_path = ? ORDER BY rowid DESC LIMIT 5",
                 (source_full,),
             ).fetchall()
 
