@@ -92,19 +92,37 @@ def _is_read_only_sql(query: str) -> bool:
     return not any(token in lowered for token in forbidden)
 
 
+def _normalize_finance_sql(query: str) -> str:
+    """
+    Normaliza aliases comunes de tablas para tolerar prompts/plans con nombres genéricos.
+    """
+    normalized = query or ""
+    normalized = re.sub(r"\bcreditos\b", "estados_cuenta", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\btransacciones\b", "movimientos", normalized, flags=re.IGNORECASE)
+    return normalized
+
+
 def _run_query(db_path: Path, query: str) -> str:
-    if not _is_read_only_sql(query):
+    normalized_query = _normalize_finance_sql(query)
+    if not _is_read_only_sql(normalized_query):
         return "Error SQL: solo se permiten consultas SELECT de solo lectura."
     if not db_path.exists():
         return f"Error SQL: no se encontro la base de datos: {db_path}"
     try:
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
-        cur.execute(query)
+        cur.execute(normalized_query)
         rows = cur.fetchall()
         columns = [desc[0] for desc in (cur.description or [])]
         conn.close()
-        return json.dumps({"columns": columns, "rows": rows}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "normalized_query": normalized_query,
+                "columns": columns,
+                "rows": rows,
+            },
+            ensure_ascii=False,
+        )
     except Exception as exc:
         return f"Error SQL: {exc}"
 

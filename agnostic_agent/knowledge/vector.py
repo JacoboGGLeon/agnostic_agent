@@ -13,7 +13,9 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 
 # Import shared types
-from agnostic_agent.knowledge.types import ElementNode, Chunk
+from agnostic_agent.knowledge.types import (
+    ElementNode, Chunk, ChunkLocator, ChunkContent, ChunkTags, ChunkQuality
+)
 
 # Try to import fitz (PyMuPDF)
 try:
@@ -91,23 +93,29 @@ def _parse_with_docling(pdf_path: str) -> Tuple[List[ElementNode], int]:
             except Exception:
                 md = getattr(it, "text", "") or ""
             
-            if not md.strip():
+            text = getattr(it, "text", "") or md
+            if not text.strip():
                 continue
                 
             kind = it.__class__.__name__.lower()
+            label = str(getattr(it, "label", getattr(it, "type", ""))).lower()
+            is_boilerplate = "header" in label or "footer" in label
+
             bbox = getattr(it, "bbox", None)
             # Ensure bbox is tuple if present
             if bbox and hasattr(bbox, "as_tuple"):
                 bbox = bbox.as_tuple()
             
-            node_id = f"{Path(pdf_path).name}::p{page_idx}::{node_seq}::{sha1(md)[:6]}"
+            node_id = f"{Path(pdf_path).name}::p{page_idx}::{node_seq}::{sha1(text)[:6]}"
             nodes.append(ElementNode(
                 id=node_id, 
                 page=page_idx, 
                 kind=kind, 
                 md=md, 
+                text=text,
                 bbox=bbox, 
-                source_path=str(pdf_path)
+                source_path=str(pdf_path),
+                is_boilerplate=is_boilerplate
             ))
             node_seq += 1
 
@@ -147,14 +155,19 @@ def _parse_with_pymupdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
                 continue
             
             kind = "paragraph"
+            # Heuristic: top margins and bottom margins of A4/Letter size usually map to headers/footers
+            is_boilerplate = bool(y0 < 60 or y1 > 730)
+
             node_id = f"{Path(pdf_path).name}::p{page_idx+1}::{node_seq}::{sha1(text)[:6]}"
             nodes.append(ElementNode(
                 id=node_id, 
                 page=page_idx+1, 
                 kind=kind, 
                 md=text, 
+                text=text,
                 bbox=(x0, y0, x1, y1), 
-                source_path=str(pdf_path)
+                source_path=str(pdf_path),
+                is_boilerplate=is_boilerplate
             ))
             node_seq += 1
             
@@ -201,6 +214,12 @@ def parse_pdf(pdf_path: str) -> Tuple[List[ElementNode], int]:
 # -----------------------------------------------------------------------------
 
 def build_chunks(nodes: List[ElementNode], k_neighbors: int = 1) -> List[Chunk]:
+    if not nodes:
+        return []
+        
+    source_path = nodes[0].source_path
+    doc_id = hashlib.sha256(str(source_path).encode("utf-8")).hexdigest()[:16]
+
     chunks: List[Chunk] = []
     by_page: Dict[int, List[ElementNode]] = {}
     for n in nodes:
@@ -210,23 +229,45 @@ def build_chunks(nodes: List[ElementNode], k_neighbors: int = 1) -> List[Chunk]:
         for i, n in enumerate(arr):
             left = max(0, i - k_neighbors)
             right = min(len(arr), i + k_neighbors + 1)
-            neigh = [x for j, x in enumerate(arr[left:right]) if j + left != i]
+            
+            neigh_before = [x.text for j, x in enumerate(arr[left:i])]
+            neigh_after = [x.text for j, x in enumerate(arr[i+1:right])]
 
-            # Construct markdown with context annotations
-            md_parts = [f"<!-- NODE {n.id} ({n.kind}) -->\n{n.md}"]
-            for nb in neigh:
-                md_parts.append(f"\n<!-- NEIGHBOR {nb.id} ({nb.kind}) -->\n{nb.md}")
+            text_norm = n.text.lower().strip()
+            chunk_pk = sha1(text_norm + doc_id)[:10]
 
-            chunk_id = f"{n.id}::k{k_neighbors}"
-            neighbor_chunk_ids = [f"{nb.id}::k{k_neighbors}" for nb in neigh]
+            locator = ChunkLocator(
+                source_path=n.source_path,
+                page_start=n.page,
+                page_end=n.page,
+                bbox=n.bbox,
+                section_path=n.section_path
+            )
+
+            content = ChunkContent(
+                text=n.text,
+                text_normalized=text_norm,
+                context_before="\n".join(neigh_before) if neigh_before else None,
+                context_after="\n".join(neigh_after) if neigh_after else None,
+                content_type=n.kind,
+                language="es"
+            )
+
+            tags = ChunkTags(document_type="document")
+            
+            quality = ChunkQuality(
+                is_boilerplate=n.is_boilerplate,
+                embed_model=EMB_MODEL_REPO,
+                token_count_estimated=len(n.text.split())
+            )
 
             chunks.append(Chunk(
-                chunk_id=chunk_id,
-                element_id=n.id,
-                page=page,
-                md="\n".join(md_parts),
-                neighbor_ids=neighbor_chunk_ids,
-                source_path=n.source_path
+                doc_id=doc_id,
+                chunk_pk=chunk_pk,
+                locator=locator,
+                content=content,
+                tags=tags,
+                quality=quality
             ))
     return chunks
 
@@ -360,12 +401,13 @@ def init_db(db_path: str):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chunks_meta (
             rowid INTEGER PRIMARY KEY,
-            chunk_id TEXT UNIQUE,
-            element_id TEXT,
-            page INTEGER,
-            md TEXT,
-            neighbors TEXT,
-            source_path TEXT
+            chunk_pk TEXT UNIQUE,
+            doc_id TEXT,
+            source_path TEXT,
+            locator TEXT,
+            content TEXT,
+            tags TEXT,
+            quality TEXT
         );
     """)
     
@@ -429,9 +471,10 @@ def _lexical_overlap_score(query: str, descriptor: str) -> float:
     return float(hits) / float(len(q_toks))
 
 
-def upsert_document_index(db_path: str, source_path: str, embeddings: np.ndarray) -> None:
+def upsert_document_index(db_path: str, source_path: str, chunk_embeddings: np.ndarray, description: str = "") -> None:
     """
-    Maintains L2 document-level index (centroid embedding per document).
+    Maintains L2 document-level index. En lugar de usar el centroide borroso de los chunks,
+    ahora crea un vector semántico fuerte basado en la DESCRIPCIÓN y el TÍTULO del documento.
     """
     import sqlite_vec
 
@@ -440,9 +483,14 @@ def upsert_document_index(db_path: str, source_path: str, embeddings: np.ndarray
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
 
-    centroid = _doc_centroid(embeddings)
-    blob = _pack_f32(centroid)
-    n_chunks = int(embeddings.shape[0]) if embeddings.ndim > 1 else int(bool(embeddings.size))
+    text_to_embed = f"{Path(source_path).name}. {description}".strip()
+    try:
+        l2_vec = embed_texts([text_to_embed])[0]
+    except Exception:
+        l2_vec = _doc_centroid(chunk_embeddings)
+
+    blob = _pack_f32(l2_vec)
+    n_chunks = int(chunk_embeddings.shape[0]) if chunk_embeddings.ndim > 1 else int(bool(chunk_embeddings.size))
 
     conn.execute(
         """
@@ -469,11 +517,19 @@ def upsert_chunks(db_path: str, chunks: List[Chunk], embeddings: np.ndarray):
         blob = _pack_f32(embeddings[i])
         
         cur.execute("""
-            INSERT OR REPLACE INTO chunks_meta(chunk_id, element_id, page, md, neighbors, source_path)
-            VALUES (?, ?, ?, ?, ?, ?);
-        """, (ch.chunk_id, ch.element_id, ch.page, ch.md, json.dumps(ch.neighbor_ids), ch.source_path))
+            INSERT OR REPLACE INTO chunks_meta(chunk_pk, doc_id, source_path, locator, content, tags, quality)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+        """, (
+            ch.chunk_pk, 
+            ch.doc_id, 
+            ch.locator.source_path,
+            ch.locator.model_dump_json(), 
+            ch.content.model_dump_json(), 
+            ch.tags.model_dump_json(), 
+            ch.quality.model_dump_json()
+        ))
         
-        cur.execute("SELECT rowid FROM chunks_meta WHERE chunk_id = ?", (ch.chunk_id,))
+        cur.execute("SELECT rowid FROM chunks_meta WHERE chunk_pk = ?", (ch.chunk_pk,))
         row = cur.fetchone()
         if row:
             row_id = row[0]
@@ -549,7 +605,8 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
                 vec_score = float(np.dot(q_vec_norm, _normalize(d_vec)))
                 descriptor = f"{Path(s_path).name} {desc_map.get(str(s_path), '')}"
                 lex_score = _lexical_overlap_score(query, descriptor)
-                d_score = (0.80 * max(0.0, vec_score)) + (0.20 * lex_score)
+                # Since d_vec is now the semantic embedding of the description, it is highly accurate.
+                d_score = (0.75 * max(0.0, vec_score)) + (0.25 * lex_score)
                 doc_candidates.append((s_path, d_score))
             doc_candidates.sort(key=lambda x: x[1], reverse=True)
         else:
@@ -563,7 +620,8 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
                 vec_score = float(np.dot(q_vec_norm, _normalize(d_vec)))
                 descriptor = f"{Path(s_path).name} {desc_map.get(str(s_path), '')}"
                 lex_score = _lexical_overlap_score(query, descriptor)
-                d_score = (0.80 * max(0.0, vec_score)) + (0.20 * lex_score)
+                # Since d_vec is now the semantic embedding of the description, it is highly accurate.
+                d_score = (0.75 * max(0.0, vec_score)) + (0.25 * lex_score)
                 doc_candidates.append((s_path, d_score))
 
             doc_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -587,28 +645,44 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
                 """
                 SELECT
                     v.distance,
-                    m.chunk_id,
-                    m.element_id,
-                    m.page,
-                    m.md,
-                    m.neighbors,
-                    m.source_path
+                    m.chunk_pk,
+                    m.doc_id,
+                    m.source_path,
+                    m.locator,
+                    m.content,
+                    m.tags,
+                    m.quality
                 FROM v_chunks v
                 JOIN chunks_meta m ON m.rowid = v.rowid
                 WHERE v.embedding MATCH ?
                   AND k = ?
                   AND m.source_path = ?
+                  AND json_extract(m.quality, '$.is_boilerplate') = 0
                 ORDER BY v.distance ASC;
                 """,
                 (q_blob, l1_fetch_k, doc_path),
             ).fetchall()
 
-            for dist, chunk_id, element_id, page, md, neighbors_raw, source_path in rows:
+            for dist, chunk_pk, doc_id, source_path, loc_raw, content_raw, tags_raw, quality_raw in rows:
                 chunk_sim = max(0.0, min(1.0, 1.0 - (dist**2) / 2.0))
                 fused_score = (0.75 * chunk_sim) + (0.25 * max(0.0, doc_score))
-                if chunk_id in seen_chunk_ids:
+                if chunk_pk in seen_chunk_ids:
                     continue
-                seen_chunk_ids.add(chunk_id)
+                seen_chunk_ids.add(chunk_pk)
+                
+                # Late-binding context
+                content_dict = json.loads(content_raw)
+                main_text = content_dict.get("text", "")
+                ctx_before = content_dict.get("context_before")
+                ctx_after = content_dict.get("context_after")
+                
+                parts = []
+                if ctx_before: parts.append(ctx_before)
+                parts.append(main_text)
+                if ctx_after: parts.append(ctx_after)
+                
+                bound_text = "\n".join(parts)
+                locator_dict = json.loads(loc_raw)
 
                 all_results.append(
                     {
@@ -617,13 +691,15 @@ def search_db(db_path: str, query: str, top_k: int = 5, source_filter: Optional[
                         "chunk_score": float(chunk_sim),
                         "doc_score": float(max(0.0, doc_score)),
                         "doc_descriptor": f"{Path(source_path).name} {desc_map.get(str(source_path), '')}".strip(),
-                        "chunk_id": chunk_id,
-                        "element_id": element_id,
-                        "page": page,
-                        "md": md,
-                        "neighbors": json.loads(neighbors_raw) if neighbors_raw else [],
+                        "chunk_id": chunk_pk,
+                        "element_id": chunk_pk,
+                        "page": locator_dict.get("page_start", 0),
+                        "md": bound_text,
+                        "neighbors": [],
                         "source_path": source_path,
                         "search_tree": "L2->L1",
+                        "content_metadata": content_dict,
+                        "locator_metadata": locator_dict
                     }
                 )
 
@@ -752,7 +828,7 @@ def get_chunks_metadata(db_path: str, limit: int = 200) -> List[Dict[str, Any]]:
         conn = sqlite3.connect(db_path)
         rows = conn.execute(
             """
-            SELECT chunk_id, element_id, page, source_path, neighbors, md
+            SELECT chunk_pk, doc_id, locator, source_path, content
             FROM chunks_meta
             ORDER BY rowid DESC
             LIMIT ?
@@ -765,21 +841,29 @@ def get_chunks_metadata(db_path: str, limit: int = 200) -> List[Dict[str, Any]]:
         return []
 
     out: List[Dict[str, Any]] = []
-    for chunk_id, element_id, page, source_path, neighbors_raw, md in rows:
+    for chunk_pk, doc_id, loc_raw, source_path, content_raw in rows:
         try:
-            neighbors = json.loads(neighbors_raw) if neighbors_raw else []
+            content = json.loads(content_raw)
+            md = content.get("text", "")
         except Exception:
-            neighbors = []
+            md = ""
+            
+        try:
+            loc = json.loads(loc_raw)
+            page = loc.get("page_start", 0)
+        except Exception:
+            page = 0
+            
         preview = (md or "").replace("\n", " ").strip()
         if len(preview) > 220:
             preview = preview[:220] + "..."
         out.append(
             {
-                "chunk_id": chunk_id,
-                "element_id": element_id,
+                "chunk_id": chunk_pk,
+                "element_id": doc_id,
                 "page": page,
                 "source_path": source_path,
-                "neighbors_count": len(neighbors),
+                "neighbors_count": 0,
                 "md_preview": preview,
             }
         )
@@ -818,7 +902,7 @@ def ingest_pdf_file(
 
     # 3. Embed
     try:
-        texts = [c.md for c in chunks]
+        texts = [c.content.text for c in chunks]
         embeddings = embed_texts(texts)
     except Exception as e:
         return {"error": f"Embedding failed: {e}"}
@@ -829,7 +913,7 @@ def ingest_pdf_file(
     try:
         init_db(db_path) 
         upsert_chunks(db_path, chunks, embeddings)
-        upsert_document_index(db_path, str(pdf_path), embeddings)
+        upsert_document_index(db_path, str(pdf_path), embeddings, description=description or "")
         
         # 4.1 Update file metadata
         conn = sqlite3.connect(db_path)

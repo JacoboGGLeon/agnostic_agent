@@ -28,15 +28,42 @@ class ElementNode(BaseModel):
     page: int
     kind: str
     md: str
+    text: str = ""
     bbox: Optional[Tuple[float, float, float, float]] = None
     prev_id: Optional[str] = None
     next_id: Optional[str] = None
     source_path: str
+    is_boilerplate: bool = False
+    section_path: Optional[str] = None
+
+
+class ChunkLocator(BaseModel):
+    source_path: str
+    page_start: int
+    page_end: int
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    section_path: Optional[str] = None
+
+class ChunkContent(BaseModel):
+    text: str
+    text_normalized: str
+    context_before: Optional[str] = None
+    context_after: Optional[str] = None
+    content_type: str
+    language: str = "es"
+
+class ChunkTags(BaseModel):
+    document_type: str = "document"
+
+class ChunkQuality(BaseModel):
+    is_boilerplate: bool = False
+    embed_model: str = "default"
+    token_count_estimated: int = 0
 
 class Chunk(BaseModel):
-    chunk_id: str
-    element_id: str
-    page: int
-    md: str
-    neighbor_ids: List[str] = Field(default_factory=list)
-    source_path: str
+    doc_id: str
+    chunk_pk: str
+    locator: ChunkLocator
+    content: ChunkContent
+    tags: ChunkTags
+    quality: ChunkQuality

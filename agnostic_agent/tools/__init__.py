@@ -57,6 +57,10 @@ query_accounting_db = finance.query_accounting_db
 finance_sources_status = finance.finance_sources_status
 get_saneamiento_rate = finance.get_saneamiento_rate
 reconcile_credit_accounting = finance.reconcile_credit_accounting
+nl2sql_sqlite = introspection.nl2sql_sqlite
+nl2sql_agent_sqlite = introspection.nl2sql_agent_sqlite
+knowledge_voyague_nl2sql_agent = introspection.knowledge_voyague_nl2sql_agent
+knowledge_voyague_nl2semantic_agent = introspection.knowledge_voyague_nl2semantic_agent
 
 
 def get_default_tools(enabled_names: List[str] | None = None) -> List[Any]:

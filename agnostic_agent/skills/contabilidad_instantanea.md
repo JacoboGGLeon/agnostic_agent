@@ -1,7 +1,7 @@
 ---
 name: "contabilidad_instantanea"
 description: "Conciliacion contable 1-a-1 por credito: valida saldo y saneamiento contra transacciones y contabilidad."
-tools: ["finance_sources_status", "query_transactions_db", "query_accounting_db", "get_saneamiento_rate", "reconcile_credit_accounting"]
+tools: ["finance_sources_status", "query_transactions_db", "query_accounting_db", "get_saneamiento_rate", "reconcile_credit_accounting", "nl2sql_sqlite", "nl2sql_agent_sqlite"]
 knowledge: ["*"]
 ---
 
@@ -17,6 +17,7 @@ Reglas de ejecucion:
 1. `query_transactions_db` para traer movimientos (`tipo`, `monto`).
 2. `query_accounting_db` para traer `saldo_total`, `estatus`, `saneamiento_calculado`.
 3. `get_saneamiento_rate` para obtener la tasa esperada segun `estatus` (lee `rules.md` en runtime; fallback a defaults si no existe).
+- Si el usuario pide consulta libre en lenguaje natural sobre DBs, usa `nl2sql_sqlite` con `execute=true` para generar SQL basado en schema real y ejecutarlo en modo solo lectura.
 - Reporta `CUADRADO (100% Match)` solo si coinciden:
 1. saldo esperado vs saldo reportado
 2. reserva esperada vs saneamiento reportado
