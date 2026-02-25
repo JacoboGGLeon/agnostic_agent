@@ -1444,7 +1444,7 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
 {rich_context_text}
 
 TAREA ACTUAL (Subquery {i} de {len(subqs)}):
-Genera el plan nativo o ejecuta las herramientas necesarias para resolver exclusivamente: "{subq}"
+Genera el DAG exclusivo para resolver: "{subq}"
 """
                 user_msg = HumanMessage(content=user_msg_content)
                 
@@ -1457,12 +1457,7 @@ Genera el plan nativo o ejecuta las herramientas necesarias para resolver exclus
                     retries=cfg.max_retries,
                 )
                 
-                # Coercion to guarantee string
-                if isinstance(response, AIMessage) and isinstance(response.content, str):
-                    current_raw = response.content
-                else:
-                    current_raw = _coerce_content_str(getattr(response, "content", ""))
-                    
+                current_raw = response.content
                 global_llm_raw += f"\n\n--- Subquery {i}: {subq} ---\n{current_raw}"
                 
                 # Parseo DAG
@@ -1474,28 +1469,6 @@ Genera el plan nativo o ejecuta las herramientas necesarias para resolver exclus
                 # El modelo retorna tool_calls usando los schemas inyectados por `bind_tools`.
                 
                 native_calls = getattr(response, "tool_calls", [])
-                
-                # HEURISTIC FALLBACK FOR LOCAL LLMs
-                # Sometimes (like Qwen/DeepSeek), they emit tool_uses as raw text instead of standard bindings.
-                if not native_calls and "tool_uses" in current_raw:
-                    try:
-                        # Buscamos el bloque JSON que contenga tool_uses
-                        match = re.search(r"(\{[\s\S]*?\"tool_uses\"[\s\S]*?\})", current_raw)
-                        if match:
-                            parsed_tools = json.loads(match.group(1))
-                            for tu in parsed_tools.get("tool_uses", []):
-                                r_name = tu.get("recipient_name", "")
-                                # Extraer 'functions.nombre' -> 'nombre'
-                                if r_name.startswith("functions."):
-                                    r_name = r_name[len("functions."):]
-                                r_args = tu.get("parameters", {})
-                                native_calls.append({
-                                    "name": r_name,
-                                    "args": r_args,
-                                    "id": f"call_fallback_{str(uuid.uuid4())[:8]}"
-                                })
-                    except Exception as e:
-                        print(f"[PLANNER] Fallback parser failed: {e}")
                 
                 # Procesar pasos del DAG (ahora Tools Nativas Puras)
                 allowed_tool_names = {t.name for t in active_tools}

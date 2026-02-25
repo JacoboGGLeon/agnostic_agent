@@ -20,7 +20,5 @@ setup(
         "transformers",     # for local embeddings
         "torch",            # for local embeddings
         "openai",           # for potential vLLM client
-        "fastapi",          # Backend Server
-        "uvicorn[standard]",# ASGI Server
     ],
 )

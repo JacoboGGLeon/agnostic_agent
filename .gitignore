@@ -6,8 +6,8 @@
 !setup.py
 !pyproject.toml
 !agnostic_agent/
-![TEMPLATE][v0_23a][AGNOSTIC_AGENT][Stack__OPENAI].ipynb
-![TEMPLATE][v0_23a][AGNOSTIC_AGENT][Stack__QWEN].ipynb
+!tests/
+!tests/**
 
 # Re-ignore pycache inside the whitelisted directory
 agnostic_agent/__pycache__/

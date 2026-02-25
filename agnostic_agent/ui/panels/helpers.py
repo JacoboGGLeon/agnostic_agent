@@ -80,9 +80,9 @@ def _build_planner_from_raw_state(raw_state: Dict[str, Any]) -> str:
             description = _safe_text(getattr(traj, "description", "")).strip()
 
         lines.append(f"Subquery {index}: {subquery}")
-        lines.append("Plan:")
+        lines.append("DAG:")
         if not description:
-            lines.append("step 1: (empty / native inference only)")
+            lines.append("step 1: (empty)")
         else:
             for raw_line in description.splitlines():
                 line = sanitize_display_text(raw_line).strip()
@@ -93,10 +93,7 @@ def _build_planner_from_raw_state(raw_state: Dict[str, Any]) -> str:
                 elif line.startswith("step "):
                     lines.append(line)
                 else:
-                    # Defensive fallback against stray strings injecting themselves as steps
-                    safe_line = sanitize_display_text(line)
-                    if safe_line:
-                        lines.append(f"step ?: {safe_line}")
+                    lines.append(f"step ?: {line}")
         if index < len(planner_trajs):
             lines.append("")
 
