@@ -1457,7 +1457,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     retries=cfg.max_retries,
                 )
                 
-                current_raw = response.content
+                # Coercion to guarantee string
+                if isinstance(response, AIMessage) and isinstance(response.content, str):
+                    current_raw = response.content
+                else:
+                    current_raw = _coerce_content_str(getattr(response, "content", ""))
+                    
                 global_llm_raw += f"\n\n--- Subquery {i}: {subq} ---\n{current_raw}"
                 
                 # Parseo DAG
