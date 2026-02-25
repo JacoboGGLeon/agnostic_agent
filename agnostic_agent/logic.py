@@ -1465,146 +1465,69 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 global_llm_clean += f"\n\n--- Plan {i}: {subq} ---\n{content_cleaned}"
                 
                 # Limpieza JSON
-                if "```" in content_cleaned:
-                    content_cleaned = re.sub(r"```json\s*", "", content_cleaned)
-                    content_cleaned = re.sub(r"```\s*", "", content_cleaned)
+                # YA NO BUSCAMOS DAG EN TEXTO. USAMOS LLAMADAS NATIVAS:
+                # El modelo retorna tool_calls usando los schemas inyectados por `bind_tools`.
                 
-                start_brace = content_cleaned.find("{")
-                end_brace = content_cleaned.rfind("}")
+                native_calls = getattr(response, "tool_calls", [])
                 
-                dag_steps = []
-                if start_brace != -1 and end_brace != -1:
-                    json_str = content_cleaned[start_brace : end_brace + 1]
-                    try:
-                        dag_data = json.loads(json_str)
-                        dag_steps = dag_data.get("dag", [])
-                    except json.JSONDecodeError:
-                        print(f"[PLANNER] as i  JSON Decode Error for subquery {i}")
-                
-                # Procesar pasos del DAG
+                # Procesar pasos del DAG (ahora Tools Nativas Puras)
                 allowed_tool_names = {t.name for t in active_tools}
-                subq_calls = []
-                
-                for step in dag_steps:
-                    t_name_raw = step.get("tool")
-                    t_name = _canonical_tool_name(t_name_raw)
-                    t_args = step.get("args", {})
-                    # RE-GENERATE ID to ensure uniqueness across consolidated subqueries
-                    # The LLM often restarts at "step_1" for each subquery.
-                    original_id = step.get("step_id") or "step_?"
-                    t_id = f"{original_id}_{i}_{str(uuid.uuid4())[:4]}"
-                    
-                    if t_name:
-                        # STRICT SKILL CHECK
-                        if skill_mode:
-                            # In skill mode, ANY tool outside the declared allowlist is blocked.
-                            if t_name not in allowed_tool_names:
-                                print(
-                                    f"[PLANNER] Tool '{t_name_raw}' normalized as '{t_name}' BLOCKED "
-                                    "(not allowed by active skill)."
-                                )
-                                continue
-                        
-                        # DEDUPLICATION CHECK
-                        # Usamos nombre + args como clave Aonica
-                        args_sorted = json.dumps(t_args, sort_keys=True)
-                        dedup_key = (t_name, args_sorted)
-                        
-                        if dedup_key in seen_calls_keys:
-                            print(f"[PLANNER] as i  Duplicate call skipped: {t_name}")
-                            continue
-                        seen_calls_keys.add(dedup_key)
-                        
-                        call_obj = {
-                            "name": t_name,
-                            "args": t_args,
-                            "id": t_id,
-                            "type": "tool_call"
-                        }
-                        subq_calls.append(call_obj)
-                        all_tool_calls.append(call_obj)
-
-                # Robust fallback: if no DAG steps were parsed, try native tool_calls
-                # returned by the model binding (agnostic across providers).
-                if not subq_calls:
-                    native_calls = extract_tool_calls(response) if isinstance(response, AIMessage) else []
-                    for nc in native_calls:
-                        n_name_raw = nc.get("name")
-                        n_name = _canonical_tool_name(n_name_raw)
-                        n_args = nc.get("args", {}) or {}
-                        n_id = nc.get("id") or f"step_native_{i}_{str(uuid.uuid4())[:4]}"
-                        if not n_name:
-                            continue
-                        if skill_mode and n_name not in allowed_tool_names:
-                            print(
-                                f"[PLANNER] Native tool '{n_name_raw}' normalized as '{n_name}' BLOCKED "
-                                "(not allowed by active skill)."
-                            )
-                            continue
-                        try:
-                            n_args_key = json.dumps(n_args, sort_keys=True)
-                        except Exception:
-                            n_args_key = repr(n_args)
-                        dedup_key = (n_name, n_args_key)
-                        if dedup_key in seen_calls_keys:
-                            continue
-                        seen_calls_keys.add(dedup_key)
-                        call_obj = {
-                            "name": n_name,
-                            "args": n_args,
-                            "id": n_id,
-                            "type": "tool_call",
-                        }
-                        subq_calls.append(call_obj)
-                        all_tool_calls.append(call_obj)
-
-                # Build a readable DAG summary per subquery.
+                subq_calls: List[Dict[str, Any]] = []
                 desc_lines: List[str] = []
-                if subq_calls:
-                    for step_idx, call in enumerate(subq_calls, start=1):
-                        try:
-                            call_args_txt = json.dumps(
-                                call.get("args", {}),
-                                ensure_ascii=False,
-                                default=_json_default,
-                            )
-                        except Exception:
-                            call_args_txt = repr(call.get("args", {}))
-                        desc_lines.append(
-                            f"step {step_idx}: id={call.get('id', f'step_{step_idx}')}, "
-                            f"tool={call.get('name', '(none)')}, args={call_args_txt}"
-                        )
-                    if not dag_steps:
-                        desc_lines.append("Note: se usaron native tool_calls (sin DAG JSON parseable).")
-                elif not dag_steps:
-                    desc_lines.append("No DAG steps were generated for this subquery.")
-                else:
-                    for step_idx, step in enumerate(dag_steps, start=1):
-                        step_id = step.get("step_id", f"step_{step_idx}")
-                        step_tool = step.get("tool", "(none)")
-                        step_args = step.get("args", {})
-                        try:
-                            step_args_txt = json.dumps(
-                                step_args,
-                                ensure_ascii=False,
-                                default=_json_default,
-                            )
-                        except Exception:
-                            step_args_txt = repr(step_args)
-                        desc_lines.append(
-                            f"step {step_idx}: id={step_id}, tool={step_tool}, args={step_args_txt}"
-                        )
-                    desc_lines.append(
-                        "Note: DAG steps were generated but all tool calls were filtered, blocked, or deduplicated."
-                    )
                 
+                for step_idx, nc in enumerate(native_calls, start=1):
+                    n_name_raw = nc.get("name")
+                    n_name = _canonical_tool_name(n_name_raw)
+                    n_args = nc.get("args", {}) or {}
+                    n_id = nc.get("id") or f"step_native_{i}_{str(uuid.uuid4())[:4]}"
+                    
+                    if not n_name:
+                        continue
+                        
+                    # STRICT SKILL CHECK
+                    if skill_mode and n_name not in allowed_tool_names:
+                        print(
+                            f"[PLANNER] Native tool '{n_name_raw}' normalized as '{n_name}' BLOCKED "
+                            "(not allowed by active skill)."
+                        )
+                        continue
+                    
+                    # DEDUPLICATION CHECK
+                    try:
+                        n_args_key = json.dumps(n_args, sort_keys=True)
+                    except Exception:
+                        n_args_key = repr(n_args)
+                        
+                    dedup_key = (n_name, n_args_key)
+                    if dedup_key in seen_calls_keys:
+                        print(f"[PLANNER] ⚠️ Duplicate call skipped: {n_name}")
+                        continue
+                        
+                    seen_calls_keys.add(dedup_key)
+                    call_obj = {
+                        "name": n_name,
+                        "args": n_args,
+                        "id": n_id,
+                        "type": "tool_call",
+                    }
+                    subq_calls.append(call_obj)
+                    all_tool_calls.append(call_obj)
+                    
+                    # Generar traza visual
+                    desc_lines.append(
+                        f"step {step_idx}: id={n_id}, tool={n_name}, args={n_args_key}"
+                    )
+
+                if not subq_calls:
+                    desc_lines.append("No native tool calls were generated for this subquery. (Text reasoning only)")
+
                 plan_trajs.append(PlannerTrajectory(
                     subquery=subq,
                     description="\n".join(desc_lines)
                 ))
                 
             except Exception as e:
-                print(f"[PLANNER] a Error planning subquery {i}: {e}")
+                print(f"[PLANNER] ❌ Error planning subquery {i}: {e}")
                 plan_trajs.append(PlannerTrajectory(subquery=subq, description=f"Error: {e}"))
 
         # 7. Construir AIMessage final consolidado
