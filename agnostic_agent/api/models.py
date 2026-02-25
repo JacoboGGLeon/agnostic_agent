@@ -23,6 +23,10 @@ class SkillInfo(BaseModel):
     enabled: bool = False
     tools: List[str] = Field(default_factory=list)
 
+class SettingsResponse(BaseModel):
+    llm_served_name: str
+    emb_served_name: str
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str

@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 
 from agnostic_agent.agent import Agent
 from agnostic_agent.capabilities import PlannerConfig
-from agnostic_agent.api.models import ChatRequest, ChatResponse, SkillInfo, ToolInfo
+from agnostic_agent.api.models import ChatRequest, ChatResponse, SkillInfo, ToolInfo, SettingsResponse
 from agnostic_agent.config.loader import load_config
 from agnostic_agent.plugins.manager import PluginManager
 
@@ -67,6 +67,19 @@ async def get_skills():
             ))
             
     return skills_list
+
+@app.get("/api/v1/settings", response_model=SettingsResponse)
+async def get_settings():
+    """Returns the default Server LLM and Embedding Models configured by the Environment Variables"""
+    # Logic matching v94 sidebar.py resolution
+    llm_name = os.getenv("LLM_SERVED_NAME") or os.getenv("OPENAI_MODEL") or os.getenv("AGNOSTIC_LLM_MODEL") or "custom-llm-model"
+    emb_name = os.getenv("EMB_SERVED_NAME") or os.getenv("OPENAI_EMBED_MODEL") or os.getenv("AGNOSTIC_EMB_MODEL") or "custom-embed-model"
+    
+    return SettingsResponse(
+        llm_served_name=llm_name,
+        emb_served_name=emb_name
+    )
+
 
 
 @app.post("/api/v1/chat", response_model=ChatResponse)
