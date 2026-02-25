@@ -277,7 +277,14 @@ class Agent:
 
         # 6) LLM planner bindeado a las tools
         planner_llm = build_planner_llm(cfg)
-        planner_llm = planner_llm.bind_tools(tools_list)
+        bind_kwargs: Dict[str, Any] = {}
+        if getattr(cfg, "tool_choice", None):
+            bind_kwargs["tool_choice"] = cfg.tool_choice
+        try:
+            planner_llm = planner_llm.bind_tools(tools_list, **bind_kwargs)
+        except TypeError:
+            # Algunos wrappers no aceptan kwargs avanzados en bind_tools.
+            planner_llm = planner_llm.bind_tools(tools_list)
 
         # 7) Construir grafo principal
         graph_app = load_logic(

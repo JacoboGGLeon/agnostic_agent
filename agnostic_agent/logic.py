@@ -399,6 +399,76 @@ def _extract_xml_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     return calls
 
 
+def _extract_tool_calls_from_jsonish_text(text: str) -> List[Dict[str, Any]]:
+    """
+    Fallback para modelos que no retornan tool_calls nativas y emiten JSON en texto:
+    - {"tool_uses":[{"recipient_name":"functions.my_tool","parameters":{...}}]}
+    - {"name":"functions.my_tool","parameters":{...}} (single call)
+    """
+    if not text:
+        return []
+
+    calls: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+
+    def _append(name_raw: Any, args_raw: Any) -> None:
+        name = _canonical_tool_name(name_raw)
+        args = _parse_args_maybe_json(args_raw)
+        if not name:
+            return
+        try:
+            args_key = json.dumps(args, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            args_key = repr(args)
+        dedup_key = (name, args_key)
+        if dedup_key in seen:
+            return
+        seen.add(dedup_key)
+        calls.append(
+            {
+                "id": f"call_{uuid.uuid4().hex}",
+                "name": name,
+                "args": args,
+            }
+        )
+
+    i = 0
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        js, next_i = _scan_balanced_json(text, i)
+        if not js:
+            i += 1
+            continue
+        i = max(next_i, i + 1)
+        try:
+            obj = json.loads(js)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        tool_uses = obj.get("tool_uses")
+        if isinstance(tool_uses, list):
+            for u in tool_uses:
+                if not isinstance(u, dict):
+                    continue
+                _append(
+                    u.get("recipient_name") or u.get("name") or u.get("tool_name"),
+                    u.get("parameters") or u.get("args") or u.get("arguments") or {},
+                )
+
+        # Single-call shape fallback.
+        if "tool_uses" not in obj:
+            _append(
+                obj.get("recipient_name") or obj.get("name") or obj.get("tool_name"),
+                obj.get("parameters") or obj.get("args") or obj.get("arguments") or {},
+            )
+
+    return calls
+
+
 def extract_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     """
     API robusta para obtener tool_calls de un AIMessage.
@@ -421,7 +491,12 @@ def extract_tool_calls(ai_msg: AIMessage) -> List[Dict[str, Any]]:
     if norm2:
         return norm2
 
-    return _extract_xml_tool_calls(ai_msg)
+    xml_calls = _extract_xml_tool_calls(ai_msg)
+    if xml_calls:
+        return xml_calls
+
+    content_text = _coerce_content_str(getattr(ai_msg, "content", ""))
+    return _extract_tool_calls_from_jsonish_text(content_text)
 
 
 def call_planner_with_retry(
@@ -1468,7 +1543,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 # YA NO BUSCAMOS DAG EN TEXTO. USAMOS LLAMADAS NATIVAS:
                 # El modelo retorna tool_calls usando los schemas inyectados por `bind_tools`.
                 
-                native_calls = getattr(response, "tool_calls", [])
+                native_calls = _normalize_toolcalls_list(getattr(response, "tool_calls", []))
+                if not native_calls:
+                    # Compat fallback: algunos proveedores emiten tool_uses en texto.
+                    native_calls = _extract_tool_calls_from_jsonish_text(
+                        _coerce_content_str(getattr(response, "content", ""))
+                    )
                 
                 # Procesar pasos del DAG (ahora Tools Nativas Puras)
                 allowed_tool_names = {t.name for t in active_tools}

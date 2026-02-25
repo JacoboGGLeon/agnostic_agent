@@ -12,6 +12,7 @@
   --r2: 14px;
   --shadow: 0 12px 35px rgba(0, 0, 0, .35);
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-ui: "Segoe UI", "Source Sans Pro", "Helvetica Neue", sans-serif;
 }
 
 .stApp {
@@ -20,6 +21,7 @@
     radial-gradient(900px 500px at 90% 0%, rgba(73, 165, 230, .22), transparent 60%),
     linear-gradient(180deg, var(--bg), #072146 60%, #001B44);
   color: var(--text);
+  font-family: var(--font-ui);
 }
 
 /* Hide Streamlit Header (Blue bar) but KEEP Hamburger Menu clickable */
@@ -51,6 +53,7 @@
 .block-container {
   padding-top: .75rem;
   padding-bottom: 1.6rem;
+  max-width: 100%;
 }
 
 section[data-testid="stSidebar"] {
@@ -219,10 +222,12 @@ div[data-testid="stChatMessage"] {
   background: linear-gradient(180deg, rgba(138, 43, 226, 0.15), rgba(255, 255, 255, .02));
   box-shadow: 0 4px 12px rgba(0, 0, 0, .2);
   color: #E2D1F9;
-  width: fit-content;
-  max-width: 85%;
+  width: 100%;
+  max-width: 100%;
   margin-right: auto;
   /* Force Left */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Agent bubble adjustment */
@@ -235,16 +240,20 @@ div[data-testid="stChatMessage"] {
   background: linear-gradient(180deg, rgba(255, 165, 0, 0.15), rgba(255, 255, 255, .02));
   box-shadow: 0 4px 12px rgba(0, 0, 0, .2);
   color: #FFE4B5;
-  width: fit-content;
-  max-width: 85%;
+  width: 100%;
+  max-width: 100%;
   margin-left: auto;
   /* Force Right */
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble-agent .bubble-content {
   text-align: left;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble-agent .bubble-content p {
@@ -283,6 +292,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 
 div[data-testid="stVerticalBlockBorderWrapper"] > div {
   padding: 12px !important;
+}
+
+.stCheckbox label,
+.stRadio label,
+.stToggle label,
+.stSelectbox label {
+  color: var(--text) !important;
 }
 
 /* Remove empty containers explicitly */
