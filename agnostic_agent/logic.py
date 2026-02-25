@@ -2018,11 +2018,19 @@ Genera el DAG exclusivo para resolver: "{subq}"
             for bad, good in replacements.items():
                 out = out.replace(bad, good)
             # Defensive cleanup for residual JS stringified object markers anywhere.
-            out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+            for _ in range(3):
+                out = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", out)
+                out = re.sub(r"(?i)\[object\s*Object\]", "", out)
+                out = out.replace("[object Object]", "")
             # Remove now-empty synthetic planner lines.
             out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
             out = re.sub(r"\n{3,}", "\n\n", out)
-            return out
+            
+            # Final strip punctuation leftover from list removals
+            out = re.sub(r",\s*,", ",", out)
+            out = re.sub(r"\[\s*,", "[", out)
+            out = re.sub(r",\s*\]", "]", out)
+            return out.strip()
 
         def _build_pipeline_markdown(title: str, final_heading: str) -> str:
             def _fenced_block(text: str, lang: str = "text") -> str:
@@ -2032,16 +2040,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
             return "\n\n".join(
                 [
-                    f"## {title}",
-                    "### ANALYZER",
+                    f"**{title.upper()}**",
+                    "**ANALYZER**",
                     _fenced_block(analyzer_text, "text"),
-                    "### PLANNER",
+                    "**PLANNER**",
                     _fenced_block(planner_text, "text"),
-                    "### EXECUTOR",
+                    "**EXECUTOR**",
                     _fenced_block(executor_text, "text"),
-                    "### CATCHER",
+                    "**CATCHER**",
                     _fenced_block(catcher_text, "text"),
-                    "### SUMMARIZER (basado en herramientas)",
+                    "**SUMMARIZER (basado en herramientas)**",
                     _fenced_block(summarizer_text, "text"),
                     final_heading,
                     user_answer,
@@ -2051,11 +2059,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
         def _build_deep_markdown() -> str:
             def _section(title: str, body: str) -> str:
                 body_text = body if isinstance(body, str) else _pretty_json(body)
-                return f"### {title}\n```text\n{body_text}\n```"
+                return f"**{title}**\n```text\n{body_text}\n```"
 
             return "\n\n".join(
                 [
-                    "## Resumen deep del pipeline",
+                    "**RESUMEN DEEP DEL PIPELINE**",
                     _section("ANALYZER", analyzer_text),
                     _section("PLANNER", planner_text),
                     _section("EXECUTOR", executor_text),
@@ -2400,7 +2408,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
         # Esta respuesta (answer_markdown) es la vista "dev" con todo el pipeline.
         answer_markdown = _build_pipeline_markdown(
             "Resumen del pipeline",
-            "### RESPUESTA FINAL (modo usuario)",
+            "**RESPUESTA FINAL (modo usuario)**",
         )
 
         # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

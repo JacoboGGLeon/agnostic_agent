@@ -12,6 +12,7 @@ from agnostic_agent.ui.panels.helpers import (
     next_id,
     normalize_output,
     strip_user_prefix,
+    render_markdown,
 )
 from agnostic_agent.ui.panels.inspector import render_inspector
 
@@ -51,14 +52,7 @@ def render_online_tab(agent_factory):
                     )
 
                     with st.chat_message("assistant"):
-                        try:
-                            raw_html = markdown.markdown(
-                                content or "_(sin respuesta)_", extensions=["extra"]
-                            )
-                        except Exception:
-                            raw_html = html.escape(content or "_(sin respuesta)_").replace(
-                                "\n", "<br>"
-                            )
+                        raw_html = render_markdown(content or "_(sin respuesta)_")
 
                         st.markdown(
                             f"""

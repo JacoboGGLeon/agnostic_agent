@@ -21,13 +21,17 @@ def sanitize_display_text(text: Any) -> str:
         out = decoded
 
     # 🚨 AGGRESSIVE JS ARTIFACT CLEANUP 🚨
-    for _ in range(2):
-        out = re.sub(r"(?i),?\s*['\"]?\[object\s*object\]['\"]?\s*,?", "", out)
+    for _ in range(3):
+        out = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", out)
+        out = re.sub(r"(?i)\[object\s*Object\]", "", out)
         out = out.replace("[object Object]", "")
-        out = out.replace("[objectObject]", "")
     
     out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
+    # Final strip punctuation leftover from list removals
+    out = re.sub(r",\s*,", ",", out)
+    out = re.sub(r"\[\s*,", "[", out)
+    out = re.sub(r",\s*\]", "]", out)
     return out.strip()
 
 def _safe_text(value: Any) -> str:
@@ -53,9 +57,17 @@ def _build_planner_from_raw_state(raw_state: Dict[str, Any]) -> str:
     lines: List[str] = ["Rol: PLANNER restringe tools+knowledge."]
     scope = raw_state.get("_planner_scope_internal") or {}
     if isinstance(scope, dict) and scope:
-        skills = scope.get("active_skills", [])
-        tools = scope.get("allowed_tools", [])
-        knowledge = scope.get("allowed_knowledge", [])
+        def _fmt_list(items):
+            if not isinstance(items, list): return str(items)
+            cleaned = []
+            for it in items:
+                s_it = sanitize_display_text(str(it))
+                if s_it: cleaned.append(s_it)
+            return "[" + ", ".join(cleaned) + "]"
+
+        skills = _fmt_list(scope.get("active_skills", []))
+        tools = _fmt_list(scope.get("allowed_tools", []))
+        knowledge = _fmt_list(scope.get("allowed_knowledge", []))
         lines.append(f"Scope: skills={skills}, tools={tools}, knowledge={knowledge}")
         lines.append("")
 
@@ -223,13 +235,20 @@ def default_selected_id() -> Optional[int]:
     a = assistant_messages()
     return a[-1]["id"] if a else None
 
+def render_markdown(text: str) -> str:
+    """Centralized markdown rendering with sanitization."""
+    if not text:
+        return ""
+    clean_text = sanitize_display_text(text)
+    try:
+         return markdown.markdown(clean_text, extensions=['extra'])
+    except Exception:
+         return html.escape(clean_text).replace("\n", "<br>")
+
 def card_md(title: str, body_md: str, icon: str = "⬛", hint: str = "") -> None:
     body_md = body_md or "_(vacío)_"
     hint_html = f'<span class="hint">{html.escape(hint)}</span>' if hint else ""
-    try:
-        body_html = markdown.markdown(body_md, extensions=['extra'])
-    except Exception:
-        body_html = html.escape(body_md).replace("\n", "<br>")
+    body_html = render_markdown(body_md)
 
     st.markdown(
         f"""

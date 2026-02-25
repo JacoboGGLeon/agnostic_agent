@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import streamlit as st
+from agnostic_agent.ui.panels.helpers import render_markdown
 
 
 def _discover_db_candidates() -> List[str]:
@@ -284,7 +285,7 @@ def _render_markdown_pretty(md_path: str, key_prefix: str) -> None:
 
     render_pretty = st.toggle("Render markdown pretty", value=True, key=f"{key_prefix}_md_pretty")
     if render_pretty:
-        st.markdown(md_text)
+        st.markdown(render_markdown(md_text), unsafe_allow_html=True)
     with st.expander("Ver markdown raw"):
         st.code(md_text, language="markdown")
 
@@ -723,30 +724,31 @@ def render_offline_tab(agent_factory):
                 col1, col2 = st.columns(2)
                 for i, skill in enumerate(skills):
                     with col1 if i % 2 == 0 else col2:
-                        st.markdown(f"**{skill.name}**")
-                        
-                        # Render YAML Metadata nicely
-                        if skill.description:
-                            st.caption(skill.description)
-                        
-                        if skill.tools:
-                            st.markdown(f"🛠 **Tools**: {', '.join([f'`{t}`' for t in skill.tools])}")
-                        
-                        if skill.knowledge:
-                            st.markdown(f"📚 **Knowledge**: {', '.join([f'`{k}`' for k in skill.knowledge])}")
+                        with st.container(border=True):
+                            st.markdown(f"**{skill.name}**")
+                            
+                            # Render YAML Metadata nicely
+                            if skill.description:
+                                st.caption(skill.description)
+                            
+                            if skill.tools:
+                                st.markdown(f"🛠 **Tools**: {', '.join([f'`{t}`' for t in skill.tools])}")
+                            
+                            if skill.knowledge:
+                                st.markdown(f"📚 **Knowledge**: {', '.join([f'`{k}`' for k in skill.knowledge])}")
 
-                        if getattr(skill, "instructions", None):
-                            with st.expander("Ver instrucciones completas", expanded=False):
-                                st.markdown(skill.instructions)
+                            if getattr(skill, "instructions", None):
+                                with st.expander("Ver instrucciones completas", expanded=False):
+                                    st.markdown(render_markdown(skill.instructions), unsafe_allow_html=True)
 
-                        is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
-                        if is_on != skill.enabled:
-                            agent.skill_registry.set_enabled(skill.name, is_on)
-                            if "skills_config" not in st.session_state:
-                                st.session_state.skills_config = {}
-                            st.session_state.skills_config[skill.name] = is_on
-                            st.rerun()
-                        st.divider()
+                            st.write("")  # Blank line spacer
+                            is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")
+                            if is_on != skill.enabled:
+                                agent.skill_registry.set_enabled(skill.name, is_on)
+                                if "skills_config" not in st.session_state:
+                                    st.session_state.skills_config = {}
+                                st.session_state.skills_config[skill.name] = is_on
+                                st.rerun()
         else:
             st.warning("Skill registry not available.")
 
