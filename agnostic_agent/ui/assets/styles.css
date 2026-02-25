@@ -161,6 +161,33 @@ section[data-testid="stSidebar"] {
   padding: 12px 12px 10px 12px;
   font-size: 14px;
   color: var(--text);
+  line-height: 1.5;
+}
+
+.card .card-b p {
+  margin: 0 0 .65rem 0;
+}
+
+.card .card-b ul,
+.card .card-b ol {
+  margin: .35rem 0 .75rem 0;
+  padding-left: 1.2rem;
+}
+
+.card .card-b code {
+  border-radius: 6px;
+  padding: 0.08rem 0.28rem;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .08);
+}
+
+.card .card-b pre {
+  overflow-x: auto;
+  margin: .45rem 0 .7rem 0;
+  padding: .65rem .75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(0, 0, 0, .26);
 }
 
 /* Code-like block inside cards (for Thinking) */
@@ -212,7 +239,38 @@ div[data-testid="stChatMessage"] {
   max-width: 85%;
   margin-left: auto;
   /* Force Right */
-  text-align: right;
+  text-align: left;
+}
+
+.bubble-agent .bubble-content {
+  text-align: left;
+  line-height: 1.55;
+}
+
+.bubble-agent .bubble-content p {
+  margin: 0 0 .65rem 0;
+}
+
+.bubble-agent .bubble-content ul,
+.bubble-agent .bubble-content ol {
+  margin: .35rem 0 .75rem 0;
+  padding-left: 1.2rem;
+}
+
+.bubble-agent .bubble-content pre {
+  overflow-x: auto;
+  margin: .45rem 0 .7rem 0;
+  padding: .65rem .75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(0, 0, 0, .28);
+}
+
+.bubble-agent .bubble-content code {
+  border-radius: 6px;
+  padding: 0.08rem 0.28rem;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(255, 255, 255, .08);
 }
 
 /* Inspector container (st.container(border=True)) */

@@ -20,11 +20,13 @@ def sanitize_display_text(text: Any) -> str:
             break
         out = decoded
 
-    # 🚨 AGGRESSIVE JS ARTIFACT CLEANUP 🚨
+    # Aggressive cleanup for leaked JS artifacts.
     for _ in range(3):
         out = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", out)
         out = re.sub(r"(?i)\[object\s*Object\]", "", out)
         out = out.replace("[object Object]", "")
+        out = re.sub(r"(?im)^[\s,'\"-]*\[object\s*Object\][\s,'\"]*$", "", out)
+        out = re.sub(r"(?im)^\s*,\s*$", "", out)
     
     out = re.sub(r"(?im)^\s*step\s*\?:\s*$", "", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
@@ -241,9 +243,13 @@ def render_markdown(text: str) -> str:
         return ""
     clean_text = sanitize_display_text(text)
     try:
-         return markdown.markdown(clean_text, extensions=['extra'])
+        return markdown.markdown(
+            clean_text,
+            extensions=["extra", "sane_lists", "nl2br"],
+            output_format="html5",
+        )
     except Exception:
-         return html.escape(clean_text).replace("\n", "<br>")
+        return html.escape(clean_text).replace("\n", "<br>")
 
 def card_md(title: str, body_md: str, icon: str = "⬛", hint: str = "") -> None:
     body_md = body_md or "_(vacío)_"

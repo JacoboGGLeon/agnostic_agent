@@ -11,6 +11,7 @@ from agnostic_agent.ui.panels.helpers import (
     extract_tool_runs,
     find_message_by_id,
     get_raw_state,
+    render_markdown,
     render_tool_runs,
     strip_user_prefix,
 )
@@ -89,12 +90,10 @@ def render_inspector():
                     )
                 elif tab_key == "deep":
                     content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
-                    card_md(
-                        "Vista profunda (deep_out / summary)",
-                        content_to_show,
-                        icon="🧠",
-                        hint="pipeline",
-                    )
+                    st.markdown("##### Vista profunda (deep_out / summary)")
+                    st.markdown(render_markdown(content_to_show), unsafe_allow_html=True)
+                    with st.expander("Ver markdown raw", expanded=False):
+                        st.code(content_to_show, language="markdown")
                 elif tab_key == "dev":
                     render_tool_runs(tool_runs)
                     with st.expander("🧬 raw_state (debug)", expanded=False):
