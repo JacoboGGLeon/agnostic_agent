@@ -821,6 +821,45 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
     return "\n".join(partes)
 
 
+def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
+    """
+    Resumen compacto para UI (deep/dev), evitando dumps gigantes.
+    """
+    if not runs:
+        return "No se ejecutaron herramientas."
+
+    lines: List[str] = [f"Se ejecutaron {len(runs)} tools."]
+    for idx, run in enumerate(runs, start=1):
+        name = str(run.get("name", "tool"))
+        args = run.get("args", {}) or {}
+        output = run.get("output")
+
+        credito_id = ""
+        if isinstance(args, dict):
+            credito_id = str(args.get("credito_id") or "").strip()
+        if not credito_id and isinstance(output, dict):
+            credito_id = str(output.get("credito_id") or "").strip()
+
+        if isinstance(output, dict):
+            if "error" in output:
+                status = f"error={output.get('error')}"
+            elif "status" in output:
+                status = f"status={output.get('status')}"
+            elif "ok" in output:
+                status = "ok=true" if bool(output.get("ok")) else "ok=false"
+            else:
+                status = "resultado=dict"
+        elif output is None:
+            status = "resultado=vacio"
+        else:
+            status = f"resultado={type(output).__name__}"
+
+        suffix = f" credito_id={credito_id}" if credito_id else ""
+        lines.append(f"{idx}. {name}{suffix} -> {status}")
+
+    return "\n".join(lines)
+
+
 # build_user_answer REMOVED (Legacy hardcoded function)
 
 
@@ -1971,7 +2010,12 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 out_lines.append(
                     f"[WARN] Cobertura Analyzer->Executor parcial: subqueries={len(analyzer_subqs)} vs calls={len(exec_steps)}"
                 )
-            return "\n".join(out_lines)
+            joined = "\n".join(out_lines)
+            for _ in range(3):
+                joined = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", joined)
+                joined = re.sub(r"(?i)\[object\s*Object\]", "", joined)
+            joined = re.sub(r"\n{3,}", "\n\n", joined)
+            return joined.strip()
 
         def _build_executor_text() -> str:
             executor_steps = state.get("executor_steps", []) or []
@@ -2393,13 +2437,17 @@ Genera el DAG exclusivo para resolver: "{subq}"
             except Exception as e:
                 user_answer = f"(Error en sintesis hibrida: {e})\n\nResumen crudo:\n{tools_summary_text}"
 
+            user_answer = strip_think(_coerce_content_str(user_answer)).strip()
+            if not user_answer:
+                user_answer = summarize_tool_runs_compact(runs)
+
             # Rebuild pipeline metadata in pretty format.
             analyzer_text = _build_analyzer_text(analyzer)
             planner_text = _build_planner_text()
             executor_text = _build_executor_text()
             catcher_text = _build_catcher_text(runs)
 
-            summarizer_text = tools_summary_text
+            summarizer_text = summarize_tool_runs_compact(runs)
 
             summary_dict: SummaryDict = SummaryDict(
                 analyzer=analyzer_text,

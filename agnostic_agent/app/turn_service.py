@@ -202,7 +202,14 @@ class TurnService:
             ai_messages = [
                 m for m in out_state.get("messages", []) if isinstance(m, AIMessage)
             ]
-            last_ai = ai_messages[-1] if ai_messages else None
+            visible_ai_messages = []
+            for m in ai_messages:
+                addkw = getattr(m, "additional_kwargs", {}) or {}
+                if isinstance(addkw, dict) and addkw.get("pipeline_internal"):
+                    continue
+                visible_ai_messages.append(m)
+
+            last_ai = visible_ai_messages[-1] if visible_ai_messages else (ai_messages[-1] if ai_messages else None)
             last_ai_text = _safe_text(last_ai.content if last_ai is not None else "")
 
             dev_text_state = _safe_text(out_state.get("dev_out"))
