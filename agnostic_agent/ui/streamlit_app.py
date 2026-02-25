@@ -276,3 +276,5 @@ with tab_online:
 
 with tab_offline:
     render_offline_tab(get_or_init_agent)
+
+# force reload

@@ -1415,6 +1415,15 @@ Genera el DAG para resolver: {json.dumps(subqs, ensure_ascii=False)}"""
                     resp = llm_obj.invoke(
                         [SystemMessage(content=sys_content_local)] + history_local[:-1] + [user_msg_local]
                     )
+                    
+                    # RADICAL ALTERNATIVE: Clean LLM output AT THE SOURCE before LangGraph
+                    if isinstance(resp, AIMessage) and isinstance(resp.content, str):
+                        clean_content = resp.content
+                        for _ in range(3):
+                            clean_content = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", clean_content)
+                            clean_content = clean_content.replace("[object Object]", "")
+                        resp.content = clean_content
+
                     content_str = str(getattr(resp, "content", ""))
                     if "generations found in stream" in content_str.lower():
                         raise ValueError(f"Provider returned empty stream string: {content_str}")
@@ -2058,8 +2067,16 @@ Genera el DAG exclusivo para resolver: "{subq}"
 
         def _build_deep_markdown() -> str:
             def _section(title: str, body: str) -> str:
-                body_text = body if isinstance(body, str) else _pretty_json(body)
-                return f"**{title}**\n```text\n{body_text}\n```"
+                # RADICAL ALTERNATIVE: Convert forcibly to string, catch ANY object leakage, provide clean fallback
+                try:
+                    body_text = str(body) if not isinstance(body, (dict, list)) else json.dumps(body, ensure_ascii=False, indent=2)
+                except Exception:
+                    body_text = "(Error serializando vista profunda)"
+                
+                # Extreme cleansing
+                body_text = body_text.replace("[object Object]", "")
+                body_text = body_text.replace(",,", ",")
+                return f"**{title}**\n```text\n{body_text.strip()}\n```"
 
             return "\n\n".join(
                 [
@@ -2321,6 +2338,15 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     SystemMessage(content=hybrid_sys), 
                     HumanMessage(content=hybrid_user_msg)
                 ])
+                
+                # RADICAL ALTERNATIVE: Intercept and clean LLM strings AT THE SOURCE
+                if isinstance(hrm, AIMessage) and isinstance(hrm.content, str):
+                    clean_content = hrm.content
+                    for _ in range(3):
+                        clean_content = re.sub(r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?", "", clean_content)
+                        clean_content = clean_content.replace("[object Object]", "")
+                    hrm.content = clean_content
+
                 user_answer = hrm.content
                 
                 # aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
