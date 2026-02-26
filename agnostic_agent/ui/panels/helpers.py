@@ -154,6 +154,70 @@ def get_raw_state(out: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
+    def _coerce_reasoning_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (list, tuple)):
+            parts: List[str] = []
+            for item in value:
+                txt = _coerce_reasoning_text(item)
+                if txt:
+                    parts.append(txt)
+            return "\n".join(parts).strip()
+        if isinstance(value, dict):
+            for key in (
+                "reasoning_content",
+                "reasoning",
+                "thoughts",
+                "thinking",
+                "analysis",
+                "text",
+                "content",
+            ):
+                if key in value:
+                    txt = _coerce_reasoning_text(value.get(key))
+                    if txt:
+                        return txt
+            try:
+                return json.dumps(value, ensure_ascii=False).strip()
+            except Exception:
+                return str(value).strip()
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _extract_think_from_content(content: Any) -> str:
+        text = _coerce_reasoning_text(content)
+        if not text:
+            return ""
+        matches = re.findall(r"(?is)<think>(.*?)</think>", text)
+        if matches:
+            joined = "\n\n".join(m.strip() for m in matches if isinstance(m, str) and m.strip())
+            return joined.strip()
+        return ""
+
+    def _extract_from_additional_kwargs(ak: Any) -> str:
+        if not isinstance(ak, dict):
+            return ""
+        for key in (
+            "reasoning_content",
+            "reasoning",
+            "thoughts",
+            "thinking",
+            "analysis",
+            "reasoning_text",
+        ):
+            txt = _coerce_reasoning_text(ak.get(key))
+            if txt:
+                return txt
+        # Provider-specific nested payloads (vLLM/Qwen/OpenAI-like wrappers)
+        for nested_key in ("provider_extra", "metadata", "extra", "qwen", "vllm"):
+            nested = ak.get(nested_key)
+            txt = _coerce_reasoning_text(nested)
+            if txt:
+                return txt
+        return ""
+
     if not isinstance(raw_state, dict):
         return ""
     msgs = raw_state.get("messages")
@@ -164,19 +228,27 @@ def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
         if not isinstance(m, dict): continue
         if m.get("type") != "ai": continue
         ak = m.get("additional_kwargs") or {}
-        if isinstance(ak, dict):
-            if ak.get("final_answer_thinking"):
-                thinking = ak.get("reasoning_content") or ak.get("reasoning") or ak.get("thoughts") or ""
-                return thinking.strip() if isinstance(thinking, str) else ""
+        if isinstance(ak, dict) and ak.get("final_answer_thinking"):
+            thinking = _extract_from_additional_kwargs(ak)
+            if thinking:
+                return thinking
     
     for m in reversed(msgs):
         if not isinstance(m, dict): continue
         if m.get("type") != "ai": continue
         ak = m.get("additional_kwargs") or {}
-        if isinstance(ak, dict) and ak.get("pipeline_internal"): continue 
-        thinking = ak.get("reasoning_content") or ak.get("reasoning") or ak.get("thoughts") or ""
-        if thinking and isinstance(thinking, str) and thinking.strip():
-            return thinking.strip()
+        if isinstance(ak, dict) and ak.get("pipeline_internal"): 
+            continue 
+        thinking = _extract_from_additional_kwargs(ak)
+        if thinking:
+            return thinking
+        meta = m.get("response_metadata")
+        thinking = _coerce_reasoning_text(meta)
+        if thinking:
+            return thinking
+        think_tag = _extract_think_from_content(m.get("content"))
+        if think_tag:
+            return think_tag
     
     return ""
 

@@ -44,6 +44,8 @@ def load_css() -> None:
         this_dir / "assets" / file_name,
         cwd / "assets" / file_name,
         cwd / "agnostic_agent" / "ui" / "assets" / file_name,
+        cwd / "agnostic_agent" / "agnostic_agent" / "ui" / "assets" / file_name,
+        cwd / "ui" / "assets" / file_name,
     ]
 
     for p in cwd.rglob(file_name):
