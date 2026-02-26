@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -201,6 +202,24 @@ def format_rich_context(
     return "\n".join(lines)
 
 
+def _knowledge_name_or_path_matches(
+    knowledge_obj: Dict[str, Any],
+    required_knowledge_names: set[str],
+) -> bool:
+    if not isinstance(knowledge_obj, dict) or not required_knowledge_names:
+        return False
+    kb_name = str(knowledge_obj.get("name") or "").strip()
+    if kb_name and kb_name in required_knowledge_names:
+        return True
+    cfg = knowledge_obj.get("config") if isinstance(knowledge_obj.get("config"), dict) else {}
+    kb_path = str(cfg.get("path") or "").strip()
+    if kb_path:
+        base = os.path.basename(kb_path)
+        if base in required_knowledge_names:
+            return True
+    return False
+
+
 def execute_planner_node(
     state: Dict[str, Any],
     *,
@@ -251,7 +270,7 @@ def execute_planner_node(
         active_knowledge_objects = [
             knowledge
             for knowledge in knowledge_selected
-            if knowledge.get("name") in required_knowledge_names
+            if _knowledge_name_or_path_matches(knowledge, required_knowledge_names)
         ]
     else:
         active_knowledge_objects = knowledge_selected

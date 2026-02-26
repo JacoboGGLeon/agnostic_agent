@@ -2,7 +2,7 @@
 name: "contabilidad_instantanea"
 description: "Conciliacion contable determinista 1-a-1 por credito. Replica el comportamiento del notebook financiero en modo conversacional."
 tools: ["finance_sources_status", "query_transactions_db", "query_accounting_db", "get_saneamiento_rate", "reconcile_credit_accounting", "nl2sql_sqlite"]
-knowledge: ["*"]
+knowledge: ["contabilidad.db", "transacciones.db", "rules.md", "dictionary.md"]
 ---
 
 # Contabilidad Instantanea
