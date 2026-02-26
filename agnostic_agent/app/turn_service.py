@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -16,6 +17,8 @@ from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
 
+logger = logging.getLogger(__name__)
+
 
 def _safe_text(value: Any) -> str:
     if value is None:
@@ -27,7 +30,7 @@ def _safe_text(value: Any) -> str:
             import json
 
             return json.dumps(value, ensure_ascii=False)
-        except Exception:
+        except (TypeError, ValueError):
             return str(value)
     return str(value)
 
@@ -301,7 +304,7 @@ class TurnService:
             )
         except Exception as e:
             # Log usage but don't fail turn
-            print(f"[TurnService] Warning: Error writing memory: {e!r}")
+            logger.warning("turn_service memory write failed: %r", e)
 
     def run_turn(
         self,

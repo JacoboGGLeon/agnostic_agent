@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """
 Infraestructura de *capacidades* (modelos/servidores) para el Agnostic Deep Agent 2026.
@@ -6,16 +6,17 @@ Infraestructura de *capacidades* (modelos/servidores) para el Agnostic Deep Agen
 Incluye:
 - Descarga de modelos Qwen3 (LLM / Embeddings / Reranker) desde Hugging Face.
 - Lanzamiento de servidores vLLM OpenAI-compatible (LLM / EMB / RERANK).
-- Configuración del planner (PlannerConfig) y construcción del LLM planner
+- ConfiguraciÃ³n del planner (PlannerConfig) y construcciÃ³n del LLM planner
 #   (build_planner_llm + build_planner_system_message) sobre ChatOpenAI (generic).
 
 NOTA:
-- Esta lógica es agnóstica del dominio; sólo gestiona modelos y servidores.
+- Esta lÃ³gica es agnÃ³stica del dominio; sÃ³lo gestiona modelos y servidores.
 - El wiring con LangGraph y el resto del agente se hace en logic.py y agent.py.
 """
 
 from dataclasses import dataclass
 from typing import Optional, Literal, Any
+import logging
 import os
 import sys
 import subprocess
@@ -30,22 +31,28 @@ from langchain_core.messages import SystemMessage
 try:
     from langchain_qwq import ChatQwenVllm as ChatGenVllm
     HAS_LANGCHAIN_QWQ = True
-except Exception:
+except ImportError:
     from langchain_openai import ChatOpenAI as ChatGenVllm
     HAS_LANGCHAIN_QWQ = False
 
+logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────
-# Helpers básicos
-# ─────────────────────────────────────────────
+
+def _log_info(*parts: Any) -> None:
+    logger.info(" ".join(str(p) for p in parts))
+
+
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Helpers bÃ¡sicos
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _str_to_bool(x: str) -> bool:
     return str(x).lower() in ("1", "true", "yes", "y", "on")
 
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Descarga de modelos (HF snapshot)
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 DEFAULT_LLM_ID = "Qwen/Qwen3-0.6B" # Example default
 DEFAULT_EMB_ID = "Qwen/Qwen3-Embedding-0.6B" # Example default
@@ -87,7 +94,7 @@ def prepare_local_models(
     """
     Descarga (si es necesario) los modelos y devuelve sus rutas locales.
 
-    Si algún ID no se pasa, se lee de las variables de entorno o se usan defaults:
+    Si algÃºn ID no se pasa, se lee de las variables de entorno o se usan defaults:
     - LLM_MODEL_ID
     - EMB_MODEL_ID
     - RERANK_MODEL_ID
@@ -106,9 +113,9 @@ def prepare_local_models(
     return LocalModelPaths(llm_dir=llm_dir, emb_dir=emb_dir, rerank_dir=rerank_dir)
 
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Servidores vLLM (OpenAI-compatible)
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @dataclass
 class VllmConfig:
@@ -123,12 +130,12 @@ class VllmConfig:
     emb_gpu_util: float = float(os.getenv("VLLM_EMB_GPU_UTIL", "0.3"))
     rerank_gpu_util: float = float(os.getenv("VLLM_RERANK_GPU_UTIL", "0.3"))
 
-    # Longitud máxima de contexto por servidor
+    # Longitud mÃ¡xima de contexto por servidor
     llm_max_len: int = int(os.getenv("VLLM_LLM_MAX_LEN", "2048"))
     emb_max_len: int = int(os.getenv("VLLM_EMB_MAX_LEN", "1024"))
     rerank_max_len: int = int(os.getenv("VLLM_RERANK_MAX_LEN", "1024"))
 
-    # Concurrencia (nº de secuencias simultáneas)
+    # Concurrencia (nÂº de secuencias simultÃ¡neas)
     llm_max_num_seqs: int = int(os.getenv("VLLM_LLM_MAX_NUM_SEQS", "4"))
     emb_max_num_seqs: int = int(os.getenv("VLLM_EMB_MAX_NUM_SEQS", "4"))
     rerank_max_num_seqs: int = int(os.getenv("VLLM_RERANK_MAX_NUM_SEQS", "4"))
@@ -139,7 +146,7 @@ class VllmConfig:
     rerank_served_name: str = os.getenv("RERANK_SERVED_NAME", "agnostic-rerank")
 
     # Parser de tool-calls y razonamiento
-    # Default: "qwen3_xml" (o "tool_calling_system" según soporte de vLLM)
+    # Default: "qwen3_xml" (o "tool_calling_system" segÃºn soporte de vLLM)
     tool_call_parser: str = os.getenv("VLLM_TOOL_CALL_PARSER", "qwen3_xml")
     enable_reasoning: bool = _str_to_bool(os.getenv("VLLM_ENABLE_REASONING", "1"))
     reasoning_parser: Optional[str] = os.getenv("VLLM_REASONING_PARSER", "qwen3")
@@ -198,11 +205,11 @@ def _wait_until_ready(
     start = time.time()
     while time.time() - start < seconds:
         if server_proc.poll() is not None:
-            print(f"❌ Servidor terminó con código {server_proc.returncode}. Log tail:")
+            _log_info(f"âŒ Servidor terminÃ³ con cÃ³digo {server_proc.returncode}. Log tail:")
             try:
                 with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.read().splitlines()
-                print("\n".join(lines[-80:]))
+                _log_info("\n".join(lines[-80:]))
             except Exception:
                 pass
             return False
@@ -211,11 +218,11 @@ def _wait_until_ready(
             return True
         except Exception:
             time.sleep(sleep)
-    print("⏰ Timeout esperando servidor, mostrando tail del log:")
+    _log_info("â° Timeout esperando servidor, mostrando tail del log:")
     try:
         with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.read().splitlines()
-        print("\n".join(lines[-80:]))
+        _log_info("\n".join(lines[-80:]))
     except Exception:
         pass
     return False
@@ -259,8 +266,8 @@ def _launch_vllm_server(
     if extra_flags:
         cmd += list(extra_flags)
 
-    print(f"\n🚀 Lanzando servidor vLLM [{name}] en puerto {port}")
-    print(" ".join(cmd))
+    _log_info(f"\nðŸš€ Lanzando servidor vLLM [{name}] en puerto {port}")
+    _log_info(" ".join(cmd))
     proc = subprocess.Popen(
         cmd,
         stdout=open(log_path, "w"),
@@ -287,7 +294,7 @@ def start_local_vllm_servers(
     llm_log: Optional[str] = None
 
     if cfg.start_llm_server:
-        # LLM – flags alineados a vLLM + langchain driver
+        # LLM â€“ flags alineados a vLLM + langchain driver
         llm_extra_flags: list[str] = [
             "--enable-auto-tool-choice",
             "--tool-call-parser",
@@ -342,32 +349,32 @@ def start_local_vllm_servers(
 
     ok_llm = True
     if cfg.start_llm_server and llm_proc is not None and llm_log is not None and llm_base is not None:
-        print("\n⏳ Esperando LLM server...")
+        _log_info("\nâ³ Esperando LLM server...")
         ok_llm = _wait_until_ready(f"{llm_base}/models", llm_proc, llm_log)
 
     ok_emb = True
     if cfg.start_emb_server and emb_proc is not None and emb_log is not None:
-        print("⏳ Esperando Embedding server...")
+        _log_info("â³ Esperando Embedding server...")
         ok_emb = _wait_until_ready(f"{emb_base}/models", emb_proc, emb_log)
 
     ok_rerank = True
     if cfg.start_rerank_server and rerank_proc is not None and rerank_log is not None:
-        print("⏳ Esperando Reranker server...")
+        _log_info("â³ Esperando Reranker server...")
         ok_rerank = _wait_until_ready(f"{rerank_base}/models", rerank_proc, rerank_log)
 
     if not ok_llm or not ok_emb or not ok_rerank:
-        raise SystemExit("❌ Algún servidor vLLM no quedó listo. Revisa logs.")
+        raise SystemExit("âŒ AlgÃºn servidor vLLM no quedÃ³ listo. Revisa logs.")
 
-    print("\n✅ Servidores vLLM listos.")
+    _log_info("\nâœ… Servidores vLLM listos.")
     if llm_base is not None:
-        print("\n📋 Modelos en LLM server:")
-        print(_url_open_no_proxy(f"{llm_base}/models"))
+        _log_info("\nðŸ“‹ Modelos en LLM server:")
+        _log_info(_url_open_no_proxy(f"{llm_base}/models"))
     if emb_base is not None:
-        print("\n📋 Modelos en Embedding server:")
-        print(_url_open_no_proxy(f"{emb_base}/models"))
+        _log_info("\nðŸ“‹ Modelos en Embedding server:")
+        _log_info(_url_open_no_proxy(f"{emb_base}/models"))
     if rerank_base is not None:
-        print("\n📋 Modelos en Reranker server:")
-        print(_url_open_no_proxy(f"{rerank_base}/models"))
+        _log_info("\nðŸ“‹ Modelos en Reranker server:")
+        _log_info(_url_open_no_proxy(f"{rerank_base}/models"))
 
     if set_env:
         if llm_base is not None:
@@ -380,23 +387,23 @@ def start_local_vllm_servers(
         if rerank_base is not None:
             os.environ["VLLM_RERANK_API_BASE"] = rerank_base
 
-        # Clave dummy: vLLM ignora el valor, sólo requiere que exista.
+        # Clave dummy: vLLM ignora el valor, sÃ³lo requiere que exista.
         os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "EMPTY")
         os.environ["VLLM_API_KEY"] = os.environ.get("VLLM_API_KEY", os.environ["OPENAI_API_KEY"])
         os.environ["LLM_SERVED_NAME"] = cfg.llm_served_name
         os.environ["EMB_SERVED_NAME"] = cfg.emb_served_name
         os.environ["RERANK_SERVED_NAME"] = cfg.rerank_served_name
 
-        print("\n🌐 Bases URL registradas en ENV:")
+        _log_info("\nðŸŒ Bases URL registradas en ENV:")
         if "VLLM_API_BASE" in os.environ:
-            print("VLLM_API_BASE       =", os.environ["VLLM_API_BASE"])
+            _log_info("VLLM_API_BASE       =", os.environ["VLLM_API_BASE"])
         if "VLLM_LLM_API_BASE" in os.environ:
-            print("VLLM_LLM_API_BASE   =", os.environ["VLLM_LLM_API_BASE"])
+            _log_info("VLLM_LLM_API_BASE   =", os.environ["VLLM_LLM_API_BASE"])
         if emb_base is not None:
-            print("VLLM_EMB_API_BASE   =", os.environ["VLLM_EMB_API_BASE"])
-            print("VLLM_EMB_URL        =", os.environ["VLLM_EMB_URL"])
+            _log_info("VLLM_EMB_API_BASE   =", os.environ["VLLM_EMB_API_BASE"])
+            _log_info("VLLM_EMB_URL        =", os.environ["VLLM_EMB_URL"])
         if rerank_base is not None:
-            print("VLLM_RERANK_API_BASE=", os.environ["VLLM_RERANK_API_BASE"])
+            _log_info("VLLM_RERANK_API_BASE=", os.environ["VLLM_RERANK_API_BASE"])
 
     endpoints = VllmEndpoints(
         llm_base_url=llm_base,
@@ -414,66 +421,66 @@ def start_local_vllm_servers(
     return endpoints, servers
 
 
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # PlannerConfig + planner LLM
-# ─────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 STRICT_SYSTEM_TEXT = (
     "Eres el PLANNER de herramientas de un agente de IA.\n"
-    "Tu trabajo es LEER con cuidado la petición completa del usuario, "
+    "Tu trabajo es LEER con cuidado la peticiÃ³n completa del usuario, "
     "descomponerla en subtareas cuando sea necesario y planificar una o "
     "VARIAS llamadas a herramientas para resolver TODAS las partes.\n\n"
     "Dispones de un conjunto de herramientas (tools). Para cada tool "
-    "conoces su nombre, su descripción y sus parámetros.\n\n"
-    "INSTRUCCIONES (agnósticas de dominio):\n"
+    "conoces su nombre, su descripciÃ³n y sus parÃ¡metros.\n\n"
+    "INSTRUCCIONES (agnÃ³sticas de dominio):\n"
     "1) Usa SIEMPRE herramientas cuando exista alguna relevante.\n"
-    "2) Devuelves únicamente tool_calls (llamadas a herramientas), "
+    "2) Devuelves Ãºnicamente tool_calls (llamadas a herramientas), "
     "   never a final answer in natural language.\n"
-    "3) Si la instrucción tiene varias acciones (por ejemplo: "
+    "3) Si la instrucciÃ³n tiene varias acciones (por ejemplo: "
     "   'primero A, luego B, al final C'), planifica todas las tools "
     "   necesarias respetando ese orden.\n"
-    "4) Si la entrada menciona varios ítems (varios textos, documentos, "
-    "   números, entidades, etc.), considera planear llamadas que cubran "
-    "   CADA ítem relevante.\n"
+    "4) Si la entrada menciona varios Ã­tems (varios textos, documentos, "
+    "   nÃºmeros, entidades, etc.), considera planear llamadas que cubran "
+    "   CADA Ã­tem relevante.\n"
     "5) Siempre que haya al menos una herramienta relevante, llama a UNA "
-    "   O MÁS herramientas; no respondas sólo con razonamiento interno.\n"
-    "6) Sé explícito y coherente en los argumentos de cada tool_call; "
-    "   respeta nombres y tipos de parámetros.\n"
-    "7) Si una acción requiere varios pasos, divide el trabajo "
+    "   O MÃS herramientas; no respondas sÃ³lo con razonamiento interno.\n"
+    "6) SÃ© explÃ­cito y coherente en los argumentos de cada tool_call; "
+    "   respeta nombres y tipos de parÃ¡metros.\n"
+    "7) Si una acciÃ³n requiere varios pasos, divide el trabajo "
     "   en varias tool_calls encadenadas.\n"
-    "8) Decide qué herramientas usar únicamente por su descripción.\n"
+    "8) Decide quÃ© herramientas usar Ãºnicamente por su descripciÃ³n.\n"
 )
 
 FREE_SYSTEM_TEXT = (
     "Eres el asistente/PLANNER de un agente.\n"
     "Regla principal:\n"
-    "- Si el usuario pide conversación, creatividad (poesía, historias), identidad del asistente, "
-    "  explicación general o razonamiento que NO requiere datos externos, responde DIRECTO en lenguaje natural.\n"
-    "- Usa herramientas SOLO cuando sean necesarias (DB, archivos, web, embeddings, cálculos deterministas, etc.).\n\n"
+    "- Si el usuario pide conversaciÃ³n, creatividad (poesÃ­a, historias), identidad del asistente, "
+    "  explicaciÃ³n general o razonamiento que NO requiere datos externos, responde DIRECTO en lenguaje natural.\n"
+    "- Usa herramientas SOLO cuando sean necesarias (DB, archivos, web, embeddings, cÃ¡lculos deterministas, etc.).\n\n"
     "Cuando uses herramientas:\n"
     "- Genera tool_calls correctas (nombre + argumentos) para resolver lo pedido.\n\n"
     "Cuando NO uses herramientas:\n"
     "- NO inventes que necesitas tools.\n"
-    "- Devuelve una respuesta final clara y útil.\n"
+    "- Devuelve una respuesta final clara y Ãºtil.\n"
 )
 
 HYBRID_SYSTEM_TEXT = (
-    "Eres un asistente IA híbrido: experto conversacional y técnico a la vez.\n\n"
-    "TU FILOSOFÍA:\n"
-    "1. **Proactividad con Herramientas:** Si el usuario pide algo que requiere datos o cálculo (buscar en PDF, sumar, etc.), "
-    "   USA las tools de inmediato. No preguntes, actúa.\n"
-    "2. **Conversación Natural:** SIEMPRE finaliza tu ejecución con una respuesta en lenguaje natural útil y amable. "
-    "   No devuelvas solo el resultado crudo de la herramienta, explícalo.\n"
+    "Eres un asistente IA hÃ­brido: experto conversacional y tÃ©cnico a la vez.\n\n"
+    "TU FILOSOFÃA:\n"
+    "1. **Proactividad con Herramientas:** Si el usuario pide algo que requiere datos o cÃ¡lculo (buscar en PDF, sumar, etc.), "
+    "   USA las tools de inmediato. No preguntes, actÃºa.\n"
+    "2. **ConversaciÃ³n Natural:** SIEMPRE finaliza tu ejecuciÃ³n con una respuesta en lenguaje natural Ãºtil y amable. "
+    "   No devuelvas solo el resultado crudo de la herramienta, explÃ­calo.\n"
     "3. **Charla:** Si el usuario solo quiere charlar o ser creativo, responde con naturalidad sin forzar herramientas.\n\n"
     "INSTRUCCIONES CLAVE:\n"
-    "- Devuelves `tool_calls` cuando hay trabajo técnico que hacer.\n"
-    "- Cuando tengas el resultado de las tools, sintetízalo en una respuesta final clara (final_answer)."
+    "- Devuelves `tool_calls` cuando hay trabajo tÃ©cnico que hacer.\n"
+    "- Cuando tengas el resultado de las tools, sintetÃ­zalo en una respuesta final clara (final_answer)."
 )
 
 
 @dataclass
 class PlannerConfig:
-    """Configuración de alto nivel del planner de herramientas."""
+    """ConfiguraciÃ³n de alto nivel del planner de herramientas."""
     model_name: str = os.getenv("LLM_SERVED_NAME", "qwen3-0.6b")
     tool_choice: str = os.getenv("PLANNER_TOOL_CHOICE", "required")
     max_retries: int = int(os.getenv("PLANNER_MAX_RETRIES", "1"))
@@ -486,19 +493,19 @@ class PlannerConfig:
     # Timeout para evitar httpx.ReadTimeout
     request_timeout: float = float(os.getenv("PLANNER_REQUEST_TIMEOUT", "120.0"))
 
-    # Prompt base del planner (agnóstico de dominio)
+    # Prompt base del planner (agnÃ³stico de dominio)
     # Se complementa con el Unified Registry injected en logic.py
     system_text: str = (
         "Eres el PLANNER de un agente de IA con acceso a un Registro de Capacidades Unificado.\n"
-        "Tu trabajo es LEER con cuidado la petición del usuario y orquestar una solución usando "
+        "Tu trabajo es LEER con cuidado la peticiÃ³n del usuario y orquestar una soluciÃ³n usando "
         "las Tools, Knowledge y Skills disponibles.\n\n"
         "INSTRUCCIONES GENERALES:\n"
-        "1) Si una Skill aplica (ver descripción), ÚSALA prioridad máxima.\n"
-        "2) Si el usuario pide datos específicos (HECHOS, PERSONAS, ENTIDADES), debés usar herramientas de BÚSQUEDA (Search / Knowledge).\n"
-        "   - JAMÁS inventes que necesitas calcular matemáticas para una pregunta de historia o texto.\n"
-        "   - Si no sabes qué tool usar para un dato, usa la tool de búsqueda más genérica disponible.\n"
-        "3) Si necesitas transformar datos (cálculos, formato), usa Tools.\n"
-        "4) Sé explícito en los argumentos de cada tool_call.\n"
+        "1) Si una Skill aplica (ver descripciÃ³n), ÃšSALA prioridad mÃ¡xima.\n"
+        "2) Si el usuario pide datos especÃ­ficos (HECHOS, PERSONAS, ENTIDADES), debÃ©s usar herramientas de BÃšSQUEDA (Search / Knowledge).\n"
+        "   - JAMÃS inventes que necesitas calcular matemÃ¡ticas para una pregunta de historia o texto.\n"
+        "   - Si no sabes quÃ© tool usar para un dato, usa la tool de bÃºsqueda mÃ¡s genÃ©rica disponible.\n"
+        "3) Si necesitas transformar datos (cÃ¡lculos, formato), usa Tools.\n"
+        "4) SÃ© explÃ­cito en los argumentos de cada tool_call.\n"
         "5) No asumas valores que no tienes; busca o pregunta.\n"
     )
 
@@ -506,7 +513,7 @@ class PlannerConfig:
 def build_planner_system_message(
     config: Optional[PlannerConfig] = None,
 ) -> SystemMessage:
-    """Devuelve el SystemMessage base para el Planner (Agnóstico)."""
+    """Devuelve el SystemMessage base para el Planner (AgnÃ³stico)."""
     cfg = config or PlannerConfig()
     return SystemMessage(content=cfg.system_text)
 
@@ -517,7 +524,7 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> Any:
     """
     cfg = config or PlannerConfig()
 
-    # Compatibilidad: si solo se definió VLLM_LLM_API_BASE, lo usamos como VLLM_API_BASE.
+    # Compatibilidad: si solo se definiÃ³ VLLM_LLM_API_BASE, lo usamos como VLLM_API_BASE.
     if "VLLM_LLM_API_BASE" in os.environ and "VLLM_API_BASE" not in os.environ:
         os.environ["VLLM_API_BASE"] = os.environ["VLLM_LLM_API_BASE"]
 
@@ -538,3 +545,4 @@ def build_planner_llm(config: Optional[PlannerConfig] = None) -> Any:
         api_key=os.environ.get("OPENAI_API_KEY", "EMPTY"),
         base_url=os.environ.get("VLLM_API_BASE"),
     )
+
