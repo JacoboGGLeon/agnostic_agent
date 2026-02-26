@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from langgraph.graph import END, START, StateGraph
+
+logger = logging.getLogger(__name__)
 
 
 def route_from_planner(
@@ -20,17 +23,16 @@ def route_from_planner(
 
     tc = getattr(last_ai, "tool_calls", None)
     if tc and isinstance(tc, list) and len(tc) > 0:
-        print(f"[ROUTER] Going to EXECUTOR. Found {len(tc)} tool_calls.")
+        logger.debug("router -> executor (native tool_calls=%s)", len(tc))
         return "executor"
 
     extracted = extract_tool_calls(last_ai)
     if extracted:
-        print(f"[ROUTER] Going to EXECUTOR. Extracted {len(extracted)} tool_calls.")
+        logger.debug("router -> executor (extracted tool_calls=%s)", len(extracted))
         return "executor"
 
     preview = str(getattr(last_ai, "content", ""))[:50]
-    print("[ROUTER] No tool calls found. Going to SUMMARIZER.")
-    print(f"[ROUTER DEBUG] Content start: {preview}...")
+    logger.debug("router -> summarizer (no tool calls; preview=%s)", preview)
     return "summarizer"
 
 

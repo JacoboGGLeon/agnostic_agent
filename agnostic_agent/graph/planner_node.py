@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def format_rich_context(
@@ -166,7 +169,7 @@ def execute_planner_node(
     if skill_mode:
         base_model = getattr(planner_llm, "bound", planner_llm)
         current_llm = base_model.bind_tools(active_tools)
-        print(f"[PLANNER] Y Skill Mode Active. Re-bound LLM to {len(active_tools)} tools.")
+        logger.info("planner skill mode active; rebound tools=%s", len(active_tools))
 
     history = [
         m
@@ -223,7 +226,7 @@ def execute_planner_node(
 
     for i, subq in enumerate(subqs, start=1):
         try:
-            print(f"[PLANNER] Planning for Subquery {i}/{len(subqs)}: {subq}")
+            logger.debug("planner subquery %s/%s: %s", i, len(subqs), subq)
             user_msg_content = f"""CONTEXTO DISPONIBLE:
 {rich_context_text}
 
@@ -262,9 +265,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 if not n_name:
                     continue
                 if skill_mode and n_name not in allowed_tool_names:
-                    print(
-                        f"[PLANNER] Native tool '{n_name_raw}' normalized as '{n_name}' BLOCKED "
-                        "(not allowed by active skill)."
+                    logger.warning(
+                        "planner blocked tool outside skill scope; raw=%s canonical=%s",
+                        n_name_raw,
+                        n_name,
                     )
                     continue
                 try:
@@ -273,7 +277,7 @@ Genera el DAG exclusivo para resolver: "{subq}"
                     n_args_key = repr(n_args)
                 dedup_key = (n_name, n_args_key)
                 if dedup_key in seen_calls_keys:
-                    print(f"[PLANNER] ⚠️ Duplicate call skipped: {n_name}")
+                    logger.debug("planner duplicate tool call skipped: %s", n_name)
                     continue
                 seen_calls_keys.add(dedup_key)
                 call_obj = {
@@ -300,10 +304,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 )
             )
         except Exception as exc:
-            print(f"[PLANNER] ❌ Error planning subquery {i}: {exc}")
+            logger.exception("planner error in subquery %s", i)
             plan_trajs.append(planner_trajectory_type(subquery=subq, description=f"Error: {exc}"))
 
-    print(f"[PLANNER] Total consolidated tool calls: {len(all_tool_calls)}")
+    logger.info("planner total consolidated tool calls=%s", len(all_tool_calls))
     ai_msg = ai_message_type(
         content=global_llm_clean.strip(),
         tool_calls=all_tool_calls,

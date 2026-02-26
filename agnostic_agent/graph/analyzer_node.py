@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def execute_analyzer_node(
@@ -79,7 +82,7 @@ def execute_analyzer_node(
         sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON block."
 
     sys_msg = system_message_type(content=sys_content)
-    user_msg = human_message_type(content="Analiza mi peticiA3n y genera el JSON.")
+    user_msg = human_message_type(content="Analiza mi peticion y genera el JSON.")
 
     selected_skills: List[str] = []
     analyzer_skill_selection: Dict[str, Any] = {
@@ -152,12 +155,16 @@ def execute_analyzer_node(
                 "score": None,
             }
 
-        print(f"[ANALYZER] JSON OK. Skills: {selected_skills}")
+        logger.debug("analyzer parsed json successfully; selected_skills=%s", selected_skills)
     except Exception as e:
         response_content = getattr(response, "content", "") if response is not None else ""
-        print(f"[ANALYZER] Error parsing JSON: {e}. Content: {str(response_content)[:100]}...")
+        logger.warning(
+            "analyzer failed parsing json; err=%r content_preview=%s",
+            e,
+            str(response_content)[:100],
+        )
         if knowledge_available:
-            print("[ANALYZER] Error fallback: leaving skills empty.")
+            logger.info("analyzer fallback activated: leaving skills empty")
             selected_skills = []
 
     if normalized_allowlist:

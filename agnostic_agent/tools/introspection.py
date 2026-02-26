@@ -857,7 +857,7 @@ def _nl2sql_generate_with_provider(
 
 
 @tool(mode="public")
-def knowledge_voyague_nl2sql_agent(
+def knowledge_nl2sql_agent(
     user_request: str,
     db_path: str = "",
     row_limit: int = 50,
@@ -922,7 +922,7 @@ def knowledge_voyague_nl2sql_agent(
 
     out: Dict[str, Any] = {
         "ok": True,
-        "agent": "knowledge_voyague_nl2sql_agent",
+        "agent": "knowledge_nl2sql_agent",
         "db_path": target_db,
         "user_request": user_request,
         "generated_sql": sql,
@@ -941,7 +941,7 @@ def knowledge_voyague_nl2sql_agent(
 
 
 @tool(mode="public")
-def knowledge_voyague_nl2semantic_agent(
+def knowledge_nl2semantic_agent(
     query: str,
     top_k: int = 15,
     rerank_top_n: int = 5,
@@ -1038,7 +1038,7 @@ def knowledge_voyague_nl2semantic_agent(
         if item.get("_meta_only"):
             continue
         if item.get("error"):
-            return {"ok": False, "agent": "knowledge_voyague_nl2semantic_agent", "error": item.get("error"), "trace": trace}
+            return {"ok": False, "agent": "knowledge_nl2semantic_agent", "error": item.get("error"), "trace": trace}
         hits.append(item)
 
     rerank_strategy = (os.getenv("KNOWLEDGE_VOYAGUE_RERANK_STRATEGY", "auto") or "auto").strip().lower()
@@ -1115,7 +1115,7 @@ def knowledge_voyague_nl2semantic_agent(
 
     return {
         "ok": True,
-        "agent": "knowledge_voyague_nl2semantic_agent",
+        "agent": "knowledge_nl2semantic_agent",
         "query": query,
         "top_k": int(top_k or 15),
         "rerank_top_n": int(rerank_top_n or 5),
@@ -1123,3 +1123,41 @@ def knowledge_voyague_nl2semantic_agent(
         "classifier": classifier_meta,
         "trace": trace,
     }
+
+
+@tool(mode="public")
+def knowledge_voyague_nl2sql_agent(
+    user_request: str,
+    db_path: str = "",
+    row_limit: int = 50,
+    execute: bool = True,
+) -> Dict[str, Any]:
+    """Backward-compatible alias for knowledge_nl2sql_agent."""
+    result = knowledge_nl2sql_agent(
+        user_request=user_request,
+        db_path=db_path,
+        row_limit=row_limit,
+        execute=execute,
+    )
+    if isinstance(result, dict):
+        result.setdefault("alias_used", "knowledge_voyague_nl2sql_agent")
+    return result
+
+
+@tool(mode="public")
+def knowledge_voyague_nl2semantic_agent(
+    query: str,
+    top_k: int = 15,
+    rerank_top_n: int = 5,
+    source_filter: str = "",
+) -> Dict[str, Any]:
+    """Backward-compatible alias for knowledge_nl2semantic_agent."""
+    result = knowledge_nl2semantic_agent(
+        query=query,
+        top_k=top_k,
+        rerank_top_n=rerank_top_n,
+        source_filter=source_filter,
+    )
+    if isinstance(result, dict):
+        result.setdefault("alias_used", "knowledge_voyague_nl2semantic_agent")
+    return result
