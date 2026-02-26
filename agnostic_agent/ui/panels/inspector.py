@@ -139,9 +139,8 @@ def render_inspector():
                             ("Catcher", "catcher"),
                             ("Summarizer", "summarizer"),
                             ("Validator", "validator"),
-                            ("Final Output", "final_output"),
-                            ("Tool Outputs", "tool_outputs"),
                             ("Metrics", "metrics"),
+                            ("Tool Outputs", "tool_outputs"),
                         ]
                         for title, key in section_order:
                             section = summary_v2.get(key)
@@ -153,20 +152,23 @@ def render_inspector():
                                 if isinstance(rows, list) and rows:
                                     st.markdown("###### Analyzer Subqueries")
                                     st.dataframe(rows, use_container_width=True, hide_index=True)
+                            elif key == "planner":
+                                _render_section_kv(title, section, skip_keys={"planner_call_rows"})
+                                rows = section.get("planner_call_rows")
+                                if isinstance(rows, list) and rows:
+                                    st.markdown("###### Planner Calls")
+                                    st.dataframe(rows, use_container_width=True, hide_index=True)
                             elif key == "validator":
                                 _render_section_kv(title, section, skip_keys={"coverage_report"})
                                 coverage = section.get("coverage_report")
                                 if isinstance(coverage, list) and coverage:
                                     st.markdown("###### Coverage Report")
                                     st.dataframe(coverage, use_container_width=True, hide_index=True)
-                            elif key == "final_output":
-                                st.markdown("###### Final Output")
-                                st.json(section)
                             elif key == "tool_outputs":
                                 runs = section.get("runs")
                                 if isinstance(runs, list) and runs:
                                     st.markdown("###### Tool Outputs")
-                                    with st.expander("Ver markdown raw", expanded=False):
+                                    with st.expander("Ver deep Tool Outputs raw", expanded=False):
                                         st.code(json.dumps(runs, ensure_ascii=False, indent=2), language="json")
                             else:
                                 _render_section_kv(title, section)

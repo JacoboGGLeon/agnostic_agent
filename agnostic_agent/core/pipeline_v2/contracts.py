@@ -46,7 +46,6 @@ class DeepSummaryV2(BaseModel):
     catcher: Dict[str, Any] = Field(default_factory=dict)
     summarizer: Dict[str, Any] = Field(default_factory=dict)
     validator: Dict[str, Any] = Field(default_factory=dict)
-    final_output: Dict[str, Any] = Field(default_factory=dict)
     tool_outputs: Dict[str, Any] = Field(default_factory=dict)
     metrics: Dict[str, Any] = Field(default_factory=dict)
 

@@ -200,9 +200,8 @@ def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str
                     ("Catcher", "catcher"),
                     ("Summarizer", "summarizer"),
                     ("Validator", "validator"),
-                    ("Final Output", "final_output"),
-                    ("Tool Outputs", "tool_outputs"),
                     ("Metrics", "metrics"),
+                    ("Tool Outputs", "tool_outputs"),
                 ]
                 for title, key in section_order:
                     section = summary_v2.get(key) or {}

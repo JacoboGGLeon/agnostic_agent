@@ -110,15 +110,6 @@ def _build_deep_summary_v2(
     ]
     run_tools = [str(run.name or "") for run in tool_runs]
     output_types = _count_by([type(run.output).__name__ for run in tool_runs])
-    final_output: Dict[str, Any] = {}
-    if tool_runs:
-        last_run = tool_runs[-1]
-        final_output = {
-            "id": _sanitize_text(last_run.id),
-            "tool": _sanitize_text(last_run.name),
-            "input": last_run.args if isinstance(last_run.args, dict) else {},
-            "output": last_run.output,
-        }
     all_tool_outputs: List[Dict[str, Any]] = []
     for run in tool_runs:
         all_tool_outputs.append(
@@ -164,6 +155,7 @@ def _build_deep_summary_v2(
             "subqueries_planned": len(planner_trajs),
             "planned_calls": planned_calls,
             "calls_by_tool": _count_by(planned_tools),
+            "planner_call_rows": out_state.get("planner_calls_by_subquery") or [],
         },
         executor={
             "executed_calls": executed_calls,
@@ -183,7 +175,6 @@ def _build_deep_summary_v2(
             "reasoning": _sanitize_text(validator.get("reasoning", "")),
             "coverage_report": coverage_report if isinstance(coverage_report, list) else [],
         },
-        final_output=final_output,
         tool_outputs={"runs": all_tool_outputs},
         metrics={
             "subqueries": subqueries,
@@ -319,9 +310,8 @@ def render_deep_text(vm: DeepViewModelV2) -> str:
         ("Catcher", "catcher"),
         ("Summarizer", "summarizer"),
         ("Validator", "validator"),
-        ("Final Output", "final_output"),
-        ("Tool Outputs", "tool_outputs"),
         ("Metrics", "metrics"),
+        ("Tool Outputs", "tool_outputs"),
     ]
     for title, key in section_order:
         section = summary.get(key) or {}

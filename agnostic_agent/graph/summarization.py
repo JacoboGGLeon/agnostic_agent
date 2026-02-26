@@ -209,11 +209,7 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
 
     total = len(runs)
     errors = 0
-    lines: List[str] = []
-    lines.append("## Resultado")
-    lines.append(f"Se procesaron {total} ejecuciones de herramientas.")
-    lines.append("")
-    lines.append("### Hallazgos")
+    findings: List[str] = []
     for idx, run in enumerate(runs, start=1):
         name = str(run.get("name", "tool"))
         args = run.get("args", {}) or {}
@@ -223,21 +219,22 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         if status.startswith("error="):
             errors += 1
         detail = f" ({entity})" if entity else ""
-        lines.append(f"{idx}. {name}{detail}: {status}")
+        findings.append(f"{idx}. {name}{detail}: {status}")
 
+    lines: List[str] = []
+    lines.append("Listo.")
+    lines.append(f"Ejecute {total} llamadas a herramientas para resolver tu solicitud.")
     lines.append("")
-    lines.append("### Conclusiones")
+    lines.append("Esto fue lo mas relevante:")
+    lines.extend(f"- {item}" for item in findings)
+    lines.append("")
     if errors == 0:
-        lines.append("- No se detectaron errores de ejecucion en las evidencias disponibles.")
+        lines.append("No detecte errores de ejecucion en la evidencia.")
     else:
-        lines.append(f"- Se detectaron {errors} ejecuciones con error; revisar detalle tecnico.")
-    lines.append("- La respuesta se genero unicamente a partir de salidas verificadas de herramientas.")
+        lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico.")
+    lines.append("La respuesta se construyo solo con salidas verificadas de herramientas.")
 
     answer = "\n".join(lines).strip()
     if looks_like_technical_answer(answer):
-        return (
-            "## Resultado\n"
-            "Se completo el procesamiento de la solicitud con evidencia de herramientas.\n"
-            "Consulta la vista profunda para el detalle tecnico por ejecucion."
-        )
+        return "Proceso completado con evidencia de herramientas. Si quieres, te muestro el detalle tecnico en la vista Deep."
     return answer
