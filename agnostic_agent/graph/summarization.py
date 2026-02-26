@@ -244,6 +244,78 @@ def _fmt_number(value: Any) -> str:
         return str(value)
 
 
+def _truncate(text: str, max_len: int = 220) -> str:
+    t = (text or "").strip().replace("\n", " ")
+    if len(t) <= max_len:
+        return t
+    return t[:max_len].rstrip() + "..."
+
+
+def _fmt_row_preview(row: Any, max_items: int = 4) -> str:
+    if isinstance(row, dict):
+        parts: List[str] = []
+        for idx, (k, v) in enumerate(row.items()):
+            if idx >= max_items:
+                break
+            parts.append(f"{k}={v}")
+        return ", ".join(parts)
+    if isinstance(row, (list, tuple)):
+        return ", ".join(str(x) for x in row[:max_items])
+    return str(row)
+
+
+def _is_reconciliation_request(text: str) -> bool:
+    t = (text or "").lower()
+    markers = (
+        "concili",
+        "saldo",
+        "saneamiento",
+        "credito",
+        "crédito",
+    )
+    return any(m in t for m in markers)
+
+
+def _generic_output_summary(output: Any) -> str:
+    if output is None:
+        return "No hubo salida util para responder."
+    if isinstance(output, str):
+        t = _truncate(output, 240)
+        return t if t else "No hubo salida util para responder."
+    if isinstance(output, list):
+        if not output:
+            return "La herramienta no devolvió resultados."
+        first = output[0]
+        preview = _fmt_row_preview(first)
+        return f"La herramienta devolvió {len(output)} resultado(s). Ejemplo: {preview}."
+    if isinstance(output, dict):
+        if output.get("error"):
+            return f"La herramienta reportó error: {output.get('error')}."
+        # Prefer human-meaningful keys before raw status flags.
+        for key in ("answer", "summary", "result", "message", "status", "descripcion", "detalle"):
+            val = output.get(key)
+            if val not in (None, ""):
+                return f"{key}: {_truncate(str(val), 240)}"
+        # If dict carries rows-like payloads, expose them.
+        if isinstance(output.get("rows"), list):
+            rows = output.get("rows")
+            if rows:
+                return f"Se obtuvieron {len(rows)} fila(s). Ejemplo: {_fmt_row_preview(rows[0])}."
+            return "La consulta se ejecutó, pero no devolvió filas."
+        # Generic compact dict preview.
+        preview_parts: List[str] = []
+        for idx, (k, v) in enumerate(output.items()):
+            if idx >= 4:
+                break
+            if isinstance(v, (dict, list)):
+                preview_parts.append(f"{k}=estructurado")
+            else:
+                preview_parts.append(f"{k}={v}")
+        if preview_parts:
+            return "Datos clave: " + ", ".join(preview_parts) + "."
+    return f"Resultado disponible: {type(output).__name__}."
+
+
 def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     name = str(run.get("name", "tool"))
     output = run.get("output")
@@ -265,26 +337,50 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
                 return f"Tasa de saneamiento esperada: {tasa}."
         return "Se obtuvo la tasa de saneamiento esperada."
 
+    if name in ("nl2sql_agent_sqlite", "nl2sql_sqlite") and isinstance(output, dict):
+        if not output.get("ok"):
+            err = output.get("error") or "fallo en consulta SQL"
+            return f"No pude consultar la base de datos: {err}."
+
+        chosen_table = output.get("chosen_table")
+        execution = output.get("execution") if isinstance(output.get("execution"), dict) else {}
+        if execution and execution.get("ok"):
+            rows = execution.get("rows") if isinstance(execution.get("rows"), list) else []
+            row_count = execution.get("row_count")
+            if isinstance(row_count, int):
+                if rows:
+                    preview = _fmt_row_preview(rows[0])
+                    table_txt = f" de {chosen_table}" if chosen_table else ""
+                    return f"Encontré {row_count} registro(s){table_txt}. Ejemplo: {preview}."
+                table_txt = f" en {chosen_table}" if chosen_table else ""
+                return f"La consulta devolvió {row_count} registro(s){table_txt}."
+        if chosen_table:
+            return f"Preparé la consulta sobre {chosen_table}, pero no hay resultados ejecutados para responder con datos."
+        return "Pude generar la consulta SQL, pero no hay resultados ejecutados para responder con datos."
+
     if name == "search_knowledge_base":
         if isinstance(output, list) and output:
-            first = output[0] if isinstance(output[0], dict) else {}
-            if isinstance(first, dict):
-                src = first.get("source", "knowledge_base")
-                excerpt = (
-                    first.get("excerpt")
-                    or first.get("content")
-                    or first.get("text")
-                    or ""
-                )
-                excerpt_txt = str(excerpt).strip().replace("\n", " ")
-                if len(excerpt_txt) > 240:
-                    excerpt_txt = excerpt_txt[:240].rstrip() + "..."
-                if excerpt_txt:
-                    return f"Encontre evidencia en {src}: {excerpt_txt}"
-            return "Encontre resultados relevantes en la base de conocimiento."
+            snippets: List[str] = []
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                excerpt = item.get("excerpt") or item.get("content") or item.get("text") or ""
+                txt = _truncate(str(excerpt), 200)
+                if txt:
+                    snippets.append(txt)
+                if len(snippets) >= 2:
+                    break
+            if snippets:
+                if len(snippets) == 1:
+                    return f"Según la evidencia encontrada: {snippets[0]}"
+                return f"Según la evidencia encontrada: {snippets[0]} Además: {snippets[1]}"
+            return "Encontre resultados relevantes en la base de conocimiento, pero sin extractos legibles."
         return "No encontre resultados relevantes en la base de conocimiento."
 
     status = _pick_status(output)
+    generic = _generic_output_summary(output)
+    if generic:
+        return generic
     return f"{name}: {status}."
 
 
@@ -353,6 +449,17 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
 
         if not message:
             message = "No hubo evidencia suficiente de tools para esta subconsulta."
+
+        # If request is reconciliation-like but only rate/info was returned, be explicit.
+        if _is_reconciliation_request(sq_text):
+            has_reconcile = False
+            if entity and entity in by_entity:
+                has_reconcile = any(str(r.get("name", "")) == "reconcile_credit_accounting" for r in by_entity.get(entity, []))
+            if not has_reconcile and "Tasa de saneamiento esperada" in message:
+                message = (
+                    f"{message} Aun no tengo conciliacion completa de saldo y saneamiento "
+                    "porque no hay evidencia de `reconcile_credit_accounting` para esta subconsulta."
+                )
 
         label_out = entity if entity else sq_label
         lines.append(f"{idx}. {label_out}: {message}")
