@@ -9,6 +9,7 @@ def compute_invariant_violations(
     subqueries: Sequence[str],
     logic_form: str,
     planner_trajs: Sequence[Any],
+    planner_calls_by_subquery: Sequence[Dict[str, Any]],
     executor_steps: Sequence[Dict[str, Any]],
     runs_count: int,
     input_object_count: int,
@@ -36,6 +37,16 @@ def compute_invariant_violations(
         invariant_violations.append(
             "CoverageInvariant: executor_steps cubre menos subqueries que Analyzer."
         )
+    if subqueries and planner_calls_by_subquery:
+        missing_plans = [
+            row
+            for row in planner_calls_by_subquery
+            if int(row.get("planned_calls", 0) or 0) == 0
+        ]
+        if missing_plans and len(subqueries) > 1:
+            invariant_violations.append(
+                "CoverageInvariant: existen subqueries sin llamadas planificadas."
+            )
     if input_object_count > 1 and runs_count < input_object_count:
         invariant_violations.append(
             "CoverageInvariant: el prompt contiene "
@@ -59,6 +70,51 @@ def compute_invariant_violations(
                 )
 
     return invariant_violations
+
+
+def build_subquery_coverage_report(
+    *,
+    subqueries: Sequence[str],
+    planner_calls_by_subquery: Sequence[Dict[str, Any]],
+    executor_steps: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    report: List[Dict[str, Any]] = []
+    executed_by_idx: Dict[int, int] = {}
+    for step in executor_steps:
+        tcid = str(step.get("tool_call_id", "") or "")
+        m = re.match(r"^call_s(\d+)_", tcid)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        executed_by_idx[idx] = executed_by_idx.get(idx, 0) + 1
+
+    planner_map: Dict[int, Dict[str, Any]] = {}
+    for row in planner_calls_by_subquery or []:
+        idx = int(row.get("subquery_idx", 0) or 0)
+        if idx > 0:
+            planner_map[idx] = row
+
+    for idx, subq in enumerate(subqueries or [], start=1):
+        row = planner_map.get(idx, {})
+        planned = int(row.get("planned_calls", 0) or 0)
+        executed = int(executed_by_idx.get(idx, 0))
+        skipped_reason = str(row.get("skipped_reason", "") or "")
+        status = "missing"
+        if executed > 0:
+            status = "executed"
+        elif skipped_reason:
+            status = "skipped"
+        report.append(
+            {
+                "subquery_idx": idx,
+                "subquery": str(subq),
+                "planned_calls": planned,
+                "executed_calls": executed,
+                "skipped_reason": skipped_reason,
+                "status": status,
+            }
+        )
+    return report
 
 
 def has_coverage_partial(invariant_violations: Sequence[str]) -> bool:

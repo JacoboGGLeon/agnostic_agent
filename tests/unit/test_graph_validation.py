@@ -10,6 +10,7 @@ def test_compute_invariant_violations_detects_coverage_gap():
         subqueries=["q1 task", "q2 task"],
         logic_form="q1 AND q2",
         planner_trajs=[{"subquery": "q1 task"}],
+        planner_calls_by_subquery=[{"subquery_idx": 1, "planned_calls": 1}, {"subquery_idx": 2, "planned_calls": 0}],
         executor_steps=[{"tool_name": "t1"}],
         runs_count=1,
         input_object_count=2,

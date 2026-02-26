@@ -73,6 +73,8 @@ def test_execute_planner_node_deduplicates_calls_across_subqueries():
     ai_msg = out["messages"][0]
     assert len(ai_msg.tool_calls) == 1
     assert ai_msg.tool_calls[0]["name"] == "tool_a"
+    assert isinstance(out.get("planner_calls_by_subquery"), list)
+    assert len(out["planner_calls_by_subquery"]) == 2
 
 
 def test_execute_planner_node_blocks_tools_outside_skill_scope():
@@ -104,6 +106,8 @@ def test_execute_planner_node_blocks_tools_outside_skill_scope():
     ai_msg = out["messages"][0]
     assert ai_msg.tool_calls == []
     assert "No native tool calls" in out["planner_trajs"][0]["description"]
+    assert out["planner_calls_by_subquery"][0]["planned_calls"] == 0
+    assert out["planner_calls_by_subquery"][0]["skipped_reason"] == "no_tool_calls_generated"
 
 
 def test_execute_planner_node_builds_subqueries_from_prompt_when_analyzer_missing():

@@ -49,6 +49,7 @@ from .graph.executor_node import execute_executor_node
 from .graph.analyzer_node import execute_analyzer_node
 from .graph.planner_node import execute_planner_node
 from .graph.contracts import PlannerTrajectory, State
+from .graph.state_contracts import validate_node_input, validate_node_output
 from .graph.runtime_utils import (
     _canonical_tool_name,
     _coerce_content_str,
@@ -92,7 +93,8 @@ def build_graph_agent(
 
     # ANALYZER (LLM-based with Strict JSON)
     def analyzer_node(state: State) -> Dict[str, Any]:
-        return execute_analyzer_node(
+        validate_node_input("analyzer", state)
+        out = execute_analyzer_node(
             state,
             tools=tools,
             cfg=cfg,
@@ -106,9 +108,12 @@ def build_graph_agent(
             extract_top_level_json_objects=_extract_top_level_json_objects,
             is_placeholder_subquery=_is_placeholder_subquery,
         )
+        validate_node_output("analyzer", out)
+        return out
 
     def planner_node(state: State) -> Dict[str, Any]:
-        return execute_planner_node(
+        validate_node_input("planner", state)
+        out = execute_planner_node(
             state,
             tools=tools,
             cfg=cfg,
@@ -127,11 +132,14 @@ def build_graph_agent(
             coerce_content_str=_coerce_content_str,
             canonical_tool_name=_canonical_tool_name,
         )
+        validate_node_output("planner", out)
+        return out
 
 
     # EXECUTOR
     def executor_node(state: State) -> Dict[str, Any]:
-        return execute_executor_node(
+        validate_node_input("executor", state)
+        out = execute_executor_node(
             state,
             tools=tools,
             ai_message_type=AIMessage,
@@ -141,19 +149,25 @@ def build_graph_agent(
             to_jsonable=_to_jsonable,
             json_default=_json_default,
         )
+        validate_node_output("executor", out)
+        return out
 
     # CATCHER
     def catcher_node(state: State) -> Dict[str, Any]:
-        return execute_catcher_node(
+        validate_node_input("catcher", state)
+        out = execute_catcher_node(
             state,
             extract_tool_calls=extract_tool_calls,
             decode_tool_content=_decode_tool_content,
             to_jsonable=_to_jsonable,
         )
+        validate_node_output("catcher", out)
+        return out
 
     # SUMMARIZER
     def summarizer_node(state: State) -> Dict[str, Any]:
-        return execute_summarizer_node(
+        validate_node_input("summarizer", state)
+        out = execute_summarizer_node(
             state,
             skill_registry=skill_registry,
             tools=tools,
@@ -170,11 +184,14 @@ def build_graph_agent(
             coerce_content_str=_coerce_content_str,
             strip_think=strip_think,
         )
+        validate_node_output("summarizer", out)
+        return out
 
     # VALIDATOR (heurAstica simple, preparada para LLM en el futuro)
     # VALIDATOR (heurAstica simple, preparada para LLM en el futuro)
     def validator_node(state: State) -> Dict[str, Any]:
-        return execute_validator_node(
+        validate_node_input("validator", state)
+        out = execute_validator_node(
             state,
             skill_registry=skill_registry,
             resolve_effective_skills=_resolve_effective_skills,
@@ -187,6 +204,8 @@ def build_graph_agent(
             build_user_answer_from_runs=build_user_answer_from_runs,
             is_technical_answer=is_technical_answer,
         )
+        validate_node_output("validator", out)
+        return out
 
     # Router (Updated Debug)
     def route_from_planner(state: State) -> str:

@@ -9,6 +9,10 @@ def test_execute_validator_node_flags_partial_coverage():
         "tool_runs": [{"name": "t1", "args": {}, "output": {"ok": True}}],
         "analyzer": {"subqueries": ["q1", "q2"], "propositional_logic": "q1 AND q2"},
         "planner_trajs": [{"subquery": "q1"}],
+        "planner_calls_by_subquery": [
+            {"subquery_idx": 1, "subquery": "q1", "planned_calls": 1, "skipped_reason": ""},
+            {"subquery_idx": 2, "subquery": "q2", "planned_calls": 0, "skipped_reason": "no_tool_calls_generated"},
+        ],
         "executor_steps": [{"tool_name": "t1"}],
         "_planner_scope_internal": {"allowed_tools": ["t1"], "skill_mode": False},
         "messages": [],
@@ -30,4 +34,6 @@ def test_execute_validator_node_flags_partial_coverage():
 
     assert out["validator"]["all_covered"] is False
     assert "CoverageInvariant:" in out["validator"]["reasoning"]
+    assert isinstance(out["coverage_report"], list)
+    assert out["coverage_report"][1]["status"] in {"missing", "skipped"}
     assert out["messages"][0].additional_kwargs.get("node") == "validator"

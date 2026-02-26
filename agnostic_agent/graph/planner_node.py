@@ -330,7 +330,39 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 )
             )
 
+    normalized_trajs: List[Dict[str, str]] = []
+    for tr in plan_trajs:
+        if isinstance(tr, dict):
+            sq = _sanitize_text(tr.get("subquery", ""))
+            ds = _sanitize_text(tr.get("description", ""))
+        else:
+            sq = _sanitize_text(getattr(tr, "subquery", ""))
+            ds = _sanitize_text(getattr(tr, "description", ""))
+        normalized_trajs.append({"subquery": sq, "description": ds})
+
     normalized_calls = flatten_tool_calls_by_subquery(planner_blocks)
+    calls_by_subquery: Dict[int, int] = {}
+    for c in normalized_calls:
+        calls_by_subquery[c.subquery_idx] = calls_by_subquery.get(c.subquery_idx, 0) + 1
+
+    planner_calls_by_subquery: List[Dict[str, Any]] = []
+    for idx, subq in enumerate(subqs, start=1):
+        count = calls_by_subquery.get(idx, 0)
+        skipped_reason = ""
+        if count == 0 and idx - 1 < len(normalized_trajs):
+            tr = normalized_trajs[idx - 1]
+            desc = tr.get("description", "")
+            if "No native tool calls were generated" in desc:
+                skipped_reason = "no_tool_calls_generated"
+        planner_calls_by_subquery.append(
+            {
+                "subquery_idx": idx,
+                "subquery": _sanitize_text(subq),
+                "planned_calls": count,
+                "skipped_reason": skipped_reason,
+            }
+        )
+
     if normalized_calls:
         all_tool_calls = [
             {
@@ -348,19 +380,10 @@ Genera el DAG exclusivo para resolver: "{subq}"
         tool_calls=all_tool_calls,
         additional_kwargs={"dag_raw": _sanitize_text(global_llm_raw)},
     )
-    normalized_trajs: List[Dict[str, str]] = []
-    for tr in plan_trajs:
-        if isinstance(tr, dict):
-            sq = _sanitize_text(tr.get("subquery", ""))
-            ds = _sanitize_text(tr.get("description", ""))
-        else:
-            sq = _sanitize_text(getattr(tr, "subquery", ""))
-            ds = _sanitize_text(getattr(tr, "description", ""))
-        normalized_trajs.append({"subquery": sq, "description": ds})
-
     return {
         "messages": [ai_msg],
         "planner_trajs": normalized_trajs,
+        "planner_calls_by_subquery": planner_calls_by_subquery,
         "llm_raw_out": _sanitize_text(global_llm_raw),
         "llm_clean_out": _sanitize_text(global_llm_clean),
         "_planner_scope_internal": planner_scope,

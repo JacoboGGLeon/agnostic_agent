@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List
 from langchain_core.messages import AIMessage
 
 from agnostic_agent.graph.validation import (
+    build_subquery_coverage_report,
     build_coverage_warning,
     compute_invariant_violations,
     has_coverage_partial,
@@ -32,6 +33,7 @@ def execute_validator_node(
     runs = state.get("tool_runs", []) or []
     analyzer = state.get("analyzer") or {}
     planner_trajs = state.get("planner_trajs", []) or []
+    planner_calls_by_subquery = state.get("planner_calls_by_subquery", []) or []
     executor_steps = state.get("executor_steps", []) or []
     planner_scope = state.get("_planner_scope_internal") or {}
     fail_fast = env_flag("AGNOSTIC_FAIL_FAST", False)
@@ -61,10 +63,17 @@ def execute_validator_node(
     subqueries = analyzer.get("subqueries") or []
     logic_form = (analyzer.get("propositional_logic") or "").strip()
     active_skills_eff = resolve_effective_skills(state, skill_registry)
+    coverage_report = build_subquery_coverage_report(
+        subqueries=subqueries,
+        planner_calls_by_subquery=planner_calls_by_subquery,
+        executor_steps=executor_steps,
+    )
+
     invariant_violations: List[str] = compute_invariant_violations(
         subqueries=subqueries,
         logic_form=logic_form,
         planner_trajs=planner_trajs,
+        planner_calls_by_subquery=planner_calls_by_subquery,
         executor_steps=executor_steps,
         runs_count=len(runs),
         input_object_count=input_object_count,
@@ -72,6 +81,10 @@ def execute_validator_node(
         planner_scope=planner_scope,
         is_placeholder_subquery=is_placeholder_subquery,
     )
+
+    if any(r.get("status") in {"missing", "skipped"} for r in coverage_report):
+        all_covered = False
+        reasons.append("CoverageInvariant: hay subqueries sin ejecucion efectiva.")
 
     if not final_answer.strip():
         all_covered = False
@@ -147,6 +160,7 @@ def execute_validator_node(
 
     return {
         "validator": validator,
+        "coverage_report": coverage_report,
         "messages": [validator_msg],
         "pipeline_summary": summary,
         "summary": summary,

@@ -115,7 +115,19 @@ def _build_deep_summary_v2(
     executed_calls = len(executed_tools)
     run_count = len(tool_runs)
     coverage_ratio = 0.0
-    if subqueries > 0:
+    coverage_report = out_state.get("coverage_report") or []
+    if isinstance(coverage_report, list) and coverage_report:
+        covered = 0
+        total = 0
+        for row in coverage_report:
+            if not isinstance(row, dict):
+                continue
+            total += 1
+            if str(row.get("status", "")) == "executed":
+                covered += 1
+        if total > 0:
+            coverage_ratio = round(covered / total, 3)
+    elif subqueries > 0:
         coverage_ratio = round(min(1.0, run_count / subqueries), 3)
 
     return DeepSummaryV2(
@@ -145,6 +157,7 @@ def _build_deep_summary_v2(
         validator={
             "all_covered": bool(validator.get("all_covered", True)),
             "reasoning": _sanitize_text(validator.get("reasoning", "")),
+            "coverage_report": coverage_report if isinstance(coverage_report, list) else [],
         },
         metrics={
             "subqueries": subqueries,
