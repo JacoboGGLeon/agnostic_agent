@@ -73,6 +73,17 @@ def load_config(profile: Optional[str] = None, config_dir: Optional[Union[str, P
         if "llm" not in config_data: config_data["llm"] = {}
         config_data["llm"]["provider"] = os.getenv("AGNOSTIC_LLM_PROVIDER")
 
+    if os.getenv("AGNOSTIC_PIPELINE_V2"):
+        if "pipeline" not in config_data:
+            config_data["pipeline"] = {}
+        config_data["pipeline"]["use_v2"] = os.getenv("AGNOSTIC_PIPELINE_V2", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+
     return AppConfig(**config_data)
 
 # Singleton instance

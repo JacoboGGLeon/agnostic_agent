@@ -33,6 +33,12 @@ class PluginsConfig(BaseModel):
     memory: Dict[str, PluginConfig] = Field(default_factory=dict)
     ui_panels: Dict[str, PluginConfig] = Field(default_factory=dict)
 
+
+class PipelineConfig(BaseModel):
+    use_v2: bool = False
+    strict_contracts: bool = True
+
+
 class AppConfig(BaseModel):
     environment: str = "dev"
     debug: bool = False
@@ -41,3 +47,4 @@ class AppConfig(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     vectorstore: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)

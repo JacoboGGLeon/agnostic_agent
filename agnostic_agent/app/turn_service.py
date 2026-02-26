@@ -13,6 +13,12 @@ from agnostic_agent.core.models.io_models import (
     AgentView,
     ToolRun,
 )
+from agnostic_agent.core.pipeline_v2 import (
+    build_pipeline_output_v2,
+    render_deep_text,
+    render_dev_text,
+    render_user_text,
+)
 from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
@@ -151,13 +157,30 @@ class TurnService:
         elif isinstance(raw_allow, list):
             skills_allowlist = [str(s).strip() for s in raw_allow if str(s).strip()]
 
+        raw_pipeline_v2 = metadata.get("pipeline_v2")
+        if isinstance(raw_pipeline_v2, str):
+            pipeline_v2_enabled = raw_pipeline_v2.strip().lower() in {"1", "true", "yes", "y", "on"}
+        elif raw_pipeline_v2 is None:
+            pipeline_v2_enabled = False
+        else:
+            pipeline_v2_enabled = bool(raw_pipeline_v2)
+
         return {
             "session_id": session_id,
             "user_id": user_id,
             "forced_skill": forced_skill,
             "skills_allowlist": skills_allowlist,
             "conversation_history_enabled": conversation_history_enabled,
+            "pipeline_v2_enabled": pipeline_v2_enabled,
         }
+
+    def _use_pipeline_v2(self, meta: Dict[str, Any]) -> bool:
+        if bool(meta.get("pipeline_v2_enabled")):
+            return True
+        import os
+
+        env_val = os.getenv("AGNOSTIC_PIPELINE_V2", "")
+        return env_val.strip().lower() in {"1", "true", "yes", "y", "on"}
 
     def _resolve_knowledge_names(self, agent_in: AgentInput) -> List[str]:
         if agent_in.knowledge_names:
@@ -286,6 +309,53 @@ class TurnService:
             ),
         }
 
+    def _build_views_v2(
+        self,
+        *,
+        prompt_text: str,
+        out_state: State,
+        summary_obj: Optional[AgentSummary],
+        tool_runs: List[ToolRun],
+        fallback_final_user: str,
+    ) -> Dict[str, AgentView]:
+        v2_output = build_pipeline_output_v2(
+            prompt_text=prompt_text,
+            out_state=out_state,
+            summary_obj=summary_obj,
+            tool_runs=tool_runs,
+            fallback_final_user=fallback_final_user,
+        )
+
+        user_text = render_user_text(v2_output.user_out)
+        deep_text = render_deep_text(v2_output.deep_out)
+        dev_text = render_dev_text(v2_output.dev_out)
+
+        raw_bundle = {
+            "pipeline_v2": v2_output.model_dump(),
+            "state": out_state,
+        }
+
+        return {
+            "dev": AgentView(
+                final_answer=dev_text,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state=raw_bundle,
+            ),
+            "deep": AgentView(
+                final_answer=deep_text,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state={},
+            ),
+            "user": AgentView(
+                final_answer=user_text,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state={},
+            ),
+        }
+
     def _persist_memory(
         self,
         *,
@@ -341,6 +411,14 @@ class TurnService:
                 tool_runs=tool_runs,
                 last_ai_text=last_ai_text,
             )
+            if self._use_pipeline_v2(meta):
+                views = self._build_views_v2(
+                    prompt_text=prompt_text,
+                    out_state=out_state,
+                    summary_obj=summary_obj,
+                    tool_runs=tool_runs,
+                    fallback_final_user=views["user"].final_answer,
+                )
 
             self._persist_memory(
                 session_id=meta["session_id"],
