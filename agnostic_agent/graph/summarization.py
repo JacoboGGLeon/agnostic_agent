@@ -203,24 +203,6 @@ def _pick_status(output: Any) -> str:
     return f"resultado={type(output).__name__}"
 
 
-def _build_tool_outputs_payload(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    payload: List[Dict[str, Any]] = []
-    for idx, run in enumerate(runs, start=1):
-        run_id = run.get("id") or run.get("tool_call_id") or f"call_{idx}"
-        tool_name = str(run.get("name", "tool"))
-        args = run.get("args", {})
-        output = run.get("output")
-        payload.append(
-            {
-                "id": str(run_id),
-                "tool": tool_name,
-                "input": args if isinstance(args, dict) else {},
-                "output": output,
-            }
-        )
-    return payload
-
-
 def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
     if not runs:
         return "No se obtuvo evidencia de herramientas para resolver la solicitud."
@@ -228,7 +210,10 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     total = len(runs)
     errors = 0
     findings: List[str] = []
-    for idx, run in enumerate(runs, start=1):
+    by_entity: Dict[str, List[str]] = {}
+    no_entity: List[str] = []
+
+    for run in runs:
         name = str(run.get("name", "tool"))
         args = run.get("args", {}) or {}
         output = run.get("output")
@@ -237,24 +222,41 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         if status.startswith("error="):
             errors += 1
         detail = f" ({entity})" if entity else ""
-        findings.append(f"{name}{detail}: {status}")
+        finding = f"{name}{detail}: {status}"
+        findings.append(finding)
+        if entity:
+            by_entity.setdefault(entity, []).append(f"{name}: {status}")
+        else:
+            no_entity.append(f"{name}: {status}")
 
     lines: List[str] = []
-    lines.append("Listo.")
-    lines.append(f"Ejecute {total} llamadas a herramientas para resolver tu solicitud.")
-    lines.append("")
-    lines.append("Esto fue lo mas relevante:")
-    lines.extend(f"- {item}" for item in findings)
+    lines.append("Resultado listo.")
+    lines.append(f"Procesé {total} ejecuciones de herramientas con evidencia verificable.")
+
+    if by_entity:
+        lines.append("")
+        lines.append("Respuesta por subconsulta:")
+        idx = 1
+        for entity, items in by_entity.items():
+            principal = ""
+            for item in items:
+                if item.startswith("reconcile_credit_accounting:"):
+                    principal = item
+                    break
+            chosen = principal or items[0]
+            lines.append(f"{idx}. {entity}: {chosen}")
+            idx += 1
+
+    if no_entity:
+        lines.append("")
+        lines.append("Evidencia adicional:")
+        lines.extend(f"- {item}" for item in no_entity)
+
     lines.append("")
     if errors == 0:
         lines.append("No detecte errores de ejecucion en la evidencia.")
     else:
         lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico.")
-    lines.append("La respuesta se construyo solo con salidas verificadas de herramientas.")
-    lines.append("")
-    lines.append("Tool Outputs (raw JSON):")
-    lines.append("```json")
-    lines.append(json.dumps(_build_tool_outputs_payload(runs), ensure_ascii=False, indent=2))
-    lines.append("```")
+    lines.append("Si quieres el JSON completo de tools, está disponible en la vista Deep/Dev.")
 
     return "\n".join(lines).strip()
