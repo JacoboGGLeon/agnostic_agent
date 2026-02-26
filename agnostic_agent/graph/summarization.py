@@ -237,14 +237,22 @@ def _extract_subqueries_from_prompt(user_prompt: str) -> List[Dict[str, str]]:
     return [{"label": "Solicitud", "text": text}]
 
 
-def _extract_credit_entity_from_text(text: str) -> str:
-    t = (text or "").strip()
-    if not t:
+def _extract_entity_from_text(text: str, known_entities: List[str]) -> str:
+    """
+    Map subquery text to an already-observed entity key (e.g., 'credito_id=LOC-0010')
+    without hardcoding domain-specific patterns.
+    """
+    t = (text or "").strip().lower()
+    if not t or not known_entities:
         return ""
-    m = re.search(r"\b(LOC-\d{4,})\b", t, flags=re.IGNORECASE)
-    if not m:
-        return ""
-    return f"credito_id={m.group(1).upper()}"
+
+    for entity in known_entities:
+        if "=" not in entity:
+            continue
+        _, value = entity.split("=", 1)
+        if str(value).strip().lower() and str(value).strip().lower() in t:
+            return entity
+    return ""
 
 
 def _fmt_number(value: Any) -> str:
@@ -274,16 +282,30 @@ def _fmt_row_preview(row: Any, max_items: int = 4) -> str:
     return str(row)
 
 
-def _is_reconciliation_request(text: str) -> bool:
-    t = (text or "").lower()
-    markers = (
-        "concili",
-        "saldo",
-        "saneamiento",
-        "credito",
-        "crédito",
-    )
-    return any(m in t for m in markers)
+def _score_run_for_user_answer(run: Dict[str, Any]) -> int:
+    """
+    Prefer runs that contain richer structured evidence over generic status-only runs.
+    """
+    output = run.get("output")
+    if not isinstance(output, dict):
+        return 1
+
+    score = 1
+    if "error" in output:
+        score -= 2
+    if isinstance(output.get("saldo"), dict):
+        score += 4
+    if isinstance(output.get("saneamiento"), dict):
+        score += 4
+    if "tasa_saneamiento" in output:
+        score += 2
+    if isinstance(output.get("execution"), dict):
+        score += 2
+    if isinstance(output.get("rows"), list):
+        score += 2
+    if isinstance(output.get("status"), str):
+        score += 1
+    return score
 
 
 def _generic_output_summary(output: Any) -> str:
@@ -327,18 +349,19 @@ def _generic_output_summary(output: Any) -> str:
 
 
 def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
-    name = str(run.get("name", "tool"))
     output = run.get("output")
 
-    if name == "reconcile_credit_accounting" and isinstance(output, dict):
-        status = output.get("status") or ("CUADRADO" if output.get("ok") else "DRIFT DETECTADO")
+    if isinstance(output, dict) and (
+        isinstance(output.get("saldo"), dict) or isinstance(output.get("saneamiento"), dict)
+    ):
+        status = output.get("status") or ("OK" if output.get("ok") else "Revisar")
         saldo = output.get("saldo") if isinstance(output.get("saldo"), dict) else {}
         saneamiento = output.get("saneamiento") if isinstance(output.get("saneamiento"), dict) else {}
         d_saldo = _fmt_number(saldo.get("diferencia", 0))
         d_san = _fmt_number(saneamiento.get("diferencia", 0))
         return f"{status}. Diferencia de saldo: {d_saldo}. Diferencia de saneamiento: {d_san}."
 
-    if name == "get_saneamiento_rate" and isinstance(output, dict):
+    if isinstance(output, dict) and "tasa_saneamiento" in output:
         tasa = output.get("tasa_saneamiento")
         if tasa is not None:
             try:
@@ -347,7 +370,9 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
                 return f"Tasa de saneamiento esperada: {tasa}."
         return "Se obtuvo la tasa de saneamiento esperada."
 
-    if name in ("nl2sql_agent_sqlite", "nl2sql_sqlite") and isinstance(output, dict):
+    if isinstance(output, dict) and (
+        isinstance(output.get("execution"), dict) or isinstance(output.get("rows"), list)
+    ):
         if not output.get("ok"):
             err = output.get("error") or "fallo en consulta SQL"
             return f"No pude consultar la base de datos: {err}."
@@ -368,7 +393,7 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
             return f"Preparé la consulta sobre {chosen_table}, pero no hay resultados ejecutados para responder con datos."
         return "Pude generar la consulta SQL, pero no hay resultados ejecutados para responder con datos."
 
-    if name == "search_knowledge_base":
+    if isinstance(output, list):
         if isinstance(output, list) and output:
             snippets: List[str] = []
             for item in output:
@@ -391,7 +416,7 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     generic = _generic_output_summary(output)
     if generic:
         return generic
-    return f"{name}: {status}."
+    return f"Resultado: {status}."
 
 
 def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
@@ -428,29 +453,30 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     else:
         lines.append("Respuesta:")
 
+    known_entities = list(by_entity.keys())
     # Try to answer subquery by subquery using entity-linked runs first.
     emitted = 0
     for idx, sq in enumerate(subqueries, start=1):
         sq_text = sq.get("text", "")
         sq_label = sq.get("label", f"Subconsulta {idx}")
-        entity = _extract_credit_entity_from_text(sq_text)
+        entity = _extract_entity_from_text(sq_text, known_entities)
         try:
             parsed = json.loads(sq_text) if sq_text.startswith("{") else {}
-            if isinstance(parsed, dict) and parsed.get("credito_id"):
-                entity = f"credito_id={str(parsed.get('credito_id')).upper()}"
+            if isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    if str(k).endswith("_id") and v not in (None, ""):
+                        candidate = f"{k}={v}"
+                        if candidate in by_entity:
+                            entity = candidate
+                            break
         except Exception:
             pass
 
         message = ""
         if entity and entity in by_entity:
             entity_runs = by_entity.get(entity, [])
-            # Prefer deterministic reconciliation run for end-user answer.
-            preferred = None
-            for r in entity_runs:
-                if str(r.get("name", "")) == "reconcile_credit_accounting":
-                    preferred = r
-                    break
-            message = _summarize_single_run_natural(preferred or entity_runs[0])
+            ranked = sorted(entity_runs, key=_score_run_for_user_answer, reverse=True)
+            message = _summarize_single_run_natural(ranked[0])
         elif no_entity_runs:
             # Map free-form queries to no-entity runs in order.
             run_idx = idx - 1
@@ -460,16 +486,14 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         if not message:
             message = "No hubo evidencia suficiente de tools para esta subconsulta."
 
-        # If request is reconciliation-like but only rate/info was returned, be explicit.
-        if _is_reconciliation_request(sq_text):
-            has_reconcile = False
-            if entity and entity in by_entity:
-                has_reconcile = any(str(r.get("name", "")) == "reconcile_credit_accounting" for r in by_entity.get(entity, []))
-            if not has_reconcile and "Tasa de saneamiento esperada" in message:
-                message = (
-                    f"{message} Aun no tengo conciliacion completa de saldo y saneamiento "
-                    "porque no hay evidencia de `reconcile_credit_accounting` para esta subconsulta."
-                )
+        # If output is rate-only and query requested more detail, make gap explicit in neutral terms.
+        low_sq = sq_text.lower()
+        asked_diffs = ("diferencia" in low_sq) or ("saldo" in low_sq and "saneamiento" in low_sq)
+        if asked_diffs and "Tasa de saneamiento esperada" in message:
+            message = (
+                f"{message} Aun no tengo evidencia suficiente para diferencias completas de saldo y saneamiento "
+                "en esta subconsulta."
+            )
 
         label_out = entity if entity else sq_label
         lines.append(f"{idx}. {label_out}: {message}")
