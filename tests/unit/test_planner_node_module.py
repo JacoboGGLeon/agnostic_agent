@@ -211,3 +211,41 @@ def test_execute_planner_node_aligns_entity_id_to_current_subquery_and_avoids_hi
     # Ensure planner invocation did not include prior human turns.
     sent = llm.invocations[0]
     assert len(sent) == 2  # system + current subquery prompt
+
+
+def test_execute_planner_node_injects_db_path_hint_for_sql_tools():
+    llm = _PlannerLLM(
+        [
+            AIMessage(
+                content="ok",
+                tool_calls=[{"id": "d1", "name": "nl2sql_sqlite", "args": {"user_request": "consulta"}}],
+            )
+        ]
+    )
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {"subqueries": ["dame informacion del credito LOC-0004 solo transacciones.db"]},
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("nl2sql_sqlite")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry([_Skill("s1", tools=["nl2sql_sqlite"])]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["s1"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 1
+    assert ai_msg.tool_calls[0]["args"]["db_path"] == "transacciones.db"

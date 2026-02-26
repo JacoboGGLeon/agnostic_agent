@@ -66,6 +66,16 @@ def _collect_arg_id_fields(args: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
+def _extract_requested_db_filename(subquery_text: str) -> str:
+    text = _sanitize_text(subquery_text)
+    if not text:
+        return ""
+    m = re.search(r"\b([A-Za-z0-9_.-]+\.db)\b", text, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    return m.group(1)
+
+
 def _align_call_ids_to_subquery(
     *,
     subquery_text: str,
@@ -81,6 +91,20 @@ def _align_call_ids_to_subquery(
         return True, args, ""
 
     normalized = dict(args or {})
+    requested_db = _extract_requested_db_filename(subquery_text)
+    tool_low = str(tool_name or "").lower()
+    if requested_db:
+        has_db_key = "db_path" in normalized
+        current_db = str(normalized.get("db_path") or "").strip() if has_db_key else ""
+        if has_db_key and not current_db:
+            normalized["db_path"] = requested_db
+        elif (
+            not has_db_key
+            and any(tok in tool_low for tok in ("sqlite", "sql"))
+            and not any(k for k in normalized.keys() if str(k).endswith("_db"))
+        ):
+            normalized["db_path"] = requested_db
+
     actual = _collect_arg_id_fields(normalized)
 
     # No *_id in args but exactly one expected id -> inject it.
