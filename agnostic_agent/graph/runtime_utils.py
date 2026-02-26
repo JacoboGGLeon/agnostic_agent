@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import AIMessage, AnyMessage
 
 from agnostic_agent.graph.summarization import (
+    build_agnostic_user_answer,
+    looks_like_technical_answer,
     summarize_tool_runs as summarize_tool_runs_shared,
     summarize_tool_runs_compact as summarize_tool_runs_compact_shared,
 )
@@ -212,6 +214,14 @@ def summarize_tool_runs(user_text: str, runs: List[Dict[str, Any]]) -> str:
 
 def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
     return summarize_tool_runs_compact_shared(runs)
+
+
+def build_user_answer_from_runs(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
+    return build_agnostic_user_answer(user_prompt, runs)
+
+
+def is_technical_answer(text: str) -> bool:
+    return looks_like_technical_answer(text)
 
 
 def _sanitize_subquery_text(text: Any) -> str:

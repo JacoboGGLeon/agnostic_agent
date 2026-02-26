@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
@@ -22,6 +22,8 @@ def execute_validator_node(
     find_last_assistant_real: Callable[[List[Any]], Any],
     coerce_content_str: Callable[[Any], str],
     strip_think: Callable[[str], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    is_technical_answer: Callable[[str], bool],
 ) -> Dict[str, Any]:
     user_prompt = state.get("user_prompt") or ""
     summary = state.get("pipeline_summary") or state.get("summary") or {}
@@ -73,7 +75,20 @@ def execute_validator_node(
 
     if not final_answer.strip():
         all_covered = False
-        reasons.append("La respuesta final esta vacAa.")
+        reasons.append("La respuesta final esta vacia.")
+
+    if runs and is_technical_answer(final_answer):
+        all_covered = False
+        reasons.append(
+            "La respuesta final parece una traza tecnica (no orientada a usuario)."
+        )
+        repaired = build_user_answer_from_runs(user_prompt, runs)
+        if repaired.strip():
+            final_answer = repaired
+            try:
+                summary["final_answer"] = repaired
+            except Exception:
+                pass
 
     if "No se invoco ninguna herramienta" in summarizer_text and runs:
         all_covered = False
@@ -100,7 +115,7 @@ def execute_validator_node(
 
     if fail_fast and invariant_violations:
         fail_msg_lines = [
-            "Ejecución detenida por fail-fast: se violaron invariantes estructurales.",
+            "EjecuciÃ³n detenida por fail-fast: se violaron invariantes estructurales.",
             "",
             f"Prompt: {user_prompt}",
             "Violaciones:",
@@ -139,3 +154,4 @@ def execute_validator_node(
         if isinstance(final_answer, str) and final_answer.strip()
         else state.get("user_out"),
     }
+

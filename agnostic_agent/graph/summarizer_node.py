@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 import json
@@ -19,6 +19,8 @@ def execute_summarizer_node(
     json_default: Callable[[Any], Any],
     summarize_tool_runs: Callable[[str, List[Dict[str, Any]]], str],
     summarize_tool_runs_compact: Callable[[List[Dict[str, Any]]], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    is_technical_answer: Callable[[str], bool],
     find_last_assistant_real: Callable[[List[Any]], Any],
     extract_tool_calls: Callable[[Any], List[Dict[str, Any]]],
     coerce_content_str: Callable[[Any], str],
@@ -208,21 +210,21 @@ def execute_summarizer_node(
                 break
             out = decoded
         replacements = {
-            "â†’": "->",
-            "Ã¡": "á",
-            "Ã©": "é",
-            "Ã­": "í",
-            "Ã³": "ó",
-            "Ãº": "ú",
-            "Ã±": "ñ",
-            "Ã": "Á",
-            "Ã‰": "É",
-            "Ã": "Í",
-            "Ã“": "Ó",
-            "Ãš": "Ú",
-            "Ã‘": "Ñ",
-            "ðŸ“Œ": "[PIN]",
-            "ðŸ”": "[SEARCH]",
+            "Ã¢â€ â€™": "->",
+            "ÃƒÂ¡": "Ã¡",
+            "ÃƒÂ©": "Ã©",
+            "ÃƒÂ­": "Ã­",
+            "ÃƒÂ³": "Ã³",
+            "ÃƒÂº": "Ãº",
+            "ÃƒÂ±": "Ã±",
+            "ÃƒÂ": "Ã",
+            "Ãƒâ€°": "Ã‰",
+            "ÃƒÂ": "Ã",
+            "Ãƒâ€œ": "Ã“",
+            "ÃƒÅ¡": "Ãš",
+            "Ãƒâ€˜": "Ã‘",
+            "Ã°Å¸â€œÅ’": "[PIN]",
+            "Ã°Å¸â€Â": "[SEARCH]",
             ",[object Object],": "",
             "[object Object]": "",
             ", [object Object],": "",
@@ -306,7 +308,7 @@ def execute_summarizer_node(
         lines.append("## Menu de capacidades")
         lines.append("")
         lines.append(
-            "Tu consulta no activA3 una skill especAfica. Elige una skill y reintenta (o ajusta tu pregunta)."
+            "Tu consulta no activo una skill especifica. Elige una skill y reintenta (o ajusta tu pregunta)."
         )
         lines.append("")
         lines.append("### Skills")
@@ -400,11 +402,11 @@ def execute_summarizer_node(
             is_dag_attempt = True
         if is_dag_attempt:
             fallback_sys = (
-                "Eres un asistente servicial y agnA3stico.\n"
+                "Eres un asistente servicial y agnostico.\n"
                 "El usuario te ha dicho algo que NO requiere herramientas externas, o bien "
                 "las herramientas que intentaste usar no estan permitidas en el contexto actual.\n"
-                "Responde de forma natural, Aotil y amable en el idioma del usuario.\n"
-                "NO inventes informaciA3n."
+                "Responde de forma natural, util y amable en el idioma del usuario.\n"
+                "NO inventes informacion."
             )
             try:
                 base_chat_model = getattr(planner_llm, "bound", planner_llm)
@@ -455,38 +457,26 @@ def execute_summarizer_node(
         }
     else:
         tools_summary_text = summarize_tool_runs(user_prompt, runs)
-        skill_gen_instructions = ""
-        if analyzer and analyzer.get("active_skills") and skill_registry:
-            for skill_name in analyzer["active_skills"]:
-                skill = skill_registry.get_skill(skill_name)
-                if skill:
-                    skill_gen_instructions += (
-                        f"\n\n--- INSTRUCCIONES ESPECAFICAS ({skill_name}) ---\n{skill.instructions}"
-                    )
+        deterministic_user_answer = build_user_answer_from_runs(user_prompt, runs)
+        user_answer = deterministic_user_answer
 
         hybrid_sys = (
-            "Eres un analista experto que responde basándose ESTRICTAMENTE en la información provista "
-            "por las herramientas (Contexto).\n"
-            "Tu objetivo es extraer los hechos con rigor absoluto y presentarlos de forma clara y útil.\n\n"
-            "REGLAS CRÍTICAS DE COMPRENSIÓN:\n"
-            "1. CERO ALUCINACIONES: No agregues información externa bajo ninguna circunstancia.\n"
-            "2. LÓGICA CONDICIONAL EXACTA: Si el usuario te pregunta por un dato específico (ej. 'plazo máximo para el reporte C-0430'), "
-            "debes leer qué aplica exactamente para ese reporte. NUNCA mezcles reglas de otros reportes solo porque tengan un número mayor.\n"
-            "3. CITAS OBLIGATORIAS: Siempre debes mencionar la fuente en tu respuesta. Usa referencias como 'De acuerdo con [Nombre del Documento]...'. "
-            "Si la respuesta cruzó múltiples documentos, cita a ambos.\n"
-            "4. Si el contexto está vacío o la respuesta no existe en el texto, di que no tienes información suficiente.\n"
-            "5. Responde en el mismo idioma del usuario."
+            "You are an assistant that must answer only from verified tool evidence.\n"
+            "Write a concise, user-facing answer in the same language as the user.\n"
+            "Do not include internal traces, tool call IDs, steps, args, or debug logs.\n"
+            "If evidence is insufficient, state that clearly without inventing facts."
         )
-        if skill_gen_instructions:
-            hybrid_sys += skill_gen_instructions
         if cfg and not cfg.enable_thinking:
-            hybrid_sys += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the final natural language answer."
-
+            hybrid_sys += (
+                "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the final natural language answer."
+            )
         hybrid_user_msg = (
-            f"Pregunta del usuario: {user_prompt}\n\n"
-            f"InformaciA3n de Herramientas (Contexto):\n{tools_summary_text}\n\n"
-            "Respuesta:"
+            f"User request:\n{user_prompt}\n\n"
+            f"Verified tool evidence:\n{tools_summary_text}\n\n"
+            f"Deterministic baseline answer:\n{deterministic_user_answer}\n\n"
+            "Improve readability and clarity for the final user response."
         )
+
         try:
             hrm = planner_llm.invoke(
                 [
@@ -494,34 +484,20 @@ def execute_summarizer_node(
                     HumanMessage(content=hybrid_user_msg),
                 ]
             )
-            if isinstance(hrm, AIMessage) and isinstance(hrm.content, str):
-                clean_content = hrm.content
-                for _ in range(3):
-                    clean_content = re.sub(
-                        r"(?i),?\s*['\"]?\[object\s*Object\]['\"]?\s*,?",
-                        "",
-                        clean_content,
-                    )
-                    clean_content = clean_content.replace("[object Object]", "")
-                hrm.content = clean_content
+            llm_answer = strip_think(coerce_content_str(getattr(hrm, "content", ""))).strip()
 
-            user_answer = hrm.content
-            think_pattern = re.compile(r"<think>(.*?)</think>", re.DOTALL)
-            match = think_pattern.search(user_answer)
+            if llm_answer and not is_technical_answer(llm_answer):
+                user_answer = llm_answer
+
             reasoning_from_final = ""
-            if match:
-                reasoning_from_final = match.group(1).strip()
-                user_answer = think_pattern.sub("", user_answer).strip()
-            if not reasoning_from_final and hasattr(hrm, "additional_kwargs") and isinstance(
-                hrm.additional_kwargs, dict
-            ):
+            if hasattr(hrm, "additional_kwargs") and isinstance(hrm.additional_kwargs, dict):
                 reasoning_from_final = (
                     hrm.additional_kwargs.get("reasoning_content")
                     or hrm.additional_kwargs.get("reasoning")
                     or hrm.additional_kwargs.get("thoughts")
                     or ""
                 )
-            if reasoning_from_final and isinstance(reasoning_from_final, str) and reasoning_from_final.strip():
+            if isinstance(reasoning_from_final, str) and reasoning_from_final.strip():
                 thinking_msg = AIMessage(
                     content="",
                     additional_kwargs={
@@ -530,12 +506,13 @@ def execute_summarizer_node(
                     },
                 )
                 state.setdefault("messages", []).append(thinking_msg)
-        except Exception as exc:
-            user_answer = f"(Error en sintesis hibrida: {exc})\n\nResumen crudo:\n{tools_summary_text}"
+        except Exception:
+            user_answer = deterministic_user_answer
 
         user_answer = strip_think(coerce_content_str(user_answer)).strip()
-        if not user_answer:
-            user_answer = summarize_tool_runs_compact(runs)
+        if not user_answer or is_technical_answer(user_answer):
+            user_answer = deterministic_user_answer
+
         analyzer_text = _build_analyzer_text(analyzer)
         planner_text = _build_planner_text()
         executor_text = _build_executor_text()
@@ -549,7 +526,6 @@ def execute_summarizer_node(
             "summarizer": summarizer_text,
             "final_answer": user_answer,
         }
-
     analyzer_text = _normalize_text(analyzer_text)
     planner_text = _normalize_text(planner_text)
     executor_text = _normalize_text(executor_text)
@@ -581,3 +557,4 @@ def execute_summarizer_node(
         "deep_out": _build_deep_markdown(),
         "user_out": user_out,
     }
+

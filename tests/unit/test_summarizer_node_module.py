@@ -23,6 +23,14 @@ def _summarize_tool_runs_compact(runs):
     return f"Se ejecutaron {len(runs)} tools."
 
 
+def _build_user_answer_from_runs(_user_prompt, runs):
+    return f"## Resultado\nSe procesaron {len(runs)} ejecuciones."
+
+
+def _is_technical_answer(_text: str) -> bool:
+    return False
+
+
 def _resolve_effective_skills(_state, _registry):
     return ["contabilidad_instantanea"]
 
@@ -66,6 +74,8 @@ def test_execute_summarizer_node_preserves_llm_clean_output_when_no_tools():
         json_default=_default_json,
         summarize_tool_runs=_summarize_tool_runs,
         summarize_tool_runs_compact=_summarize_tool_runs_compact,
+        build_user_answer_from_runs=_build_user_answer_from_runs,
+        is_technical_answer=_is_technical_answer,
         find_last_assistant_real=_find_last_assistant_real,
         extract_tool_calls=_extract_tool_calls,
         coerce_content_str=_coerce_content_str,
@@ -103,6 +113,8 @@ def test_execute_summarizer_node_never_returns_empty_user_out_with_tools():
         json_default=_default_json,
         summarize_tool_runs=_summarize_tool_runs,
         summarize_tool_runs_compact=_summarize_tool_runs_compact,
+        build_user_answer_from_runs=_build_user_answer_from_runs,
+        is_technical_answer=_is_technical_answer,
         find_last_assistant_real=_find_last_assistant_real,
         extract_tool_calls=_extract_tool_calls,
         coerce_content_str=_coerce_content_str,

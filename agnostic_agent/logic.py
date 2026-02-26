@@ -64,8 +64,10 @@ from .graph.runtime_utils import (
     _resolve_effective_skills,
     _sanitize_subquery_text,
     _to_jsonable,
+    build_user_answer_from_runs,
     extract_tool_calls,
     find_last_assistant_real,
+    is_technical_answer,
     strip_think,
     summarize_tool_runs,
     summarize_tool_runs_compact,
@@ -161,6 +163,8 @@ def build_graph_agent(
             json_default=_json_default,
             summarize_tool_runs=summarize_tool_runs,
             summarize_tool_runs_compact=summarize_tool_runs_compact,
+            build_user_answer_from_runs=build_user_answer_from_runs,
+            is_technical_answer=is_technical_answer,
             find_last_assistant_real=find_last_assistant_real,
             extract_tool_calls=extract_tool_calls,
             coerce_content_str=_coerce_content_str,
@@ -180,6 +184,8 @@ def build_graph_agent(
             find_last_assistant_real=find_last_assistant_real,
             coerce_content_str=_coerce_content_str,
             strip_think=strip_think,
+            build_user_answer_from_runs=build_user_answer_from_runs,
+            is_technical_answer=is_technical_answer,
         )
 
     # Router (Updated Debug)

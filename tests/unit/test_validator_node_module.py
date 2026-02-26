@@ -24,6 +24,8 @@ def test_execute_validator_node_flags_partial_coverage():
         find_last_assistant_real=lambda _msgs: None,
         coerce_content_str=lambda x: str(x) if x is not None else "",
         strip_think=lambda s: s,
+        build_user_answer_from_runs=lambda _prompt, _runs: "respuesta reparada",
+        is_technical_answer=lambda _text: False,
     )
 
     assert out["validator"]["all_covered"] is False
