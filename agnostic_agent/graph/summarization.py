@@ -203,6 +203,91 @@ def _pick_status(output: Any) -> str:
     return f"resultado={type(output).__name__}"
 
 
+def _extract_subqueries_from_prompt(user_prompt: str) -> List[Dict[str, str]]:
+    text = (user_prompt or "").strip()
+    if not text:
+        return []
+
+    rows: List[Dict[str, str]] = []
+
+    # Case 1: prompt contains multiple JSON objects (common in batch structured inputs).
+    json_chunks = re.findall(r"\{[^{}]+\}", text)
+    if len(json_chunks) >= 2:
+        for idx, chunk in enumerate(json_chunks, start=1):
+            label = f"Subconsulta {idx}"
+            try:
+                obj = json.loads(chunk)
+                if isinstance(obj, dict):
+                    cid = obj.get("credito_id")
+                    if cid:
+                        label = f"Credito {cid}"
+            except Exception:
+                pass
+            rows.append({"label": label, "text": chunk})
+        return rows
+
+    # Case 2: multi-question prompt separated by '?'.
+    questions = [q.strip() + "?" for q in text.split("?") if q.strip()]
+    if len(questions) >= 2:
+        for idx, q in enumerate(questions, start=1):
+            rows.append({"label": f"Pregunta {idx}", "text": q})
+        return rows
+
+    # Case 3: fallback single request.
+    return [{"label": "Solicitud", "text": text}]
+
+
+def _fmt_number(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except Exception:
+        return str(value)
+
+
+def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
+    name = str(run.get("name", "tool"))
+    output = run.get("output")
+
+    if name == "reconcile_credit_accounting" and isinstance(output, dict):
+        status = output.get("status") or ("CUADRADO" if output.get("ok") else "DRIFT DETECTADO")
+        saldo = output.get("saldo") if isinstance(output.get("saldo"), dict) else {}
+        saneamiento = output.get("saneamiento") if isinstance(output.get("saneamiento"), dict) else {}
+        d_saldo = _fmt_number(saldo.get("diferencia", 0))
+        d_san = _fmt_number(saneamiento.get("diferencia", 0))
+        return f"{status}. Diferencia de saldo: {d_saldo}. Diferencia de saneamiento: {d_san}."
+
+    if name == "get_saneamiento_rate" and isinstance(output, dict):
+        tasa = output.get("tasa_saneamiento")
+        if tasa is not None:
+            try:
+                return f"Tasa de saneamiento esperada: {float(tasa) * 100:.2f}%."
+            except Exception:
+                return f"Tasa de saneamiento esperada: {tasa}."
+        return "Se obtuvo la tasa de saneamiento esperada."
+
+    if name == "search_knowledge_base":
+        if isinstance(output, list) and output:
+            first = output[0] if isinstance(output[0], dict) else {}
+            if isinstance(first, dict):
+                src = first.get("source", "knowledge_base")
+                excerpt = (
+                    first.get("excerpt")
+                    or first.get("content")
+                    or first.get("text")
+                    or ""
+                )
+                excerpt_txt = str(excerpt).strip().replace("\n", " ")
+                if len(excerpt_txt) > 240:
+                    excerpt_txt = excerpt_txt[:240].rstrip() + "..."
+                if excerpt_txt:
+                    return f"Encontre evidencia en {src}: {excerpt_txt}"
+            return "Encontre resultados relevantes en la base de conocimiento."
+        return "No encontre resultados relevantes en la base de conocimiento."
+
+    status = _pick_status(output)
+    return f"{name}: {status}."
+
+
 def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
     if not runs:
         return "No se obtuvo evidencia de herramientas para resolver la solicitud."
@@ -210,8 +295,8 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     total = len(runs)
     errors = 0
     findings: List[str] = []
-    by_entity: Dict[str, List[str]] = {}
-    no_entity: List[str] = []
+    by_entity: Dict[str, List[Dict[str, Any]]] = {}
+    no_entity_runs: List[Dict[str, Any]] = []
 
     for run in runs:
         name = str(run.get("name", "tool"))
@@ -222,41 +307,67 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         if status.startswith("error="):
             errors += 1
         detail = f" ({entity})" if entity else ""
-        finding = f"{name}{detail}: {status}"
-        findings.append(finding)
+        findings.append(f"{name}{detail}: {status}")
         if entity:
-            by_entity.setdefault(entity, []).append(f"{name}: {status}")
+            by_entity.setdefault(entity, []).append(run)
         else:
-            no_entity.append(f"{name}: {status}")
+            no_entity_runs.append(run)
 
     lines: List[str] = []
-    lines.append("Resultado listo.")
-    lines.append(f"Procesé {total} ejecuciones de herramientas con evidencia verificable.")
+    lines.append("Ya lo revise.")
+    subqueries = _extract_subqueries_from_prompt(user_prompt)
 
-    if by_entity:
-        lines.append("")
-        lines.append("Respuesta por subconsulta:")
-        idx = 1
-        for entity, items in by_entity.items():
-            principal = ""
-            for item in items:
-                if item.startswith("reconcile_credit_accounting:"):
-                    principal = item
+    if len(subqueries) > 1:
+        lines.append("Te respondo punto por punto:")
+    else:
+        lines.append("Respuesta:")
+
+    # Try to answer subquery by subquery using entity-linked runs first.
+    emitted = 0
+    for idx, sq in enumerate(subqueries, start=1):
+        sq_text = sq.get("text", "")
+        sq_label = sq.get("label", f"Subconsulta {idx}")
+        entity = ""
+        try:
+            parsed = json.loads(sq_text) if sq_text.startswith("{") else {}
+            if isinstance(parsed, dict) and parsed.get("credito_id"):
+                entity = f"credito_id={parsed.get('credito_id')}"
+        except Exception:
+            entity = ""
+
+        message = ""
+        if entity and entity in by_entity:
+            entity_runs = by_entity.get(entity, [])
+            # Prefer deterministic reconciliation run for end-user answer.
+            preferred = None
+            for r in entity_runs:
+                if str(r.get("name", "")) == "reconcile_credit_accounting":
+                    preferred = r
                     break
-            chosen = principal or items[0]
-            lines.append(f"{idx}. {entity}: {chosen}")
-            idx += 1
+            message = _summarize_single_run_natural(preferred or entity_runs[0])
+        elif no_entity_runs:
+            # Map free-form queries to no-entity runs in order.
+            run_idx = idx - 1
+            if run_idx < len(no_entity_runs):
+                message = _summarize_single_run_natural(no_entity_runs[run_idx])
 
-    if no_entity:
-        lines.append("")
-        lines.append("Evidencia adicional:")
-        lines.extend(f"- {item}" for item in no_entity)
+        if not message:
+            message = "No hubo evidencia suficiente de tools para esta subconsulta."
+
+        label_out = entity if entity else sq_label
+        lines.append(f"{idx}. {label_out}: {message}")
+        emitted += 1
+
+    # If we still have unmatched no-entity runs, append as additional evidence.
+    if emitted == 0 and no_entity_runs:
+        for idx, run in enumerate(no_entity_runs, start=1):
+            lines.append(f"{idx}. {_summarize_single_run_natural(run)}")
 
     lines.append("")
     if errors == 0:
-        lines.append("No detecte errores de ejecucion en la evidencia.")
+        lines.append("No detecte errores de ejecucion en la evidencia disponible.")
     else:
-        lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico.")
-    lines.append("Si quieres el JSON completo de tools, está disponible en la vista Deep/Dev.")
+        lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico en Deep/Dev.")
+    lines.append("Si quieres el detalle tecnico completo, lo tienes en Deep/Dev.")
 
     return "\n".join(lines).strip()
