@@ -203,6 +203,24 @@ def _pick_status(output: Any) -> str:
     return f"resultado={type(output).__name__}"
 
 
+def _build_tool_outputs_payload(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    payload: List[Dict[str, Any]] = []
+    for idx, run in enumerate(runs, start=1):
+        run_id = run.get("id") or run.get("tool_call_id") or f"call_{idx}"
+        tool_name = str(run.get("name", "tool"))
+        args = run.get("args", {})
+        output = run.get("output")
+        payload.append(
+            {
+                "id": str(run_id),
+                "tool": tool_name,
+                "input": args if isinstance(args, dict) else {},
+                "output": output,
+            }
+        )
+    return payload
+
+
 def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
     if not runs:
         return "No se obtuvo evidencia de herramientas para resolver la solicitud."
@@ -233,8 +251,10 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     else:
         lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico.")
     lines.append("La respuesta se construyo solo con salidas verificadas de herramientas.")
+    lines.append("")
+    lines.append("Tool Outputs (raw JSON):")
+    lines.append("```json")
+    lines.append(json.dumps(_build_tool_outputs_payload(runs), ensure_ascii=False, indent=2))
+    lines.append("```")
 
-    answer = "\n".join(lines).strip()
-    if looks_like_technical_answer(answer):
-        return "Proceso completado con evidencia de herramientas. Si quieres, te muestro el detalle tecnico en la vista Deep."
-    return answer
+    return "\n".join(lines).strip()
