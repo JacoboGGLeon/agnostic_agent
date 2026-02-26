@@ -63,6 +63,6 @@ def test_turn_service_pipeline_v2_viewmodels(monkeypatch):
     )
 
     out = svc.run_turn({"user_prompt": "hola"})
-    assert "## Deep Pipeline" in out["deep_out"]["final_answer"]
+    assert "## Deep Summary" in out["deep_out"]["final_answer"]
     assert "## Dev Summary" in out["dev_out"]["final_answer"]
     assert "### Solicitud" in out["user_out"]["final_answer"]

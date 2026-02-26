@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from agnostic_agent.core.models.io_models import AgentSummary, ToolRun
 from agnostic_agent.core.pipeline_v2.contracts import (
+    DeepSummaryV2,
     DeepViewModelV2,
     DevViewModelV2,
     PipelineEvent,
@@ -69,6 +71,91 @@ def _build_timeline(
     return events
 
 
+def _count_by(values: List[str]) -> Dict[str, int]:
+    if not values:
+        return {}
+    return dict(Counter(v for v in values if v))
+
+
+def _extract_planned_tools(planner_trajs: List[Any]) -> List[str]:
+    planned: List[str] = []
+    for traj in planner_trajs:
+        description = ""
+        if isinstance(traj, dict):
+            description = str(traj.get("description", "") or "")
+        else:
+            description = str(getattr(traj, "description", "") or "")
+        planned.extend(re.findall(r"tool=([a-zA-Z0-9_]+)", description))
+    return planned
+
+
+def _build_deep_summary_v2(
+    *,
+    out_state: Dict[str, Any],
+    tool_runs: List[ToolRun],
+    findings: List[str],
+    final_answer: str,
+) -> DeepSummaryV2:
+    analyzer = out_state.get("analyzer") or {}
+    planner_trajs = out_state.get("planner_trajs") or []
+    executor_steps = out_state.get("executor_steps") or []
+    validator = out_state.get("validator") or {}
+
+    planned_tools = _extract_planned_tools(planner_trajs)
+    executed_tools = [
+        str(step.get("tool_name", "") or "")
+        for step in executor_steps
+        if isinstance(step, dict)
+    ]
+    run_tools = [str(run.name or "") for run in tool_runs]
+    output_types = _count_by([type(run.output).__name__ for run in tool_runs])
+
+    subqueries = len(analyzer.get("subqueries") or [])
+    planned_calls = len(planned_tools)
+    executed_calls = len(executed_tools)
+    run_count = len(tool_runs)
+    coverage_ratio = 0.0
+    if subqueries > 0:
+        coverage_ratio = round(min(1.0, run_count / subqueries), 3)
+
+    return DeepSummaryV2(
+        analyzer={
+            "subqueries": subqueries,
+            "logic": _sanitize_text(analyzer.get("propositional_logic", "")),
+            "active_skills": out_state.get("_active_skills_internal") or [],
+        },
+        planner={
+            "subqueries_planned": len(planner_trajs),
+            "planned_calls": planned_calls,
+            "calls_by_tool": _count_by(planned_tools),
+        },
+        executor={
+            "executed_calls": executed_calls,
+            "calls_by_tool": _count_by(executed_tools),
+        },
+        catcher={
+            "tool_runs": run_count,
+            "runs_by_tool": _count_by(run_tools),
+            "output_types": output_types,
+        },
+        summarizer={
+            "findings": len(findings),
+            "final_answer_chars": len(final_answer),
+        },
+        validator={
+            "all_covered": bool(validator.get("all_covered", True)),
+            "reasoning": _sanitize_text(validator.get("reasoning", "")),
+        },
+        metrics={
+            "subqueries": subqueries,
+            "planned_calls": planned_calls,
+            "executed_calls": executed_calls,
+            "tool_runs": run_count,
+            "coverage_ratio": coverage_ratio,
+        },
+    )
+
+
 def build_pipeline_output_v2(
     *,
     prompt_text: str,
@@ -121,10 +208,17 @@ def build_pipeline_output_v2(
     )
 
     timeline = _build_timeline(out_state, summary_obj)
+    summary_v2 = _build_deep_summary_v2(
+        out_state=out_state,
+        tool_runs=tool_runs,
+        findings=findings,
+        final_answer=final_answer,
+    )
     deep_vm = DeepViewModelV2(
         timeline=timeline,
+        summary=summary_v2,
         artifacts={
-            "summary": summary_obj.model_dump() if summary_obj else {},
+            "summary_v2": summary_v2.model_dump(),
             "tool_runs_count": len(tool_runs),
         },
         raw={
@@ -171,13 +265,31 @@ def render_user_text(vm: UserViewModelV2) -> str:
 
 
 def render_deep_text(vm: DeepViewModelV2) -> str:
-    lines: List[str] = ["## Deep Pipeline"]
-    lines.append("### Timeline")
-    for ev in vm.timeline:
-        lines.append(f"- {ev.node}: {ev.status} ({ev.duration_ms}ms)")
-    lines.append("")
-    lines.append("### Artifacts")
-    lines.append(_sanitize_text(vm.artifacts))
+    lines: List[str] = ["## Deep Summary"]
+    summary = vm.summary.model_dump() if vm.summary else {}
+    if not isinstance(summary, dict) or not summary:
+        summary = vm.artifacts.get("summary_v2", {}) if isinstance(vm.artifacts, dict) else {}
+
+    if not isinstance(summary, dict) or not summary:
+        return _sanitize_text("\n".join(lines + ["- (no summary)"]))
+
+    section_order = [
+        ("Analyzer", "analyzer"),
+        ("Planner", "planner"),
+        ("Executor", "executor"),
+        ("Catcher", "catcher"),
+        ("Summarizer", "summarizer"),
+        ("Validator", "validator"),
+        ("Metrics", "metrics"),
+    ]
+    for title, key in section_order:
+        section = summary.get(key) or {}
+        if not isinstance(section, dict) or not section:
+            continue
+        lines.append("")
+        lines.append(f"### {title}")
+        for field, value in section.items():
+            lines.append(f"- {field}: {_sanitize_text(value)}")
     return _sanitize_text("\n".join(lines))
 
 

@@ -28,6 +28,7 @@ class UserViewModelV2(BaseModel):
 
 class DeepViewModelV2(BaseModel):
     timeline: List[PipelineEvent] = Field(default_factory=list)
+    summary: Optional["DeepSummaryV2"] = None
     artifacts: Dict[str, Any] = Field(default_factory=dict)
     raw: Dict[str, Any] = Field(default_factory=dict)
 
@@ -36,6 +37,16 @@ class DevViewModelV2(BaseModel):
     summary: str = ""
     counts: Dict[str, int] = Field(default_factory=dict)
     issues: List[str] = Field(default_factory=list)
+
+
+class DeepSummaryV2(BaseModel):
+    analyzer: Dict[str, Any] = Field(default_factory=dict)
+    planner: Dict[str, Any] = Field(default_factory=dict)
+    executor: Dict[str, Any] = Field(default_factory=dict)
+    catcher: Dict[str, Any] = Field(default_factory=dict)
+    summarizer: Dict[str, Any] = Field(default_factory=dict)
+    validator: Dict[str, Any] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineOutputV2(BaseModel):

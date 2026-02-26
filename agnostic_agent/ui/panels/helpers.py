@@ -185,25 +185,39 @@ def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str
         pipeline_v2 = raw_state.get("pipeline_v2")
         if isinstance(pipeline_v2, dict):
             deep_v2 = pipeline_v2.get("deep_out") or {}
-            timeline = deep_v2.get("timeline") or []
-            artifacts = deep_v2.get("artifacts") or {}
-            lines: List[str] = ["## RESUMEN DEEP DEL PIPELINE (v2)", "", "### Timeline"]
-            if isinstance(timeline, list) and timeline:
-                for ev in timeline:
-                    if not isinstance(ev, dict):
+            summary_v2 = deep_v2.get("summary")
+            if not isinstance(summary_v2, dict):
+                artifacts = deep_v2.get("artifacts") or {}
+                if isinstance(artifacts, dict):
+                    summary_v2 = artifacts.get("summary_v2")
+
+            if isinstance(summary_v2, dict) and summary_v2:
+                lines: List[str] = ["## RESUMEN DEEP DEL PIPELINE (v2)", ""]
+                section_order = [
+                    ("Analyzer", "analyzer"),
+                    ("Planner", "planner"),
+                    ("Executor", "executor"),
+                    ("Catcher", "catcher"),
+                    ("Summarizer", "summarizer"),
+                    ("Validator", "validator"),
+                    ("Metrics", "metrics"),
+                ]
+                for title, key in section_order:
+                    section = summary_v2.get(key) or {}
+                    if not isinstance(section, dict) or not section:
                         continue
-                    node = sanitize_display_text(ev.get("node", ""))
-                    status = sanitize_display_text(ev.get("status", ""))
-                    duration = ev.get("duration_ms", 0)
-                    lines.append(f"- {node}: {status} ({duration}ms)")
-            else:
-                lines.append("- (sin eventos)")
-            lines.append("")
-            lines.append("### Artifacts")
-            lines.append("```json")
-            lines.append(sanitize_display_text(json.dumps(artifacts, ensure_ascii=False, indent=2)))
-            lines.append("```")
-            return sanitize_display_text("\n".join(lines))
+                    lines.append(f"### {title}")
+                    for field, value in section.items():
+                        rendered = (
+                            json.dumps(value, ensure_ascii=False)
+                            if isinstance(value, (dict, list))
+                            else str(value)
+                        )
+                        lines.append(
+                            f"- {sanitize_display_text(field)}: {sanitize_display_text(rendered)}"
+                        )
+                    lines.append("")
+                return sanitize_display_text("\n".join(lines))
 
     planner_from_state = ""
     expected_subqueries = 0

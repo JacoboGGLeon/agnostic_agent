@@ -1,4 +1,5 @@
 from .contracts import (
+    DeepSummaryV2,
     DevViewModelV2,
     DeepViewModelV2,
     PipelineEvent,
@@ -17,6 +18,7 @@ __all__ = [
     "PipelineEvent",
     "UserSection",
     "UserViewModelV2",
+    "DeepSummaryV2",
     "DeepViewModelV2",
     "DevViewModelV2",
     "PipelineOutputV2",
