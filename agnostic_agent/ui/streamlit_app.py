@@ -48,9 +48,27 @@ def load_css() -> None:
         cwd / "ui" / "assets" / file_name,
     ]
 
+    # Resolve from installed/local package path when cwd is not repo root.
+    try:
+        import agnostic_agent as _aa  # type: ignore
+
+        pkg_ui_css = Path(_aa.__file__).resolve().parent / "ui" / "assets" / file_name
+        candidates.append(pkg_ui_css)
+    except Exception:
+        pass
+
     for p in cwd.rglob(file_name):
-        if len(p.relative_to(cwd).parts) <= 4:
+        if len(p.relative_to(cwd).parts) <= 8:
             candidates.append(p)
+
+    content_root = Path("/content")
+    if content_root.exists():
+        for p in content_root.rglob(file_name):
+            try:
+                if len(p.relative_to(content_root).parts) <= 10:
+                    candidates.append(p)
+            except Exception:
+                continue
 
     seen: set[str] = set()
     unique_candidates: list[Path] = []
