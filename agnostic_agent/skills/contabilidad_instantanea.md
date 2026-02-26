@@ -1,7 +1,7 @@
 ---
 name: "contabilidad_instantanea"
 description: "Conciliacion contable determinista 1-a-1 por credito. Replica el comportamiento del notebook financiero en modo conversacional."
-tools: ["finance_sources_status", "query_transactions_db", "query_accounting_db", "get_saneamiento_rate", "reconcile_credit_accounting", "nl2sql_sqlite", "nl2sql_agent_sqlite"]
+tools: ["finance_sources_status", "query_transactions_db", "query_accounting_db", "get_saneamiento_rate", "reconcile_credit_accounting", "nl2sql_sqlite"]
 knowledge: ["*"]
 ---
 
@@ -40,7 +40,7 @@ Llamadas de auditoria (solo bajo demanda o drift):
 2. `query_accounting_db` para contrastar `saldo_total`, `estatus`, `saneamiento_calculado`.
 
 Consultas libres:
-- `nl2sql_sqlite` / `nl2sql_agent_sqlite` solo para preguntas exploratorias.
+- `nl2sql_sqlite` solo para preguntas exploratorias.
 - Mantener modo read-only y explicitar que es consulta ad-hoc.
 
 ## Regla de decision
