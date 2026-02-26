@@ -258,6 +258,7 @@ def extract_tool_calls_from_jsonish_text(text: str) -> List[Dict[str, Any]]:
             continue
 
         tool_uses = obj.get("tool_uses")
+        tool_calls = obj.get("tool_calls")
         if isinstance(tool_uses, list):
             for item in tool_uses:
                 if not isinstance(item, dict):
@@ -266,7 +267,23 @@ def extract_tool_calls_from_jsonish_text(text: str) -> List[Dict[str, Any]]:
                     item.get("recipient_name") or item.get("name") or item.get("tool_name"),
                     item.get("parameters") or item.get("args") or item.get("arguments") or {},
                 )
-        elif "tool_uses" not in obj:
+        elif isinstance(tool_calls, list):
+            for item in tool_calls:
+                if not isinstance(item, dict):
+                    continue
+                fn = item.get("function") if isinstance(item.get("function"), dict) else {}
+                _append(
+                    item.get("recipient_name")
+                    or item.get("name")
+                    or item.get("tool_name")
+                    or fn.get("name"),
+                    item.get("parameters")
+                    or item.get("args")
+                    or item.get("arguments")
+                    or fn.get("arguments")
+                    or {},
+                )
+        elif "tool_uses" not in obj and "tool_calls" not in obj:
             _append(
                 obj.get("recipient_name") or obj.get("name") or obj.get("tool_name"),
                 obj.get("parameters") or obj.get("args") or obj.get("arguments") or {},
