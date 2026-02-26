@@ -47,8 +47,8 @@ class DeepSummaryV2(BaseModel):
     summarizer: Dict[str, Any] = Field(default_factory=dict)
     validator: Dict[str, Any] = Field(default_factory=dict)
     final_output: Dict[str, Any] = Field(default_factory=dict)
+    tool_outputs: Dict[str, Any] = Field(default_factory=dict)
     metrics: Dict[str, Any] = Field(default_factory=dict)
-    metrics_extended: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineOutputV2(BaseModel):

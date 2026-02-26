@@ -140,14 +140,20 @@ def render_inspector():
                             ("Summarizer", "summarizer"),
                             ("Validator", "validator"),
                             ("Final Output", "final_output"),
+                            ("Tool Outputs", "tool_outputs"),
                             ("Metrics", "metrics"),
-                            ("Metrics Extended", "metrics_extended"),
                         ]
                         for title, key in section_order:
                             section = summary_v2.get(key)
                             if not isinstance(section, dict) or not section:
                                 continue
-                            if key == "validator":
+                            if key == "analyzer":
+                                _render_section_kv(title, section, skip_keys={"subquery_rows"})
+                                rows = section.get("subquery_rows")
+                                if isinstance(rows, list) and rows:
+                                    st.markdown("###### Analyzer Subqueries")
+                                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                            elif key == "validator":
                                 _render_section_kv(title, section, skip_keys={"coverage_report"})
                                 coverage = section.get("coverage_report")
                                 if isinstance(coverage, list) and coverage:
@@ -156,12 +162,18 @@ def render_inspector():
                             elif key == "final_output":
                                 st.markdown("###### Final Output")
                                 st.json(section)
+                            elif key == "tool_outputs":
+                                runs = section.get("runs")
+                                if isinstance(runs, list) and runs:
+                                    st.markdown("###### Tool Outputs")
+                                    with st.expander("Ver markdown raw", expanded=False):
+                                        st.code(json.dumps(runs, ensure_ascii=False, indent=2), language="json")
                             else:
                                 _render_section_kv(title, section)
                     else:
                         st.markdown(render_markdown(content_to_show), unsafe_allow_html=True)
 
-                    with st.expander("Ver markdown raw", expanded=False):
+                    with st.expander("Ver deep markdown raw", expanded=False):
                         st.code(content_to_show, language="markdown")
                 elif tab_key == "dev":
                     render_tool_runs(tool_runs)

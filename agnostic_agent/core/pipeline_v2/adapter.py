@@ -100,6 +100,7 @@ def _build_deep_summary_v2(
     planner_trajs = out_state.get("planner_trajs") or []
     executor_steps = out_state.get("executor_steps") or []
     validator = out_state.get("validator") or {}
+    analyzer_subqueries = analyzer.get("subqueries") or []
 
     planned_tools = _extract_planned_tools(planner_trajs)
     executed_tools = [
@@ -118,6 +119,16 @@ def _build_deep_summary_v2(
             "input": last_run.args if isinstance(last_run.args, dict) else {},
             "output": last_run.output,
         }
+    all_tool_outputs: List[Dict[str, Any]] = []
+    for run in tool_runs:
+        all_tool_outputs.append(
+            {
+                "id": _sanitize_text(run.id),
+                "tool": _sanitize_text(run.name),
+                "input": run.args if isinstance(run.args, dict) else {},
+                "output": run.output,
+            }
+        )
 
     subqueries = len(analyzer.get("subqueries") or [])
     planned_calls = len(planned_tools)
@@ -144,6 +155,10 @@ def _build_deep_summary_v2(
             "subqueries": subqueries,
             "logic": _sanitize_text(analyzer.get("propositional_logic", "")),
             "active_skills": out_state.get("_active_skills_internal") or [],
+            "subquery_rows": [
+                {"idx": i, "subquery": _sanitize_text(sq)}
+                for i, sq in enumerate(analyzer_subqueries, start=1)
+            ],
         },
         planner={
             "subqueries_planned": len(planner_trajs),
@@ -169,18 +184,13 @@ def _build_deep_summary_v2(
             "coverage_report": coverage_report if isinstance(coverage_report, list) else [],
         },
         final_output=final_output,
+        tool_outputs={"runs": all_tool_outputs},
         metrics={
             "subqueries": subqueries,
             "planned_calls": planned_calls,
             "executed_calls": executed_calls,
             "tool_runs": run_count,
             "coverage_ratio": coverage_ratio,
-        },
-        metrics_extended={
-            "subqueries": subqueries,
-            "planned_calls": planned_calls,
-            "executed_calls": executed_calls,
-            "tool_runs": run_count,
         },
     )
 
@@ -310,8 +320,8 @@ def render_deep_text(vm: DeepViewModelV2) -> str:
         ("Summarizer", "summarizer"),
         ("Validator", "validator"),
         ("Final Output", "final_output"),
+        ("Tool Outputs", "tool_outputs"),
         ("Metrics", "metrics"),
-        ("Metrics Extended", "metrics_extended"),
     ]
     for title, key in section_order:
         section = summary.get(key) or {}
