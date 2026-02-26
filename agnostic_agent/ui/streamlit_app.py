@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -15,7 +16,14 @@ from agnostic_agent.config.loader import load_config
 # -----------------------------
 # Page Config
 # -----------------------------
-APP_TITLE = os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab").strip() or "Agentic Lab"
+def _clean_app_title(value: str) -> str:
+    raw = value if isinstance(value, str) else str(value or "")
+    cleaned = re.sub(r"<[^>]+>", "", raw).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned or "Agentic Lab"
+
+
+APP_TITLE = _clean_app_title(os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab"))
 APP_LOGO = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
 
 st.set_page_config(

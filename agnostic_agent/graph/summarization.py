@@ -137,7 +137,7 @@ def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
         return "No se ejecutaron herramientas."
 
     lines: List[str] = [f"Se ejecutaron {len(runs)} tools."]
-    for run in runs:
+    for idx, run in enumerate(runs, start=1):
         name = str(run.get("name", "tool"))
         args = run.get("args", {}) or {}
         output = run.get("output")

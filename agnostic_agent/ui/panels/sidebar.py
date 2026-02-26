@@ -1,5 +1,6 @@
 ﻿import json
 import os
+import re
 
 import streamlit as st
 
@@ -39,8 +40,15 @@ def _resolve_emb_name() -> str:
     return "custom-embedding-model"
 
 
+def _clean_ui_text(value: str, default: str = "") -> str:
+    raw = value if isinstance(value, str) else str(value or "")
+    cleaned = re.sub(r"<[^>]+>", "", raw).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned or default
+
+
 def render_sidebar() -> None:
-    app_title = os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab").strip() or "Agentic Lab"
+    app_title = _clean_ui_text(os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab"), "Agentic Lab")
     logo_url = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
 
     with st.sidebar:
@@ -108,8 +116,8 @@ def render_sidebar() -> None:
         st.divider()
         st.markdown("#### Models")
 
-        llm_name = _resolve_llm_name()
-        emb_name = _resolve_emb_name()
+        llm_name = _clean_ui_text(_resolve_llm_name(), "custom-llm-model")
+        emb_name = _clean_ui_text(_resolve_emb_name(), "custom-embedding-model")
 
         st.text_input("Model Name", value=llm_name, disabled=True, key="planner_model_name_display")
         st.caption("Embedding Server")
