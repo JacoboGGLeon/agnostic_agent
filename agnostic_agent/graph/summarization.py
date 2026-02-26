@@ -47,7 +47,7 @@ def summarize_tool_runs(
 
     parts = ["Summary based on tools (no hallucinations)"]
 
-    for run in runs:
+    for idx, run in enumerate(runs, start=1):
         tool_name = run["name"]
         args = run["args"]
         output = run["output"]
@@ -137,7 +137,7 @@ def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
         return "No se ejecutaron herramientas."
 
     lines: List[str] = [f"Se ejecutaron {len(runs)} tools."]
-    for idx, run in enumerate(runs, start=1):
+    for run in runs:
         name = str(run.get("name", "tool"))
         args = run.get("args", {}) or {}
         output = run.get("output")
@@ -219,7 +219,7 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         if status.startswith("error="):
             errors += 1
         detail = f" ({entity})" if entity else ""
-        findings.append(f"{idx}. {name}{detail}: {status}")
+        findings.append(f"{name}{detail}: {status}")
 
     lines: List[str] = []
     lines.append("Listo.")

@@ -230,10 +230,7 @@ def build_pipeline_output_v2(
 
     user_vm = UserViewModelV2(
         final_answer=final_answer,
-        sections=[
-            UserSection(title="Solicitud", items=[_sanitize_text(prompt_text)]),
-            UserSection(title="Hallazgos", items=findings),
-        ],
+        sections=[],
         warnings=warnings,
     )
 
@@ -283,6 +280,9 @@ def render_user_text(vm: UserViewModelV2) -> str:
         lines.append(vm.final_answer)
     for section in vm.sections:
         if not section.items:
+            continue
+        if (section.title or "").strip().lower() in {"solicitud", "hallazgos"}:
+            # Avoid duplicating content already represented in final_answer.
             continue
         lines.append("")
         lines.append(f"### {section.title}")

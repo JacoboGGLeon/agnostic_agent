@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
@@ -55,6 +56,94 @@ def _render_section_kv(title: str, section: Dict[str, Any], skip_keys: Optional[
     if rows:
         st.markdown(f"###### {title}")
         st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def _extract_planner_trajs(raw_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not isinstance(raw_state, dict):
+        return []
+    candidates: List[Any] = []
+    candidates.append(raw_state.get("planner_trajs"))
+    state_obj = raw_state.get("state")
+    if isinstance(state_obj, dict):
+        candidates.append(state_obj.get("planner_trajs"))
+    pipeline_v2 = raw_state.get("pipeline_v2")
+    if isinstance(pipeline_v2, dict):
+        deep_out = pipeline_v2.get("deep_out")
+        if isinstance(deep_out, dict):
+            raw = deep_out.get("raw")
+            if isinstance(raw, dict):
+                candidates.append(raw.get("planner_trajs"))
+
+    for trajs in candidates:
+        if isinstance(trajs, list) and trajs:
+            normalized: List[Dict[str, Any]] = []
+            for item in trajs:
+                if isinstance(item, dict):
+                    normalized.append(item)
+            if normalized:
+                return normalized
+    return []
+
+
+def _parse_planner_description(desc: str) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    if not isinstance(desc, str) or not desc.strip():
+        return rows
+
+    for raw_line in desc.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = re.match(r"^step\s+(\d+)\s*:\s*(.*)$", line, flags=re.IGNORECASE)
+        if not m:
+            continue
+        step = m.group(1)
+        tail = m.group(2).strip()
+        call_id = ""
+        tool = ""
+        args = ""
+
+        id_match = re.search(r"id=([^,\s]+)", tail)
+        if id_match:
+            call_id = id_match.group(1).strip()
+        tool_match = re.search(r"tool=([^,\s]+)", tail)
+        if tool_match:
+            tool = tool_match.group(1).strip()
+        args_match = re.search(r"args=(\{.*\})$", tail)
+        if args_match:
+            args = args_match.group(1).strip()
+
+        rows.append(
+            {
+                "step": step,
+                "tool_call_id": call_id,
+                "tool": tool,
+                "args": args,
+            }
+        )
+    return rows
+
+
+def _render_planner_dag(raw_state: Optional[Dict[str, Any]]) -> None:
+    trajs = _extract_planner_trajs(raw_state)
+    if not trajs:
+        return
+
+    st.markdown("###### Planner DAG (step x step)")
+    for i, traj in enumerate(trajs, start=1):
+        subquery = str(traj.get("subquery", "")).strip()
+        desc = str(traj.get("description", "")).strip()
+        label = f"Subquery {i}"
+        if subquery:
+            label = f"{label}: {subquery}"
+        with st.expander(label, expanded=False):
+            rows = _parse_planner_description(desc)
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+            else:
+                st.markdown("_(sin pasos parseables)_")
+                if desc:
+                    st.code(desc, language="text")
 
 
 def render_inspector():
@@ -158,6 +247,7 @@ def render_inspector():
                                 if isinstance(rows, list) and rows:
                                     st.markdown("###### Planner Calls")
                                     st.dataframe(rows, use_container_width=True, hide_index=True)
+                                _render_planner_dag(raw_state)
                             elif key == "validator":
                                 _render_section_kv(title, section, skip_keys={"coverage_report"})
                                 coverage = section.get("coverage_report")
