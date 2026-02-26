@@ -91,8 +91,6 @@ if "export_json" not in st.session_state:
     st.session_state.export_json = None
 if "theme_mode" not in st.session_state:
     st.session_state.theme_mode = "dark"
-if "pipeline_v2_enabled" not in st.session_state:
-    st.session_state.pipeline_v2_enabled = True
 
 # Init Plugin Manager
 if "plugin_manager" not in st.session_state:
