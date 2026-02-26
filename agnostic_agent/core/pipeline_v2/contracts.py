@@ -56,3 +56,7 @@ class PipelineOutputV2(BaseModel):
     dev_out: DevViewModelV2
     schema_version: str = "v2"
     turn_id: Optional[str] = None
+
+
+# Resolve forward refs introduced by from __future__ import annotations.
+DeepViewModelV2.model_rebuild()
