@@ -1,18 +1,20 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Union
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AnyMessage
 
+from typing import Any, Dict, List, Optional, Union
+
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+
+from agnostic_agent.app.errors import AgnosticAgentError, TurnExecutionError
 from agnostic_agent.core.models.io_models import (
     AgentInput,
     AgentOutput,
-    AgentView,
     AgentSummary,
+    AgentView,
     ToolRun,
 )
+from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
-from agnostic_agent.knowledge import select_knowledge_bases, KnowledgeBase
-from agnostic_agent.app.errors import AgnosticAgentError, TurnExecutionError
 
 
 def _safe_text(value: Any) -> str:
@@ -23,10 +25,12 @@ def _safe_text(value: Any) -> str:
     if isinstance(value, (dict, list)):
         try:
             import json
+
             return json.dumps(value, ensure_ascii=False)
         except Exception:
             return str(value)
     return str(value)
+
 
 class TurnService:
     """
@@ -51,7 +55,7 @@ class TurnService:
         self.context_cfg = context_cfg
         self.setup_path = setup_path
         self.setup_config = setup_config or {}
-        
+
         # Internal state for multi-turn conversation
         self._state: Optional[Dict[str, Any]] = None
 
@@ -112,6 +116,193 @@ class TurnService:
 
         return "\n\n".join(parts)
 
+    def _resolve_prompt_text(self, agent_in: AgentInput) -> str:
+        return (
+            getattr(agent_in, "user_prompt", None)
+            or getattr(agent_in, "user_text", None)
+            or ""
+        )
+
+    def _resolve_metadata(self, agent_in: AgentInput) -> Dict[str, Any]:
+        metadata = agent_in.metadata or {}
+        session_id = agent_in.session_id or "default"
+        user_id = metadata.get("user_id")
+        forced_skill = metadata.get("forced_skill")
+        skills_allowlist = None
+
+        raw_history_enabled = metadata.get("conversation_history_enabled", True)
+        if isinstance(raw_history_enabled, str):
+            conversation_history_enabled = raw_history_enabled.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            }
+        else:
+            conversation_history_enabled = bool(raw_history_enabled)
+
+        raw_allow = metadata.get("skills_allowlist")
+        if isinstance(raw_allow, str) and raw_allow.strip():
+            skills_allowlist = [s.strip() for s in raw_allow.split(",") if s.strip()]
+        elif isinstance(raw_allow, list):
+            skills_allowlist = [str(s).strip() for s in raw_allow if str(s).strip()]
+
+        return {
+            "session_id": session_id,
+            "user_id": user_id,
+            "forced_skill": forced_skill,
+            "skills_allowlist": skills_allowlist,
+            "conversation_history_enabled": conversation_history_enabled,
+        }
+
+    def _resolve_knowledge_names(self, agent_in: AgentInput) -> List[str]:
+        if agent_in.knowledge_names:
+            return list(agent_in.knowledge_names)
+        return [kb.name for kb in self.knowledge_bases]
+
+    def _build_state_in(
+        self,
+        *,
+        prompt_text: str,
+        meta: Dict[str, Any],
+        knowledge_names: List[str],
+        knowledge_selected: List[KnowledgeBase],
+        memory_context: Dict[str, Any],
+    ) -> State:
+        prev_messages = self._clean_prev_messages() if meta["conversation_history_enabled"] else []
+
+        return {
+            "messages": prev_messages + [HumanMessage(content=prompt_text)],
+            "analyzer": None,
+            "planner_trajs": [],
+            "executor_steps": [],
+            "tool_runs": [],
+            "summary": None,
+            "pipeline_summary": None,
+            "user_prompt": prompt_text,
+            "session_id": meta["session_id"],
+            "user_id": meta["user_id"],
+            # Skill selection controls:
+            # - forced_skill: legacy single-skill selector (UI). Semantically: allowlist of one.
+            # - skills_allowlist: preferred multi-skill allowlist.
+            "forced_skill": meta["forced_skill"],
+            "skills_allowlist": meta["skills_allowlist"],
+            "setup_path": self.setup_path or "",
+            "setup_config": self.setup_config,
+            "knowledge_names": knowledge_names,
+            "kb_all": [kb.__dict__ for kb in self.knowledge_bases],
+            "knowledge_selected": [kb.__dict__ for kb in knowledge_selected],
+            "memory_context": memory_context,
+            "context_tables": list(self.context_tables),
+            "context_cfg": self.context_cfg,
+        }
+
+    def _extract_last_ai_text(self, out_state: State) -> str:
+        ai_messages = [m for m in out_state.get("messages", []) if isinstance(m, AIMessage)]
+        visible_ai_messages = []
+        for msg in ai_messages:
+            addkw = getattr(msg, "additional_kwargs", {}) or {}
+            if isinstance(addkw, dict) and addkw.get("pipeline_internal"):
+                continue
+            visible_ai_messages.append(msg)
+
+        last_ai = (
+            visible_ai_messages[-1]
+            if visible_ai_messages
+            else (ai_messages[-1] if ai_messages else None)
+        )
+        return _safe_text(last_ai.content if last_ai is not None else "")
+
+    def _build_summary_obj(self, out_state: State) -> Optional[AgentSummary]:
+        raw_summary: Dict[str, Any] = (
+            out_state.get("pipeline_summary")
+            or out_state.get("summary")
+            or {}
+        )
+        return AgentSummary(**raw_summary) if raw_summary else None
+
+    def _build_tool_runs(self, out_state: State) -> List[ToolRun]:
+        raw_runs = out_state.get("tool_runs", []) or []
+        tool_runs: List[ToolRun] = []
+        for run in raw_runs:
+            tool_runs.append(
+                ToolRun(
+                    id=str(run.get("id", "")),
+                    name=str(run.get("name", "")),
+                    args=run.get("args", {}),
+                    output=run.get("output"),
+                )
+            )
+        return tool_runs
+
+    def _build_views(
+        self,
+        *,
+        out_state: State,
+        summary_obj: Optional[AgentSummary],
+        tool_runs: List[ToolRun],
+        last_ai_text: str,
+    ) -> Dict[str, AgentView]:
+        dev_text_state = _safe_text(out_state.get("dev_out"))
+        deep_text_state = _safe_text(out_state.get("deep_out"))
+        user_text_state = _safe_text(out_state.get("user_out"))
+        summary_user_answer = _safe_text(summary_obj.final_answer or "") if summary_obj else ""
+
+        final_user = (
+            (user_text_state or "").strip()
+            or summary_user_answer.strip()
+            or last_ai_text.strip()
+        )
+        final_deep = (
+            (deep_text_state or "").strip()
+            or self._build_deep_text(summary_obj).strip()
+            or summary_user_answer.strip()
+            or last_ai_text.strip()
+        )
+        final_dev = (dev_text_state or "").strip() or last_ai_text.strip() or final_deep
+
+        return {
+            "dev": AgentView(
+                final_answer=final_dev,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state=out_state,
+            ),
+            "deep": AgentView(
+                final_answer=final_deep,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state={},
+            ),
+            "user": AgentView(
+                final_answer=final_user,
+                summary=summary_obj,
+                tool_runs=tool_runs,
+                raw_state={},
+            ),
+        }
+
+    def _persist_memory(
+        self,
+        *,
+        session_id: str,
+        prompt_text: str,
+        final_user: str,
+        user_id: Optional[str],
+    ) -> None:
+        try:
+            write_memory(
+                session_id=session_id,
+                user_prompt=prompt_text,
+                user_out=final_user,
+                user_id=user_id,
+                memory_cfg=self.memory_cfg,
+            )
+        except Exception as e:
+            # Log usage but don't fail turn
+            print(f"[TurnService] Warning: Error writing memory: {e!r}")
+
     def run_turn(
         self,
         user_input: Union[str, Dict[str, Any], AgentInput],
@@ -121,192 +312,55 @@ class TurnService:
         """
         try:
             agent_in = self._coerce_input(user_input)
+            prompt_text = self._resolve_prompt_text(agent_in)
+            meta = self._resolve_metadata(agent_in)
+            knowledge_names = self._resolve_knowledge_names(agent_in)
+            knowledge_selected = select_knowledge_bases(knowledge_names, self.knowledge_bases)
+            memory_context = read_memory(session_id=meta["session_id"])
 
-            prompt_text = (
-                getattr(agent_in, "user_prompt", None)
-                or getattr(agent_in, "user_text", None)
-                or ""
+            state_in = self._build_state_in(
+                prompt_text=prompt_text,
+                meta=meta,
+                knowledge_names=knowledge_names,
+                knowledge_selected=knowledge_selected,
+                memory_context=memory_context,
             )
 
-            # Metadata resolution
-            session_id = agent_in.session_id or "default"
-            user_id = None
-            forced_skill = None
-            skills_allowlist = None
-            conversation_history_enabled = True
-            if agent_in.metadata:
-                user_id = agent_in.metadata.get("user_id")
-                forced_skill = agent_in.metadata.get("forced_skill")
-                raw_history_enabled = agent_in.metadata.get("conversation_history_enabled", True)
-                if isinstance(raw_history_enabled, str):
-                    conversation_history_enabled = raw_history_enabled.strip().lower() in {
-                        "1",
-                        "true",
-                        "yes",
-                        "y",
-                        "on",
-                    }
-                else:
-                    conversation_history_enabled = bool(raw_history_enabled)
-                # Optional: restrict what skills the graph may consider "active".
-                # Accepts list[str] (preferred) or comma-separated str.
-                raw_allow = agent_in.metadata.get("skills_allowlist")
-                if isinstance(raw_allow, str) and raw_allow.strip():
-                    skills_allowlist = [s.strip() for s in raw_allow.split(",") if s.strip()]
-                elif isinstance(raw_allow, list):
-                    skills_allowlist = [str(s).strip() for s in raw_allow if str(s).strip()]
-
-            # Knowledge selection
-            knowledge_names = agent_in.knowledge_names
-            if not knowledge_names:
-                knowledge_names = [kb.name for kb in self.knowledge_bases]
-
-            knowledge_selected = select_knowledge_bases(knowledge_names, self.knowledge_bases)
-
-            # Memory read
-            memory_context = read_memory(session_id=session_id)
-
-            # State construction
-            prev_messages = self._clean_prev_messages() if conversation_history_enabled else []
-            state_in: State = {
-                "messages": prev_messages + [HumanMessage(content=prompt_text)],
-                "analyzer": None,
-                "planner_trajs": [],
-                "executor_steps": [],
-                "tool_runs": [],
-                "summary": None,
-                "pipeline_summary": None,
-                "user_prompt": prompt_text,
-                "session_id": session_id,
-                "user_id": user_id,
-                # Skill selection controls:
-                # - forced_skill: legacy single-skill selector (UI). Semantically: allowlist of one.
-                # - skills_allowlist: preferred multi-skill allowlist.
-                "forced_skill": forced_skill,
-                "skills_allowlist": skills_allowlist,
-                "setup_path": self.setup_path or "",
-                "setup_config": self.setup_config,
-                "knowledge_names": knowledge_names,
-                "kb_all": [kb.__dict__ for kb in self.knowledge_bases],
-                "knowledge_selected": [kb.__dict__ for kb in knowledge_selected],
-                "memory_context": memory_context,
-                "context_tables": list(self.context_tables),
-                "context_cfg": self.context_cfg,
-            }
-
-            # Invoke Graph
             out_state: State = self.graph_app.invoke(state_in)
             self._state = out_state
 
-            # Extract Output
-            ai_messages = [
-                m for m in out_state.get("messages", []) if isinstance(m, AIMessage)
-            ]
-            visible_ai_messages = []
-            for m in ai_messages:
-                addkw = getattr(m, "additional_kwargs", {}) or {}
-                if isinstance(addkw, dict) and addkw.get("pipeline_internal"):
-                    continue
-                visible_ai_messages.append(m)
-
-            last_ai = visible_ai_messages[-1] if visible_ai_messages else (ai_messages[-1] if ai_messages else None)
-            last_ai_text = _safe_text(last_ai.content if last_ai is not None else "")
-
-            dev_text_state = _safe_text(out_state.get("dev_out"))
-            deep_text_state = _safe_text(out_state.get("deep_out"))
-            user_text_state = _safe_text(out_state.get("user_out"))
-
-            raw_summary: Dict[str, Any] = (
-                out_state.get("pipeline_summary")
-                or out_state.get("summary")
-                or {}
-            )
-            
-            summary_obj = AgentSummary(**raw_summary) if raw_summary else None
-            summary_user_answer = _safe_text(summary_obj.final_answer or "") if summary_obj else ""
-
-            raw_runs = out_state.get("tool_runs", []) or []
-            tool_runs: List[ToolRun] = []
-            for r in raw_runs:
-                tool_runs.append(
-                    ToolRun(
-                        id=str(r.get("id", "")),
-                        name=str(r.get("name", "")),
-                        args=r.get("args", {}),
-                        output=r.get("output"),
-                    )
-                )
-
-            # Construct Views
-            final_user = (
-                (user_text_state or "").strip()
-                or summary_user_answer.strip()
-                or last_ai_text.strip()
-            )
-
-            final_deep = (
-                (deep_text_state or "").strip()
-                or self._build_deep_text(summary_obj).strip()
-                or summary_user_answer.strip()
-                or last_ai_text.strip()
-            )
-
-            final_dev = (
-                (dev_text_state or "").strip()
-                or last_ai_text.strip()
-                or final_deep
-            )
-
-            dev_view = AgentView(
-                final_answer=final_dev,
-                summary=summary_obj,
+            last_ai_text = self._extract_last_ai_text(out_state)
+            summary_obj = self._build_summary_obj(out_state)
+            tool_runs = self._build_tool_runs(out_state)
+            views = self._build_views(
+                out_state=out_state,
+                summary_obj=summary_obj,
                 tool_runs=tool_runs,
-                raw_state=out_state,
+                last_ai_text=last_ai_text,
             )
 
-            deep_view = AgentView(
-                final_answer=final_deep,
-                summary=summary_obj,
-                tool_runs=tool_runs,
-                raw_state={},
+            self._persist_memory(
+                session_id=meta["session_id"],
+                prompt_text=prompt_text,
+                final_user=views["user"].final_answer,
+                user_id=meta["user_id"],
             )
-
-            user_view = AgentView(
-                final_answer=final_user,
-                summary=summary_obj,
-                tool_runs=tool_runs,
-                raw_state={},
-            )
-
-            # Memory Write
-            try:
-                write_memory(
-                    session_id=session_id,
-                    user_prompt=prompt_text,
-                    user_out=final_user,
-                    user_id=user_id,
-                    memory_cfg=self.memory_cfg,
-                )
-            except Exception as e:
-                # Log usage but don't fail turn
-                print(f"[TurnService] ⚠️ Error writing memory: {e!r}")
 
             output = AgentOutput(
-                dev_out=dev_view,
-                deep_out=deep_view,
-                user_out=user_view,
+                dev_out=views["dev"],
+                deep_out=views["deep"],
+                user_out=views["user"],
             )
             return output.to_dict()
 
         except AgnosticAgentError as e:
-            # Re-raise known errors
             raise e
         except Exception as e:
-            # Wrap unexpected errors
             import traceback
+
             tb = traceback.format_exc()
             raise TurnExecutionError(
-                message=f"Unexpected error during turn execution: {str(e)}", 
-                step="run_turn", 
-                details={"original_error": str(e), "traceback": tb}
+                message=f"Unexpected error during turn execution: {str(e)}",
+                step="run_turn",
+                details={"original_error": str(e), "traceback": tb},
             ) from e
