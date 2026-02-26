@@ -1,6 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
+from pathlib import Path
+
 import streamlit as st
 from agnostic_agent.agent import Agent
 from agnostic_agent.capabilities import PlannerConfig
@@ -13,9 +15,12 @@ from agnostic_agent.config.loader import load_config
 # -----------------------------
 # Page Config
 # -----------------------------
+APP_TITLE = os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab").strip() or "Agentic Lab"
+APP_LOGO = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
+
 st.set_page_config(
-    page_title="Agentic Lab · BBVA",
-    page_icon="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png",
+    page_title=APP_TITLE,
+    page_icon=APP_LOGO or "R",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -23,63 +28,49 @@ st.set_page_config(
 # -----------------------------
 # CSS Loading
 # -----------------------------
-def load_css():
+def load_css() -> None:
     file_name = "styles.css"
-    # Extended search strategy:
-    # 1. Standard paths
-    # 2. Recursive search in current directory (depth 3)
-    
+    cwd = Path.cwd()
+    this_dir = Path(__file__).resolve().parent
     candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", file_name),
-        os.path.join(os.getcwd(), "assets", file_name),
-        os.path.join(os.getcwd(), "agnostic_agent", "ui", "assets", file_name),
-        "/content/assets/styles.css",
-        "assets/styles.css",
+        this_dir / "assets" / file_name,
+        cwd / "assets" / file_name,
+        cwd / "agnostic_agent" / "ui" / "assets" / file_name,
     ]
-    
-    # Add recursive search
-    try:
-        for root, dirs, files in os.walk(os.getcwd()):
-            if file_name in files:
-                candidates.append(os.path.join(root, file_name))
-            # Limit depth hack (not perfect but safe for small repos)
-            if root.count(os.sep) - os.getcwd().count(os.sep) > 3:
-                del dirs[:] 
-    except:
-        pass
 
-    css_content = ""
-    found_path = None
-    
-    # Deduplicate while preserving order
-    seen = set()
-    unique_candidates = []
+    for p in cwd.rglob(file_name):
+        if len(p.relative_to(cwd).parts) <= 4:
+            candidates.append(p)
+
+    seen: set[str] = set()
+    unique_candidates: list[Path] = []
     for c in candidates:
-        if c not in seen:
+        cp = str(c.resolve()) if c.exists() else str(c)
+        if cp not in seen:
+            seen.add(cp)
             unique_candidates.append(c)
-            seen.add(c)
-            
-    for path in unique_candidates:
-        if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    css_content = f.read()
-                found_path = path
-                break
-            except:
-                continue
-                
-    if found_path:
-        st.markdown(f'<style>{css_content}</style>', unsafe_allow_html=True)
-    else:
-        # Fallback inline minimal style
-        st.markdown("""
+
+    for css_path in unique_candidates:
+        if not css_path.exists():
+            continue
+        try:
+            css_content = css_path.read_text(encoding="utf-8")
+            st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+            return
+        except OSError:
+            continue
+
+    st.markdown(
+        """
         <style>
         .topbar { padding: 10px; border-bottom: 1px solid #333; }
         .logo-img { width: 108px; }
         </style>
-        """, unsafe_allow_html=True)
-        st.warning(f"⚠️ CSS not found. Using minimal fallback. (Tried: {', '.join(unique_candidates[:3])}...)")
+        """,
+        unsafe_allow_html=True,
+    )
+    tried = ", ".join(str(p) for p in unique_candidates[:3])
+    st.warning(f"CSS not found. Using minimal fallback. (Tried: {tried}...)")
 
 load_css()
 
@@ -253,12 +244,17 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 
 # 2. Topbar
 st.markdown('<div class="topbar-offset"></div>', unsafe_allow_html=True)
+logo_html = (
+    f'<img class="logo-img" src="{APP_LOGO}" alt="brand" style="width: 108px; height: auto;"/>'
+    if APP_LOGO
+    else ""
+)
 st.markdown(
     f"""
 <div class="topbar">
   <div class="brand">
-    <img class="logo-img" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png" alt="BBVA" style="width: 108px; height: auto;"/>
-    <div class="title">Agentic Lab · Studio</div>
+    {logo_html}
+    <div class="title">{APP_TITLE} · Studio</div>
   </div>
   <div class="badges">
     <!-- Badges here if needed -->
@@ -269,7 +265,7 @@ st.markdown(
 )
 
 # 3. Main Tabs
-tab_online, tab_offline = st.tabs(["💬 Online Chat", "🛠 Offline Manager"])
+tab_online, tab_offline = st.tabs(["Online Chat", "Offline Manager"])
 
 with tab_online:
     render_online_tab(get_or_init_agent)

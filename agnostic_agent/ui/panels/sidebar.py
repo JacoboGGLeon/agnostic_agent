@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 
 import streamlit as st
@@ -21,13 +21,11 @@ def _resolve_llm_name() -> str:
 
 
 def _resolve_emb_name() -> str:
-    # 1) Explicit env override if present.
     for env_key in ("EMB_SERVED_NAME", "OPENAI_EMBED_MODEL", "AGNOSTIC_EMB_MODEL"):
         val = os.getenv(env_key, "")
         if val.strip():
             return val.strip()
 
-    # 2) setup.yaml-derived config if available in agent.
     agent = st.session_state.get("agent")
     if agent is not None:
         setup_cfg = getattr(agent, "setup_config", {}) or {}
@@ -41,13 +39,14 @@ def _resolve_emb_name() -> str:
     return "custom-embedding-model"
 
 
-def render_sidebar():
+def render_sidebar() -> None:
+    app_title = os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab").strip() or "Agentic Lab"
+    logo_url = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
+
     with st.sidebar:
-        st.image(
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png",
-            width=140,
-        )
-        st.markdown("### Agentic Lab · Settings")
+        if logo_url:
+            st.image(logo_url, width=140)
+        st.markdown(f"### {app_title} · Settings")
 
         st.radio(
             "Theme",
@@ -67,14 +66,13 @@ def render_sidebar():
             st.checkbox("Dev", value=True, key="show_dev_tab")
 
         st.toggle(
-            "Historial en conversación",
+            "Historial en conversacion",
             value=True,
             key="conversation_history_enabled",
             help="Si se desactiva, cada turno se ejecuta sin arrastrar mensajes previos del chat.",
         )
 
         st.divider()
-
         st.caption(f"Mensajes: {len(st.session_state.messages)}")
 
         c1, c2 = st.columns(2)
@@ -102,7 +100,6 @@ def render_sidebar():
             )
 
         st.divider()
-
         st.markdown("#### Models")
 
         llm_name = _resolve_llm_name()

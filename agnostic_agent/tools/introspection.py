@@ -332,6 +332,15 @@ def read_knowledge(source_path: str, db_path: Optional[str] = None) -> Dict[str,
 def _resolve_sqlite_db_path(db_path: str) -> str:
     raw = (db_path or "").strip()
     candidates: List[str] = []
+    alias_map: Dict[str, str] = {}
+    alias_map_raw = os.getenv("AGNOSTIC_SQLITE_ALIAS_MAP_JSON", "").strip()
+    if alias_map_raw:
+        try:
+            parsed = json.loads(alias_map_raw)
+            if isinstance(parsed, dict):
+                alias_map = {str(k).lower(): str(v) for k, v in parsed.items()}
+        except json.JSONDecodeError:
+            alias_map = {}
 
     if raw:
         candidates.append(raw)
@@ -341,12 +350,6 @@ def _resolve_sqlite_db_path(db_path: str) -> str:
         else:
             candidates.append(os.path.join(os.getcwd(), "session", f"{raw}.db"))
             candidates.append(os.path.join(os.getcwd(), f"{raw}.db"))
-        alias_map = {
-            "accounting": "contabilidad.db",
-            "contabilidad": "contabilidad.db",
-            "transactions": "transacciones.db",
-            "transacciones": "transacciones.db",
-        }
         if raw.lower() in alias_map:
             alias = alias_map[raw.lower()]
             candidates.append(os.path.join(os.getcwd(), "session", alias))
@@ -354,11 +357,12 @@ def _resolve_sqlite_db_path(db_path: str) -> str:
     else:
         candidates.extend(
             [
-                os.path.join(os.getcwd(), "session", "contabilidad.db"),
-                os.path.join(os.getcwd(), "session", "transacciones.db"),
                 os.path.join(os.getcwd(), "session", "embeddings.db"),
             ]
         )
+        for alias in alias_map.values():
+            candidates.append(os.path.join(os.getcwd(), "session", alias))
+            candidates.append(os.path.join(os.getcwd(), alias))
 
     seen = set()
     for candidate in candidates:

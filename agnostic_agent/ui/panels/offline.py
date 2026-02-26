@@ -3,10 +3,77 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import streamlit as st
 from agnostic_agent.ui.panels.helpers import render_markdown
+
+
+def _tokenize_name(value: str) -> Set[str]:
+    base = (value or "").lower().replace("-", "_").replace(".", "_")
+    return {part for part in base.split("_") if part}
+
+
+def _safe_key(value: str) -> str:
+    tokens = sorted(_tokenize_name(value))
+    return "_".join(tokens) if tokens else "default"
+
+
+def _enabled_skill_names(agent: Any) -> List[str]:
+    registry = getattr(agent, "skill_registry", None)
+    if registry is None:
+        return []
+    try:
+        skills = registry.list_skills(enabled_only=True)
+    except Exception:
+        return []
+    return [s.name for s in skills if getattr(s, "name", "")]
+
+
+def _load_source_env_map() -> Dict[str, List[str]]:
+    raw = os.getenv("AGNOSTIC_SOURCE_ENV_MAP_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: Dict[str, List[str]] = {}
+    for env_var, selectors in parsed.items():
+        if not isinstance(env_var, str) or not env_var.strip():
+            continue
+        if isinstance(selectors, str):
+            out[env_var] = [selectors]
+        elif isinstance(selectors, list):
+            out[env_var] = [str(x) for x in selectors if str(x).strip()]
+    return out
+
+
+def _apply_source_env_map(
+    session_sources: List[Dict[str, Any]],
+    env_map: Dict[str, List[str]],
+) -> int:
+    selected = 0
+    for env_var, selectors in env_map.items():
+        chosen_path = ""
+        for selector in selectors:
+            selector_l = selector.lower()
+            for src in session_sources:
+                if not src.get("reachable"):
+                    continue
+                name = str(src.get("name", "")).lower()
+                path = str(src.get("path", ""))
+                if selector_l == name or selector_l in path.lower():
+                    chosen_path = path
+                    break
+            if chosen_path:
+                break
+        if chosen_path:
+            os.environ[env_var] = chosen_path
+            selected += 1
+    return selected
 
 
 def _discover_db_candidates() -> List[str]:
@@ -65,7 +132,6 @@ def _discover_session_roots() -> List[Path]:
 
 def _discover_session_sources() -> List[Dict[str, Any]]:
     roots = _discover_session_roots()
-    finance_names = {"contabilidad.db", "transacciones.db", "rules.md", "dictionary.md"}
     sources: List[Dict[str, Any]] = []
     seen_paths = set()
 
@@ -86,7 +152,7 @@ def _discover_session_sources() -> List[Dict[str, Any]]:
                     "reachable": reachable,
                     "semaforo": "GREEN" if reachable else "RED",
                     "reachability_detail": detail,
-                    "finance_target": path.name in finance_names,
+                    "source_tags": sorted(_tokenize_name(path.stem) | _tokenize_name(path.name)),
                 }
             )
 
@@ -191,27 +257,40 @@ def _sqlite_table_rows(path: str, table_name: str, limit: int, offset: int = 0) 
 
 
 def _filter_sources_for_skill(skill_name: str, sources: List[Dict[str, Any]], active_vector_db: str) -> List[Dict[str, Any]]:
-    if skill_name == "contabilidad_instantanea":
-        out = [s for s in sources if s.get("finance_target")]
-        return out
+    registry = getattr(st.session_state.get("agent"), "skill_registry", None)
+    hints: Set[str] = set(_tokenize_name(skill_name))
+    if registry is not None:
+        try:
+            skill = registry.get_skill(skill_name)
+        except Exception:
+            skill = None
+        if skill is not None:
+            for tool_name in getattr(skill, "tools", []) or []:
+                hints |= _tokenize_name(str(tool_name))
+            for kb_name in getattr(skill, "knowledge", []) or []:
+                hints |= _tokenize_name(str(kb_name))
 
-    # semantic_researcher: prefer embeddings DB + markdown docs if available.
-    out: List[Dict[str, Any]] = []
+    scored: List[tuple[int, Dict[str, Any]]] = []
     active_name = Path(active_vector_db).name.lower() if active_vector_db else ""
-    for s in sources:
-        name = str(s.get("name", "")).lower()
-        if s.get("kind") == "db" and (name == "embeddings.db" or name == active_name):
-            out.append(s)
-        elif s.get("kind") == "md" and not s.get("finance_target"):
-            out.append(s)
+    for src in sources:
+        name_tokens = _tokenize_name(str(src.get("name", "")))
+        path_tokens = _tokenize_name(Path(str(src.get("path", ""))).stem)
+        source_tags = set(src.get("source_tags", [])) | name_tokens | path_tokens
+        overlap = len(hints & source_tags)
+        if src.get("kind") == "db" and str(src.get("name", "")).lower() in {"embeddings.db", active_name}:
+            overlap += 2
+        scored.append((overlap, src))
 
-    # If none found for semantic, include active vector DB as fallback pseudo-source.
-    if not any(x.get("kind") == "db" for x in out) and active_vector_db:
+    scored.sort(key=lambda x: (-x[0], not x[1].get("reachable"), x[1].get("name", "")))
+    filtered = [src for score, src in scored if score > 0]
+    if filtered:
+        return filtered
+
+    if active_vector_db:
         p = Path(active_vector_db)
         if p.exists():
             reachable, detail = _check_source_reachability(p)
-            out.insert(
-                0,
+            return [
                 {
                     "name": p.name,
                     "kind": "db",
@@ -221,10 +300,10 @@ def _filter_sources_for_skill(skill_name: str, sources: List[Dict[str, Any]], ac
                     "reachable": reachable,
                     "semaforo": "GREEN" if reachable else "RED",
                     "reachability_detail": detail,
-                    "finance_target": False,
-                },
-            )
-    return out
+                    "source_tags": sorted(_tokenize_name(p.stem) | _tokenize_name(p.name)),
+                }
+            ]
+    return [s for s in sources if s.get("reachable")]
 
 
 def _render_sqlite_viewer(db_path: str, key_prefix: str) -> None:
@@ -320,7 +399,8 @@ def render_offline_tab(agent_factory):
             st.rerun()
 
         st.info("Sube PDFs, selecciona la DB correcta y revisa metadata por elemento.")
-        km_tabs = st.tabs(["General", "semantic_researcher", "contabilidad_instantanea"])
+        dynamic_skills = _enabled_skill_names(agent)
+        km_tabs = st.tabs(["General"] + dynamic_skills)
 
         with km_tabs[0]:
             candidates = _discover_db_candidates()
@@ -388,21 +468,13 @@ def render_offline_tab(agent_factory):
                 c_ko.metric("Unreachable", total_sources - reachable_sources)
                 st.dataframe(session_sources, use_container_width=True, hide_index=True)
 
-                finance_map = {
-                    row["name"]: row["path"]
-                    for row in session_sources
-                    if row.get("finance_target") and row.get("reachable")
-                }
-                if st.button("Usar fuentes detectadas para Finance"):
-                    if "contabilidad.db" in finance_map:
-                        os.environ["AGNOSTIC_FIN_ACC_DB"] = finance_map["contabilidad.db"]
-                    if "transacciones.db" in finance_map:
-                        os.environ["AGNOSTIC_FIN_TRANS_DB"] = finance_map["transacciones.db"]
-                    if "rules.md" in finance_map:
-                        os.environ["AGNOSTIC_FIN_RULES_MD"] = finance_map["rules.md"]
-                    if "dictionary.md" in finance_map:
-                        os.environ["AGNOSTIC_FIN_DICT_MD"] = finance_map["dictionary.md"]
-                    st.success("Variables AGNOSTIC_FIN_* actualizadas con fuentes detectadas y reachables.")
+                env_map = _load_source_env_map()
+                if env_map:
+                    if st.button("Aplicar source mapping configurado"):
+                        applied = _apply_source_env_map(session_sources, env_map)
+                        st.success(f"Mapping aplicado a {applied} variables de entorno.")
+                else:
+                    st.caption("Sin AGNOSTIC_SOURCE_ENV_MAP_JSON configurado.")
 
                 selected_source = st.selectbox(
                     "Inspeccionar fuente",
@@ -450,69 +522,39 @@ def render_offline_tab(agent_factory):
                     except Exception as e:
                         st.error(f"Error critico durante la ingestion: {e}")
 
-        with km_tabs[1]:
-            st.markdown("#### semantic_researcher")
-            active_db = _active_db_path()
-            session_sources = _discover_session_sources()
-            semantic_sources = _filter_sources_for_skill("semantic_researcher", session_sources, active_db)
-            if semantic_sources:
-                st.dataframe(semantic_sources, use_container_width=True, hide_index=True)
-                sem_db_sources = [s for s in semantic_sources if s.get("kind") == "db"]
-                sem_md_sources = [s for s in semantic_sources if s.get("kind") == "md"]
+        for idx, skill_name in enumerate(dynamic_skills, start=1):
+            with km_tabs[idx]:
+                st.markdown(f"#### {skill_name}")
+                active_db = _active_db_path()
+                session_sources = _discover_session_sources()
+                skill_sources = _filter_sources_for_skill(skill_name, session_sources, active_db)
+                if skill_sources:
+                    st.dataframe(skill_sources, use_container_width=True, hide_index=True)
+                    db_sources = [s for s in skill_sources if s.get("kind") == "db"]
+                    md_sources = [s for s in skill_sources if s.get("kind") == "md"]
+                    safe_skill = _safe_key(skill_name)
 
-                if sem_db_sources:
-                    sem_db_path = st.selectbox(
-                        "DB para semantic_researcher",
-                        options=[s["path"] for s in sem_db_sources],
-                        format_func=lambda path: f"{Path(path).name} - {path}",
-                        key="km_sem_db",
-                    )
-                    _render_sqlite_viewer(sem_db_path, key_prefix="km_sem")
+                    if db_sources:
+                        db_path = st.selectbox(
+                            f"DB para {skill_name}",
+                            options=[s["path"] for s in db_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key=f"km_{safe_skill}_db",
+                        )
+                        _render_sqlite_viewer(db_path, key_prefix=f"km_{safe_skill}")
+                    else:
+                        st.info(f"No se detecto DB para {skill_name}.")
+
+                    if md_sources:
+                        md_path = st.selectbox(
+                            f"Markdown para {skill_name}",
+                            options=[s["path"] for s in md_sources],
+                            format_func=lambda path: f"{Path(path).name} - {path}",
+                            key=f"km_{safe_skill}_md",
+                        )
+                        _render_markdown_pretty(md_path, key_prefix=f"km_{safe_skill}")
                 else:
-                    st.info("No se detecto DB para semantic_researcher.")
-
-                if sem_md_sources:
-                    sem_md_path = st.selectbox(
-                        "Markdown para semantic_researcher",
-                        options=[s["path"] for s in sem_md_sources],
-                        format_func=lambda path: f"{Path(path).name} - {path}",
-                        key="km_sem_md",
-                    )
-                    _render_markdown_pretty(sem_md_path, key_prefix="km_sem")
-            else:
-                st.info("No se detectaron fuentes para semantic_researcher.")
-
-        with km_tabs[2]:
-            st.markdown("#### contabilidad_instantanea")
-            active_db = _active_db_path()
-            session_sources = _discover_session_sources()
-            fin_sources = _filter_sources_for_skill("contabilidad_instantanea", session_sources, active_db)
-            if fin_sources:
-                st.dataframe(fin_sources, use_container_width=True, hide_index=True)
-                fin_db_sources = [s for s in fin_sources if s.get("kind") == "db"]
-                fin_md_sources = [s for s in fin_sources if s.get("kind") == "md"]
-
-                if fin_db_sources:
-                    fin_db_path = st.selectbox(
-                        "DB para contabilidad_instantanea",
-                        options=[s["path"] for s in fin_db_sources],
-                        format_func=lambda path: f"{Path(path).name} - {path}",
-                        key="km_fin_db",
-                    )
-                    _render_sqlite_viewer(fin_db_path, key_prefix="km_fin")
-                else:
-                    st.info("No se detecto DB para contabilidad_instantanea.")
-
-                if fin_md_sources:
-                    fin_md_path = st.selectbox(
-                        "Markdown para contabilidad_instantanea",
-                        options=[s["path"] for s in fin_md_sources],
-                        format_func=lambda path: f"{Path(path).name} - {path}",
-                        key="km_fin_md",
-                    )
-                    _render_markdown_pretty(fin_md_path, key_prefix="km_fin")
-            else:
-                st.info("No se detectaron fuentes para contabilidad_instantanea.")
+                    st.info(f"No se detectaron fuentes para {skill_name}.")
 
     with tab_tm:
         st.markdown("### Tools Playground")

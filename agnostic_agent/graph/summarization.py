@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -39,9 +39,6 @@ def summarize_tool_runs(
     *,
     json_default: Optional[Callable[[Any], Any]] = None,
 ) -> str:
-    """
-    User-friendly summary based ONLY on tool outputs.
-    """
     if not runs:
         return (
             "No se invoco ninguna herramienta. "
@@ -106,6 +103,35 @@ def summarize_tool_runs(
     return "\n".join(parts)
 
 
+def _pick_entity_id(args: Dict[str, Any], output: Any) -> str:
+    preferred_keys = [
+        "id",
+        "entity_id",
+        "record_id",
+        "item_id",
+        "document_id",
+        "ticket_id",
+        "task_id",
+        "codigo",
+        "key",
+        "name",
+    ]
+    for key in preferred_keys:
+        value = args.get(key)
+        if value is None and isinstance(output, dict):
+            value = output.get(key)
+        if value not in (None, ""):
+            return f"{key}={value}"
+    for key, value in args.items():
+        if key.endswith("_id") and value not in (None, ""):
+            return f"{key}={value}"
+    if isinstance(output, dict):
+        for key, value in output.items():
+            if key.endswith("_id") and value not in (None, ""):
+                return f"{key}={value}"
+    return ""
+
+
 def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
     if not runs:
         return "No se ejecutaron herramientas."
@@ -116,11 +142,7 @@ def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
         args = run.get("args", {}) or {}
         output = run.get("output")
 
-        credito_id = ""
-        if isinstance(args, dict):
-            credito_id = str(args.get("credito_id") or "").strip()
-        if not credito_id and isinstance(output, dict):
-            credito_id = str(output.get("credito_id") or "").strip()
+        entity = _pick_entity_id(args if isinstance(args, dict) else {}, output)
 
         if isinstance(output, dict):
             if "error" in output:
@@ -136,7 +158,7 @@ def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
         else:
             status = f"resultado={type(output).__name__}"
 
-        suffix = f" credito_id={credito_id}" if credito_id else ""
+        suffix = f" {entity}" if entity else ""
         lines.append(f"{idx}. {name}{suffix} -> {status}")
 
     return "\n".join(lines)
@@ -164,36 +186,6 @@ def looks_like_technical_answer(text: str) -> bool:
         1 for ln in lines if re.match(r"^\d+\.\s+\w+", ln) and "->" in ln
     )
     return numbered_tool_lines >= 3
-
-
-def _pick_entity_id(args: Dict[str, Any], output: Any) -> str:
-    preferred_keys = [
-        "id",
-        "entity_id",
-        "record_id",
-        "item_id",
-        "document_id",
-        "ticket_id",
-        "task_id",
-        "credito_id",
-        "codigo",
-        "key",
-        "name",
-    ]
-    for key in preferred_keys:
-        value = args.get(key)
-        if value is None and isinstance(output, dict):
-            value = output.get(key)
-        if value not in (None, ""):
-            return f"{key}={value}"
-    for key, value in args.items():
-        if key.endswith("_id") and value not in (None, ""):
-            return f"{key}={value}"
-    if isinstance(output, dict):
-        for key, value in output.items():
-            if key.endswith("_id") and value not in (None, ""):
-                return f"{key}={value}"
-    return ""
 
 
 def _pick_status(output: Any) -> str:
@@ -226,7 +218,7 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
         name = str(run.get("name", "tool"))
         args = run.get("args", {}) or {}
         output = run.get("output")
-        entity = _pick_entity_id(args, output)
+        entity = _pick_entity_id(args if isinstance(args, dict) else {}, output)
         status = _pick_status(output)
         if status.startswith("error="):
             errors += 1
@@ -236,17 +228,16 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     lines.append("")
     lines.append("### Conclusiones")
     if errors == 0:
-        lines.append("- No se detectaron errores de ejecución en las evidencias disponibles.")
+        lines.append("- No se detectaron errores de ejecucion en las evidencias disponibles.")
     else:
-        lines.append(f"- Se detectaron {errors} ejecuciones con error; revisar detalle técnico.")
-    lines.append("- La respuesta se generó únicamente a partir de salidas verificadas de herramientas.")
+        lines.append(f"- Se detectaron {errors} ejecuciones con error; revisar detalle tecnico.")
+    lines.append("- La respuesta se genero unicamente a partir de salidas verificadas de herramientas.")
 
     answer = "\n".join(lines).strip()
     if looks_like_technical_answer(answer):
-        # Safety net: keep this user-facing even if data is sparse.
         return (
             "## Resultado\n"
-            "Se completó el procesamiento de la solicitud con evidencia de herramientas.\n"
-            "Consulta la vista profunda para el detalle técnico por ejecución."
+            "Se completo el procesamiento de la solicitud con evidencia de herramientas.\n"
+            "Consulta la vista profunda para el detalle tecnico por ejecucion."
         )
     return answer
