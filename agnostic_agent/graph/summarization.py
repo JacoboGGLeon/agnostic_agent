@@ -237,6 +237,16 @@ def _extract_subqueries_from_prompt(user_prompt: str) -> List[Dict[str, str]]:
     return [{"label": "Solicitud", "text": text}]
 
 
+def _extract_credit_entity_from_text(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        return ""
+    m = re.search(r"\b(LOC-\d{4,})\b", t, flags=re.IGNORECASE)
+    if not m:
+        return ""
+    return f"credito_id={m.group(1).upper()}"
+
+
 def _fmt_number(value: Any) -> str:
     try:
         return f"{float(value):.2f}"
@@ -423,13 +433,13 @@ def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> 
     for idx, sq in enumerate(subqueries, start=1):
         sq_text = sq.get("text", "")
         sq_label = sq.get("label", f"Subconsulta {idx}")
-        entity = ""
+        entity = _extract_credit_entity_from_text(sq_text)
         try:
             parsed = json.loads(sq_text) if sq_text.startswith("{") else {}
             if isinstance(parsed, dict) and parsed.get("credito_id"):
-                entity = f"credito_id={parsed.get('credito_id')}"
+                entity = f"credito_id={str(parsed.get('credito_id')).upper()}"
         except Exception:
-            entity = ""
+            pass
 
         message = ""
         if entity and entity in by_entity:
