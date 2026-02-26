@@ -1,11 +1,12 @@
+import json
+from typing import Any, Dict, List, Optional, Tuple
+
 import streamlit as st
-from typing import List, Tuple
 
 from agnostic_agent.ui.panels.helpers import (
     assistant_messages,
     as_text,
     card_code,
-    card_md,
     extract_summary_deep,
     extract_thinking,
     extract_tool_runs,
@@ -17,19 +18,56 @@ from agnostic_agent.ui.panels.helpers import (
 )
 
 
+def _get_summary_v2(raw_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_state, dict):
+        return None
+    pipeline_v2 = raw_state.get("pipeline_v2")
+    if not isinstance(pipeline_v2, dict):
+        return None
+    deep_v2 = pipeline_v2.get("deep_out")
+    if not isinstance(deep_v2, dict):
+        return None
+
+    summary_v2 = deep_v2.get("summary")
+    if isinstance(summary_v2, dict):
+        return summary_v2
+
+    artifacts = deep_v2.get("artifacts")
+    if isinstance(artifacts, dict):
+        fallback = artifacts.get("summary_v2")
+        if isinstance(fallback, dict):
+            return fallback
+    return None
+
+
+def _render_section_kv(title: str, section: Dict[str, Any], skip_keys: Optional[set] = None) -> None:
+    skip_keys = skip_keys or set()
+    rows: List[Dict[str, str]] = []
+    for k, v in section.items():
+        if k in skip_keys:
+            continue
+        if isinstance(v, (dict, list)):
+            value = json.dumps(v, ensure_ascii=False)
+        else:
+            value = str(v)
+        rows.append({"field": str(k), "value": value})
+
+    if rows:
+        st.markdown(f"###### {title}")
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def render_inspector():
     if not st.session_state.get("show_inspector", True):
-        st.info("Inspector oculto. Actívalo en la barra lateral.")
+        st.info("Inspector oculto. Activalo en la barra lateral.")
         return
 
-    # Streamlit does not support "opening a div and then rendering widgets inside it".
-    # Use a real container so the box actually wraps all content.
     with st.container(border=True):
-        st.markdown("### 🔎 Inspector")
+        st.markdown("### Inspector")
 
         a_msgs = assistant_messages()
         if not a_msgs:
-            st.info("Aún no hay respuestas del agente. Escribe algo para empezar.")
+            st.info("Aun no hay respuestas del agente. Escribe algo para empezar.")
             return
 
         ids = [m["id"] for m in a_msgs]
@@ -38,8 +76,8 @@ def render_inspector():
             m = find_message_by_id(mid) or {}
             out = m.get("out") or {}
             text = strip_user_prefix(as_text(out.get("user_out"))).replace("\n", " ").strip()
-            text = (text[:60] + "…") if len(text) > 60 else text
-            return f"id={mid} · {text or '(sin texto)'}"
+            text = (text[:60] + "...") if len(text) > 60 else text
+            return f"id={mid} - {text or '(sin texto)'}"
 
         if st.session_state.selected_msg_id not in ids:
             st.session_state.selected_msg_id = ids[-1]
@@ -69,11 +107,11 @@ def render_inspector():
 
         tab_specs: List[Tuple[str, str]] = []
         if st.session_state.get("show_thinking_tab", True):
-            tab_specs.append(("🧠 Thinking", "thinking"))
+            tab_specs.append(("Thinking", "thinking"))
         if st.session_state.get("show_deep_tab", True):
-            tab_specs.append(("🧠 Deep", "deep"))
+            tab_specs.append(("Deep", "deep"))
         if st.session_state.get("show_dev_tab", True):
-            tab_specs.append(("🔍 Dev", "dev"))
+            tab_specs.append(("Dev", "dev"))
 
         if not tab_specs:
             return
@@ -85,18 +123,44 @@ def render_inspector():
                     card_code(
                         "Pensamiento (thinking)",
                         thinking,
-                        icon="🧠",
+                        icon="Thinking",
                         hint="reasoning_content",
                     )
                 elif tab_key == "deep":
-                    content_to_show = deep_txt if deep_txt else "_(vacío / sin resumen)_"
+                    content_to_show = deep_txt if deep_txt else "_(vacio / sin resumen)_"
                     st.markdown("##### Vista profunda (deep_out / summary)")
-                    st.markdown(render_markdown(content_to_show), unsafe_allow_html=True)
+
+                    summary_v2 = _get_summary_v2(raw_state)
+                    if isinstance(summary_v2, dict) and summary_v2:
+                        section_order = [
+                            ("Analyzer", "analyzer"),
+                            ("Planner", "planner"),
+                            ("Executor", "executor"),
+                            ("Catcher", "catcher"),
+                            ("Summarizer", "summarizer"),
+                            ("Validator", "validator"),
+                            ("Metrics", "metrics"),
+                        ]
+                        for title, key in section_order:
+                            section = summary_v2.get(key)
+                            if not isinstance(section, dict) or not section:
+                                continue
+                            if key == "validator":
+                                _render_section_kv(title, section, skip_keys={"coverage_report"})
+                                coverage = section.get("coverage_report")
+                                if isinstance(coverage, list) and coverage:
+                                    st.markdown("###### Coverage Report")
+                                    st.dataframe(coverage, use_container_width=True, hide_index=True)
+                            else:
+                                _render_section_kv(title, section)
+                    else:
+                        st.markdown(render_markdown(content_to_show), unsafe_allow_html=True)
+
                     with st.expander("Ver markdown raw", expanded=False):
                         st.code(content_to_show, language="markdown")
                 elif tab_key == "dev":
                     render_tool_runs(tool_runs)
-                    with st.expander("🧬 raw_state (debug)", expanded=False):
+                    with st.expander("raw_state (debug)", expanded=False):
                         if isinstance(raw_state, dict) and raw_state:
                             st.json(raw_state)
                         else:
