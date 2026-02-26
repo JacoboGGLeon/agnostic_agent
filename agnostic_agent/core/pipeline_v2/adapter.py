@@ -109,6 +109,15 @@ def _build_deep_summary_v2(
     ]
     run_tools = [str(run.name or "") for run in tool_runs]
     output_types = _count_by([type(run.output).__name__ for run in tool_runs])
+    final_output: Dict[str, Any] = {}
+    if tool_runs:
+        last_run = tool_runs[-1]
+        final_output = {
+            "id": _sanitize_text(last_run.id),
+            "tool": _sanitize_text(last_run.name),
+            "input": last_run.args if isinstance(last_run.args, dict) else {},
+            "output": last_run.output,
+        }
 
     subqueries = len(analyzer.get("subqueries") or [])
     planned_calls = len(planned_tools)
@@ -159,12 +168,19 @@ def _build_deep_summary_v2(
             "reasoning": _sanitize_text(validator.get("reasoning", "")),
             "coverage_report": coverage_report if isinstance(coverage_report, list) else [],
         },
+        final_output=final_output,
         metrics={
             "subqueries": subqueries,
             "planned_calls": planned_calls,
             "executed_calls": executed_calls,
             "tool_runs": run_count,
             "coverage_ratio": coverage_ratio,
+        },
+        metrics_extended={
+            "subqueries": subqueries,
+            "planned_calls": planned_calls,
+            "executed_calls": executed_calls,
+            "tool_runs": run_count,
         },
     )
 
@@ -293,7 +309,9 @@ def render_deep_text(vm: DeepViewModelV2) -> str:
         ("Catcher", "catcher"),
         ("Summarizer", "summarizer"),
         ("Validator", "validator"),
+        ("Final Output", "final_output"),
         ("Metrics", "metrics"),
+        ("Metrics Extended", "metrics_extended"),
     ]
     for title, key in section_order:
         section = summary.get(key) or {}

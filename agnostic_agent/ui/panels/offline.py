@@ -399,8 +399,7 @@ def render_offline_tab(agent_factory):
             st.rerun()
 
         st.info("Sube PDFs, selecciona la DB correcta y revisa metadata por elemento.")
-        dynamic_skills = _enabled_skill_names(agent)
-        km_tabs = st.tabs(["General"] + dynamic_skills)
+        km_tabs = st.tabs(["General"])
 
         with km_tabs[0]:
             candidates = _discover_db_candidates()
@@ -521,40 +520,6 @@ def render_offline_tab(agent_factory):
                             st.error(f"Error: {result.get('error')}")
                     except Exception as e:
                         st.error(f"Error critico durante la ingestion: {e}")
-
-        for idx, skill_name in enumerate(dynamic_skills, start=1):
-            with km_tabs[idx]:
-                st.markdown(f"#### {skill_name}")
-                active_db = _active_db_path()
-                session_sources = _discover_session_sources()
-                skill_sources = _filter_sources_for_skill(skill_name, session_sources, active_db)
-                if skill_sources:
-                    st.dataframe(skill_sources, use_container_width=True, hide_index=True)
-                    db_sources = [s for s in skill_sources if s.get("kind") == "db"]
-                    md_sources = [s for s in skill_sources if s.get("kind") == "md"]
-                    safe_skill = _safe_key(skill_name)
-
-                    if db_sources:
-                        db_path = st.selectbox(
-                            f"DB para {skill_name}",
-                            options=[s["path"] for s in db_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key=f"km_{safe_skill}_db",
-                        )
-                        _render_sqlite_viewer(db_path, key_prefix=f"km_{safe_skill}")
-                    else:
-                        st.info(f"No se detecto DB para {skill_name}.")
-
-                    if md_sources:
-                        md_path = st.selectbox(
-                            f"Markdown para {skill_name}",
-                            options=[s["path"] for s in md_sources],
-                            format_func=lambda path: f"{Path(path).name} - {path}",
-                            key=f"km_{safe_skill}_md",
-                        )
-                        _render_markdown_pretty(md_path, key_prefix=f"km_{safe_skill}")
-                else:
-                    st.info(f"No se detectaron fuentes para {skill_name}.")
 
     with tab_tm:
         st.markdown("### Tools Playground")

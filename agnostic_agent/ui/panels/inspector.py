@@ -139,7 +139,9 @@ def render_inspector():
                             ("Catcher", "catcher"),
                             ("Summarizer", "summarizer"),
                             ("Validator", "validator"),
+                            ("Final Output", "final_output"),
                             ("Metrics", "metrics"),
+                            ("Metrics Extended", "metrics_extended"),
                         ]
                         for title, key in section_order:
                             section = summary_v2.get(key)
@@ -151,6 +153,9 @@ def render_inspector():
                                 if isinstance(coverage, list) and coverage:
                                     st.markdown("###### Coverage Report")
                                     st.dataframe(coverage, use_container_width=True, hide_index=True)
+                            elif key == "final_output":
+                                st.markdown("###### Final Output")
+                                st.json(section)
                             else:
                                 _render_section_kv(title, section)
                     else:
