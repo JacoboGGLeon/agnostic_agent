@@ -2,6 +2,7 @@
 
 import os
 import re
+import html
 from pathlib import Path
 
 import streamlit as st
@@ -16,15 +17,20 @@ from agnostic_agent.config.loader import load_config
 # -----------------------------
 # Page Config
 # -----------------------------
+DEFAULT_BRAND_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png"
+
+
 def _clean_app_title(value: str) -> str:
     raw = value if isinstance(value, str) else str(value or "")
-    cleaned = re.sub(r"<[^>]+>", "", raw).strip()
+    raw = html.unescape(raw).replace("`", " ")
+    cleaned = re.sub(r"<[^>]+>", " ", raw).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s*[·\-|]\s*(studio|settings)\s*$", "", cleaned, flags=re.IGNORECASE).strip()
     return cleaned or "Agentic Lab"
 
 
 APP_TITLE = _clean_app_title(os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab"))
-APP_LOGO = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
+APP_LOGO = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip() or DEFAULT_BRAND_LOGO_URL
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -280,7 +286,7 @@ logo_html = (
 st.markdown(
     f"""
 <div class="topbar">
-  <div class="brand">
+  <div class="brand" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
     {logo_html}
     <div class="title">{APP_TITLE} · Studio</div>
   </div>

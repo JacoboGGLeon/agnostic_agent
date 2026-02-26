@@ -1,8 +1,11 @@
-﻿import json
+import html
+import json
 import os
 import re
 
 import streamlit as st
+
+DEFAULT_BRAND_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/BBVA_2019.svg/1280px-BBVA_2019.svg.png"
 
 
 def _resolve_llm_name() -> str:
@@ -42,18 +45,19 @@ def _resolve_emb_name() -> str:
 
 def _clean_ui_text(value: str, default: str = "") -> str:
     raw = value if isinstance(value, str) else str(value or "")
-    cleaned = re.sub(r"<[^>]+>", "", raw).strip()
+    raw = html.unescape(raw).replace("`", " ")
+    cleaned = re.sub(r"<[^>]+>", " ", raw).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s*[·\-|]\s*(studio|settings)\s*$", "", cleaned, flags=re.IGNORECASE).strip()
     return cleaned or default
 
 
 def render_sidebar() -> None:
     app_title = _clean_ui_text(os.getenv("AGNOSTIC_APP_TITLE", "Agentic Lab"), "Agentic Lab")
-    logo_url = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip()
+    logo_url = os.getenv("AGNOSTIC_BRAND_LOGO_URL", "").strip() or DEFAULT_BRAND_LOGO_URL
 
     with st.sidebar:
-        if logo_url:
-            st.image(logo_url, width=140)
+        st.image(logo_url, width=140)
         st.markdown(f"### {app_title} · Settings")
 
         st.radio(
