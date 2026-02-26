@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from agnostic_agent.core.pipeline_v2.planner import (
     build_subqueries_from_prompt,
@@ -20,6 +20,106 @@ def _sanitize_text(value: Any) -> str:
     text = text.replace("[object Object]", "")
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _extract_expected_id_constraints(subquery_text: str) -> Dict[str, str]:
+    """
+    Infer expected entity id constraints from subquery text in a generic way.
+    Prefers explicit JSON fragments; falls back to generic ID-like tokens.
+    """
+    text = _sanitize_text(subquery_text)
+    constraints: Dict[str, str] = {}
+    if not text:
+        return constraints
+
+    for chunk in re.findall(r"\{[^{}]+\}", text):
+        try:
+            obj = json.loads(chunk)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        for key, value in obj.items():
+            key_s = str(key)
+            if key_s.endswith("_id") and value not in (None, ""):
+                constraints[key_s] = str(value)
+
+    if constraints:
+        return constraints
+
+    # Fallback: generic ID-like token (e.g., LOC-0010, ABC_1234, USER42)
+    token_match = re.search(r"\b[A-Za-z]{2,}[A-Za-z0-9_-]*-[A-Za-z0-9_-]+\b", text)
+    if token_match:
+        constraints["entity_id"] = token_match.group(0)
+    return constraints
+
+
+def _collect_arg_id_fields(args: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    if not isinstance(args, dict):
+        return out
+    for key, value in args.items():
+        key_s = str(key)
+        if key_s.endswith("_id") and value not in (None, ""):
+            out[key_s] = str(value)
+    return out
+
+
+def _align_call_ids_to_subquery(
+    *,
+    subquery_text: str,
+    tool_name: str,
+    args: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any], str]:
+    """
+    Ensure call args entity IDs are semantically aligned with subquery IDs.
+    Returns (ok, normalized_args, reason_if_blocked).
+    """
+    expected = _extract_expected_id_constraints(subquery_text)
+    if not expected:
+        return True, args, ""
+
+    normalized = dict(args or {})
+    actual = _collect_arg_id_fields(normalized)
+
+    # No *_id in args but exactly one expected id -> inject it.
+    if not actual and len(expected) == 1:
+        exp_key, exp_val = next(iter(expected.items()))
+        normalized.setdefault(exp_key, exp_val)
+        return True, normalized, ""
+
+    # If same key exists with wrong value, overwrite with expected deterministic value.
+    changed = False
+    for key, exp_val in expected.items():
+        if key in normalized and str(normalized.get(key)) != str(exp_val):
+            normalized[key] = exp_val
+            changed = True
+
+    if changed:
+        return True, normalized, ""
+
+    actual_after = _collect_arg_id_fields(normalized)
+    if not actual_after:
+        return True, normalized, ""
+
+    # If all shared keys match, consider aligned.
+    shared_keys = set(expected.keys()) & set(actual_after.keys())
+    if shared_keys and all(expected[k] == actual_after[k] for k in shared_keys):
+        return True, normalized, ""
+
+    # If expected has one value and args has one *_id key, force alignment.
+    if len(expected) == 1 and len(actual_after) == 1:
+        _, exp_val = next(iter(expected.items()))
+        act_key, act_val = next(iter(actual_after.items()))
+        if act_val != exp_val:
+            normalized[act_key] = exp_val
+        return True, normalized, ""
+
+    return (
+        False,
+        normalized,
+        f"entity_mismatch tool={tool_name} expected={expected} actual={actual_after}",
+    )
 
 
 def format_rich_context(
@@ -184,11 +284,8 @@ def execute_planner_node(
         current_llm = base_model.bind_tools(active_tools)
         logger.info("planner skill mode active; rebound tools=%s", len(active_tools))
 
-    history = [
-        m
-        for m in msgs
-        if not is_pipeline_internal_ai(m) and not is_ai_with_tool_calls(m)
-    ]
+    # Avoid cross-turn leakage: planner should use current subquery context only.
+    history: List[Any] = []
 
     all_tool_calls: List[Dict[str, Any]] = []
     planner_blocks: List[Dict[str, Any]] = []
@@ -287,6 +384,15 @@ Genera el DAG exclusivo para resolver: "{subq}"
                         n_name,
                     )
                     continue
+                ok_align, aligned_args, blocked_reason = _align_call_ids_to_subquery(
+                    subquery_text=str(subq),
+                    tool_name=n_name,
+                    args=n_args,
+                )
+                if not ok_align:
+                    logger.warning("planner blocked mismatched entity call: %s", blocked_reason)
+                    continue
+                n_args = aligned_args
                 try:
                     n_args_key = json.dumps(n_args, sort_keys=True)
                 except Exception:

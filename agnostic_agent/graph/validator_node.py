@@ -67,6 +67,7 @@ def execute_validator_node(
         subqueries=subqueries,
         planner_calls_by_subquery=planner_calls_by_subquery,
         executor_steps=executor_steps,
+        tool_runs=runs,
     )
 
     invariant_violations: List[str] = compute_invariant_violations(
@@ -82,9 +83,9 @@ def execute_validator_node(
         is_placeholder_subquery=is_placeholder_subquery,
     )
 
-    if any(r.get("status") in {"missing", "skipped"} for r in coverage_report):
+    if any(r.get("status") in {"missing", "skipped", "mismatch"} for r in coverage_report):
         all_covered = False
-        reasons.append("CoverageInvariant: hay subqueries sin ejecucion efectiva.")
+        reasons.append("CoverageInvariant: hay subqueries sin ejecucion efectiva o con mismatch semantico.")
 
     if not final_answer.strip():
         all_covered = False

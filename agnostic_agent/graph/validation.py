@@ -77,6 +77,7 @@ def build_subquery_coverage_report(
     subqueries: Sequence[str],
     planner_calls_by_subquery: Sequence[Dict[str, Any]],
     executor_steps: Sequence[Dict[str, Any]],
+    tool_runs: Sequence[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     report: List[Dict[str, Any]] = []
     executed_by_idx: Dict[int, int] = {}
@@ -104,6 +105,15 @@ def build_subquery_coverage_report(
             status = "executed"
         elif skipped_reason:
             status = "skipped"
+        semantic = _semantic_match_status(
+            subquery=str(subq),
+            subquery_idx=idx,
+            executor_steps=executor_steps,
+            tool_runs=tool_runs or [],
+        )
+        if status == "executed" and semantic == "mismatch":
+            status = "mismatch"
+            skipped_reason = "entity_mismatch_between_subquery_and_tool_args"
         report.append(
             {
                 "subquery_idx": idx,
@@ -115,6 +125,80 @@ def build_subquery_coverage_report(
             }
         )
     return report
+
+
+def _extract_expected_id_values(text: str) -> Set[str]:
+    values: Set[str] = set()
+    source = str(text or "")
+    for chunk in re.findall(r"\{[^{}]+\}", source):
+        try:
+            import json
+
+            obj = json.loads(chunk)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        for key, value in obj.items():
+            if str(key).endswith("_id") and value not in (None, ""):
+                values.add(str(value).strip().lower())
+    if values:
+        return values
+    m = re.search(r"\b[A-Za-z]{2,}[A-Za-z0-9_-]*-[A-Za-z0-9_-]+\b", source)
+    if m:
+        values.add(m.group(0).strip().lower())
+    return values
+
+
+def _extract_run_id_values(step: Dict[str, Any], run: Dict[str, Any]) -> Set[str]:
+    values: Set[str] = set()
+    args = step.get("args", {}) if isinstance(step, dict) else {}
+    if isinstance(args, dict):
+        for key, value in args.items():
+            if str(key).endswith("_id") and value not in (None, ""):
+                values.add(str(value).strip().lower())
+    output = run.get("output", {}) if isinstance(run, dict) else {}
+    if isinstance(output, dict):
+        for key, value in output.items():
+            if str(key).endswith("_id") and value not in (None, ""):
+                values.add(str(value).strip().lower())
+    return values
+
+
+def _semantic_match_status(
+    *,
+    subquery: str,
+    subquery_idx: int,
+    executor_steps: Sequence[Dict[str, Any]],
+    tool_runs: Sequence[Dict[str, Any]],
+) -> str:
+    expected = _extract_expected_id_values(subquery)
+    if not expected:
+        return "unknown"
+
+    matched = False
+    seen = False
+    runs_by_call_id: Dict[str, Dict[str, Any]] = {}
+    for run in tool_runs or []:
+        call_id = str(run.get("id", "") or "")
+        if call_id:
+            runs_by_call_id[call_id] = run
+
+    for step in executor_steps or []:
+        tcid = str(step.get("tool_call_id", "") or "")
+        m = re.match(r"^call_s(\d+)_", tcid)
+        if not m or int(m.group(1)) != subquery_idx:
+            continue
+        seen = True
+        run = runs_by_call_id.get(tcid, {})
+        observed = _extract_run_id_values(step, run)
+        if observed and any(val in expected for val in observed):
+            matched = True
+            break
+
+    if not seen:
+        return "unknown"
+    return "match" if matched else "mismatch"
 
 
 def has_coverage_partial(invariant_violations: Sequence[str]) -> bool:

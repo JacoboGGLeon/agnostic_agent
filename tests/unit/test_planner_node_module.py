@@ -149,3 +149,65 @@ def test_execute_planner_node_builds_subqueries_from_prompt_when_analyzer_missin
     assert all(isinstance(tr, dict) for tr in out["planner_trajs"])
     ai_msg = out["messages"][0]
     assert len(ai_msg.tool_calls) == 2
+
+
+def test_execute_planner_node_aligns_entity_id_to_current_subquery_and_avoids_history_leak():
+    class _InspectPlannerLLM:
+        def __init__(self):
+            self.invocations = []
+
+        def bind_tools(self, _tools):
+            return self
+
+        def invoke(self, messages):
+            self.invocations.append(messages)
+            # Intentionally wrong entity id; planner should align to LOC-0010.
+            return AIMessage(
+                content="ok",
+                tool_calls=[
+                    {
+                        "id": "z1",
+                        "name": "reconcile_credit_accounting",
+                        "args": {"credito_id": "LOC-0005", "balance": "39336.16"},
+                    }
+                ],
+            )
+
+    llm = _InspectPlannerLLM()
+    previous_turn = HumanMessage(
+        content='Realiza la conciliación del Crédito LOC-0005. Estatus: Vigente / Al corriente.'
+    )
+    state = {
+        "messages": [previous_turn, HumanMessage(content="irrelevante para planner")],
+        "analyzer": {
+            "subqueries": [
+                'Realiza la conciliación del crédito {"credito_id":"LOC-0010","saldo_total":39336.16}'
+            ]
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("reconcile_credit_accounting")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry([_Skill("s1", tools=["reconcile_credit_accounting"])]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["s1"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 1
+    assert ai_msg.tool_calls[0]["args"]["credito_id"] == "LOC-0010"
+    # Ensure planner invocation did not include prior human turns.
+    sent = llm.invocations[0]
+    assert len(sent) == 2  # system + current subquery prompt
