@@ -181,6 +181,30 @@ def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
     return ""
 
 def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str) -> str:
+    if isinstance(raw_state, dict):
+        pipeline_v2 = raw_state.get("pipeline_v2")
+        if isinstance(pipeline_v2, dict):
+            deep_v2 = pipeline_v2.get("deep_out") or {}
+            timeline = deep_v2.get("timeline") or []
+            artifacts = deep_v2.get("artifacts") or {}
+            lines: List[str] = ["## RESUMEN DEEP DEL PIPELINE (v2)", "", "### Timeline"]
+            if isinstance(timeline, list) and timeline:
+                for ev in timeline:
+                    if not isinstance(ev, dict):
+                        continue
+                    node = sanitize_display_text(ev.get("node", ""))
+                    status = sanitize_display_text(ev.get("status", ""))
+                    duration = ev.get("duration_ms", 0)
+                    lines.append(f"- {node}: {status} ({duration}ms)")
+            else:
+                lines.append("- (sin eventos)")
+            lines.append("")
+            lines.append("### Artifacts")
+            lines.append("```json")
+            lines.append(sanitize_display_text(json.dumps(artifacts, ensure_ascii=False, indent=2)))
+            lines.append("```")
+            return sanitize_display_text("\n".join(lines))
+
     planner_from_state = ""
     expected_subqueries = 0
     summary: Dict[str, Any] = {}

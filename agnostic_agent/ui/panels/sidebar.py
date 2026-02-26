@@ -71,6 +71,12 @@ def render_sidebar() -> None:
             key="conversation_history_enabled",
             help="Si se desactiva, cada turno se ejecuta sin arrastrar mensajes previos del chat.",
         )
+        st.toggle(
+            "Pipeline v2",
+            value=bool(st.session_state.get("pipeline_v2_enabled", True)),
+            key="pipeline_v2_enabled",
+            help="Activa salidas tipadas (user/deep/dev) para un render mas estable en Inspector.",
+        )
 
         st.divider()
         st.caption(f"Mensajes: {len(st.session_state.messages)}")
