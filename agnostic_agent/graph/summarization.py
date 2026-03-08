@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 import os
+import unicodedata
 
 
 def fmt_args(args: Dict[str, Any]) -> str:
@@ -349,8 +350,127 @@ def _generic_output_summary(output: Any) -> str:
     return f"Resultado disponible: {type(output).__name__}."
 
 
+def _parse_output_json_dict(output: Any) -> Dict[str, Any]:
+    if isinstance(output, dict):
+        return output
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _norm_status_key(text: str) -> str:
+    n = unicodedata.normalize("NFKD", str(text or ""))
+    n = "".join(ch for ch in n if not unicodedata.combining(ch)).lower().strip()
+    n = re.sub(r"\s+", " ", n)
+    return n
+
+
+def _finance_reconciliation_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
+    loc_match = re.search(r"\bLOC-\d{3,}\b", user_prompt or "", flags=re.IGNORECASE)
+    credito_id = loc_match.group(0).upper() if loc_match else ""
+    if not credito_id:
+        return ""
+
+    tx_run = None
+    acc_run = None
+    for run in runs:
+        name = str(run.get("name", ""))
+        args = run.get("args", {}) if isinstance(run.get("args"), dict) else {}
+        q = str(args.get("query", "") or "")
+        if credito_id.lower() not in q.lower():
+            continue
+        if name == "query_transactions_db":
+            tx_run = run
+        elif name == "query_accounting_db":
+            acc_run = run
+    if not tx_run or not acc_run:
+        return ""
+
+    tx_out = _parse_output_json_dict(tx_run.get("output"))
+    acc_out = _parse_output_json_dict(acc_run.get("output"))
+    if not tx_out or not acc_out:
+        return ""
+
+    tx_cols = tx_out.get("columns") if isinstance(tx_out.get("columns"), list) else []
+    tx_rows = tx_out.get("rows") if isinstance(tx_out.get("rows"), list) else []
+    acc_cols = acc_out.get("columns") if isinstance(acc_out.get("columns"), list) else []
+    acc_rows = acc_out.get("rows") if isinstance(acc_out.get("rows"), list) else []
+    if not tx_cols or not acc_cols or not acc_rows:
+        return ""
+
+    def _idx(cols: List[Any], target: str) -> int:
+        for i, c in enumerate(cols):
+            if str(c).lower() == target:
+                return i
+        return -1
+
+    tipo_i = _idx(tx_cols, "tipo")
+    monto_i = _idx(tx_cols, "monto")
+    saldo_i = _idx(acc_cols, "saldo_total")
+    estatus_i = _idx(acc_cols, "estatus")
+    saneamiento_i = _idx(acc_cols, "saneamiento_calculado")
+    if min(tipo_i, monto_i, saldo_i, estatus_i, saneamiento_i) < 0:
+        return ""
+
+    totals = {"DESEMBOLSO": 0.0, "PAGO": 0.0, "PENALIZACION": 0.0, "DESCUENTO": 0.0}
+    for row in tx_rows:
+        if not isinstance(row, (list, tuple)) or len(row) <= max(tipo_i, monto_i):
+            continue
+        tipo = str(row[tipo_i]).strip().upper()
+        try:
+            monto = float(row[monto_i])
+        except Exception:
+            monto = 0.0
+        if tipo in totals:
+            totals[tipo] += monto
+
+    acc = acc_rows[0]
+    if not isinstance(acc, (list, tuple)) or len(acc) <= max(saldo_i, estatus_i, saneamiento_i):
+        return ""
+    saldo_reportado = float(acc[saldo_i])
+    estatus = str(acc[estatus_i])
+    saneamiento_reportado = float(acc[saneamiento_i])
+
+    saldo_esperado = totals["DESEMBOLSO"] - totals["PAGO"] + totals["PENALIZACION"] - totals["DESCUENTO"]
+    diff_saldo = saldo_esperado - saldo_reportado
+
+    rates = {
+        "desembolsado": 0.01,
+        "vigente / al corriente": 0.01,
+        "mora temprana (1-30 dias)": 0.05,
+        "mora media (31-60 dias)": 0.20,
+        "mora tardia (61-90 dias)": 0.50,
+        "cartera vencida (+90 dias)": 1.00,
+        "castigado / incobrable": 1.00,
+        "en cobranza externa / legal": 1.00,
+        "liquidado / cerrado": 0.00,
+    }
+    tasa = rates.get(_norm_status_key(estatus), 0.0)
+    reserva_esperada = saldo_reportado * tasa
+    diff_reserva = reserva_esperada - saneamiento_reportado
+
+    ok_saldo = abs(diff_saldo) < 0.01
+    ok_reserva = abs(diff_reserva) < 0.01
+    estado = "CUADRADO (100% Match)" if ok_saldo and ok_reserva else "DRIFT DETECTADO"
+
+    return (
+        f"Conciliacion del credito {credito_id}: {estado}.\n"
+        f"- Saldo esperado: {saldo_esperado:.2f} | Saldo reportado: {saldo_reportado:.2f} | Diferencia: {diff_saldo:.2f}\n"
+        f"- Reserva esperada: {reserva_esperada:.2f} (tasa {tasa*100:.2f}% por estatus '{estatus}') | "
+        f"Reserva reportada: {saneamiento_reportado:.2f} | Diferencia: {diff_reserva:.2f}"
+    )
+
+
 def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     output = run.get("output")
+    parsed = _parse_output_json_dict(output)
+    if parsed:
+        output = parsed
 
     if isinstance(output, dict) and (
         isinstance(output.get("saldo"), dict) or isinstance(output.get("saneamiento"), dict)
@@ -439,6 +559,10 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
 def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
     if not runs:
         return "No se obtuvo evidencia de herramientas para resolver la solicitud."
+
+    finance_answer = _finance_reconciliation_answer(user_prompt, runs)
+    if finance_answer:
+        return finance_answer
 
     total = len(runs)
     errors = 0

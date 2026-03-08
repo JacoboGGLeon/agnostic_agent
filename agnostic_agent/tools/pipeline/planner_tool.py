@@ -92,13 +92,14 @@ def _align_call_ids_to_subquery(
     Ensure call args entity IDs are semantically aligned with subquery IDs.
     Returns (ok, normalized_args, reason_if_blocked).
     """
+    normalized = dict(args or {})
+    tool_low = str(tool_name or "").lower()
+    if tool_low in {"nl2sql_sqlite", "nl2sql_agent_sqlite", "knowledge_nl2sql_agent"}:
+        normalized.setdefault("execute", True)
+    requested_db = _extract_requested_db_filename(subquery_text)
     expected = _extract_expected_id_constraints(subquery_text)
     if not expected:
-        return True, args, ""
-
-    normalized = dict(args or {})
-    requested_db = _extract_requested_db_filename(subquery_text)
-    tool_low = str(tool_name or "").lower()
+        return True, normalized, ""
     if requested_db:
         has_db_key = "db_path" in normalized
         current_db = str(normalized.get("db_path") or "").strip() if has_db_key else ""

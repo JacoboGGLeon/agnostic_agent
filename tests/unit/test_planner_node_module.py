@@ -249,6 +249,7 @@ def test_execute_planner_node_injects_db_path_hint_for_sql_tools():
     ai_msg = out["messages"][0]
     assert len(ai_msg.tool_calls) == 1
     assert ai_msg.tool_calls[0]["args"]["db_path"] == "transacciones.db"
+    assert ai_msg.tool_calls[0]["args"]["execute"] is True
 
 
 def test_execute_planner_node_contabilidad_is_deterministic_1_to_1():

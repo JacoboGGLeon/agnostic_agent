@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Callable, Dict, List, Sequence, Set
+import json
 
 
 def compute_invariant_violations(
@@ -157,11 +158,24 @@ def _extract_run_id_values(step: Dict[str, Any], run: Dict[str, Any]) -> Set[str
         for key, value in args.items():
             if str(key).endswith("_id") and value not in (None, ""):
                 values.add(str(value).strip().lower())
+        query_text = str(args.get("query", "") or "")
+        for token in re.findall(r"\bLOC-\d{3,}\b", query_text, flags=re.IGNORECASE):
+            values.add(token.strip().lower())
     output = run.get("output", {}) if isinstance(run, dict) else {}
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict):
+                output = parsed
+        except Exception:
+            pass
     if isinstance(output, dict):
         for key, value in output.items():
             if str(key).endswith("_id") and value not in (None, ""):
                 values.add(str(value).strip().lower())
+        nested_query = str(output.get("normalized_query", "") or output.get("query", "") or "")
+        for token in re.findall(r"\bLOC-\d{3,}\b", nested_query, flags=re.IGNORECASE):
+            values.add(token.strip().lower())
     return values
 
 
