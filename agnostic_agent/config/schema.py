@@ -35,7 +35,7 @@ class PluginsConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
-    use_v2: bool = False
+    use_v2: bool = True
     strict_contracts: bool = True
 
 

@@ -65,4 +65,27 @@ def test_turn_service_pipeline_v2_viewmodels(monkeypatch):
     out = svc.run_turn({"user_prompt": "hola"})
     assert "## Deep Summary" in out["deep_out"]["final_answer"]
     assert "## Dev Summary" in out["dev_out"]["final_answer"]
-    assert "### Solicitud" in out["user_out"]["final_answer"]
+    assert out["user_out"]["final_answer"] == "Respuesta visible para usuario"
+
+
+def test_turn_service_pipeline_v2_enabled_by_default(monkeypatch):
+    monkeypatch.setattr("agnostic_agent.app.turn_service.read_memory", lambda session_id: {})
+    monkeypatch.setattr(
+        "agnostic_agent.app.turn_service.write_memory",
+        lambda **kwargs: None,
+    )
+    monkeypatch.delenv("AGNOSTIC_PIPELINE_V2", raising=False)
+
+    svc = TurnService(
+        graph_app=_FakeGraph(),
+        knowledge_bases=[
+            KnowledgeBase(name="kb1", kind="sqlite-vec", config={"path": "dummy.db"})
+        ],
+        memory_cfg={},
+        context_tables=[],
+        context_cfg={},
+    )
+
+    out = svc.run_turn({"user_prompt": "hola"})
+    assert "## Deep Summary" in out["deep_out"]["final_answer"]
+    assert "## Dev Summary" in out["dev_out"]["final_answer"]

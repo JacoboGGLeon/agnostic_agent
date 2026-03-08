@@ -161,7 +161,7 @@ class TurnService:
         if isinstance(raw_pipeline_v2, str):
             pipeline_v2_enabled = raw_pipeline_v2.strip().lower() in {"1", "true", "yes", "y", "on"}
         elif raw_pipeline_v2 is None:
-            pipeline_v2_enabled = False
+            pipeline_v2_enabled = None
         else:
             pipeline_v2_enabled = bool(raw_pipeline_v2)
 
@@ -175,12 +175,15 @@ class TurnService:
         }
 
     def _use_pipeline_v2(self, meta: Dict[str, Any]) -> bool:
-        if bool(meta.get("pipeline_v2_enabled")):
-            return True
+        raw_override = meta.get("pipeline_v2_enabled")
+        if isinstance(raw_override, bool):
+            return raw_override
         import os
 
         env_val = os.getenv("AGNOSTIC_PIPELINE_V2", "")
-        return env_val.strip().lower() in {"1", "true", "yes", "y", "on"}
+        if env_val.strip():
+            return env_val.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return True
 
     def _resolve_knowledge_names(self, agent_in: AgentInput) -> List[str]:
         if agent_in.knowledge_names:
