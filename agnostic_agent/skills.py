@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from agnostic_agent.protocols.smp import validate_skill_manifest
 
 
 def _parse_semver(value: Optional[str]) -> tuple[int, int, int]:
@@ -93,6 +94,9 @@ class SkillRegistry:
     def _load_manifest_skill(self, manifest_path: Path) -> Optional[Skill]:
         data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
+            return None
+        is_valid, _errors = validate_skill_manifest(data, base_path=manifest_path.parent)
+        if not is_valid:
             return None
 
         name = data.get("name")

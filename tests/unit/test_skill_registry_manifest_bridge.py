@@ -93,3 +93,22 @@ tools:
     assert router.source_type == "manifest"
     assert router.version == "0.2.0"
     assert "advanced_tool" in router.tools
+
+
+def test_invalid_manifest_is_skipped_by_smp_validation(tmp_path: Path):
+    bad_pkg = tmp_path / "bad_skill"
+    bad_pkg.mkdir(parents=True)
+    (bad_pkg / "manifest.yaml").write_text(
+        """api_version: skill/v1
+kind: skill
+name: bad_skill
+version: 0.1.0
+entrypoint: skill:build
+instructions: missing_instructions.md
+input_schema: missing_input.json
+output_schema: missing_output.json
+""",
+        encoding="utf-8",
+    )
+    reg = SkillRegistry(str(tmp_path))
+    assert reg.get_skill("bad_skill") is None
