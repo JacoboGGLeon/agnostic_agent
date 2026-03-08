@@ -1,20 +1,21 @@
 api_version: skill/v1
 kind: skill
-name: nl2sql_sqlite
-version: 0.1.0
-description: Chat with SQLite databases by generating SQL from the real schema and
-  executing read-only queries.
+name: knowledge_reader
+version: 1.0.0
+description: Inspeccion de knowledge base HKB y documentos.
 entrypoint: skill:build
 instructions: instructions.md
 input_schema: schemas/input.schema.json
 output_schema: schemas/output.schema.json
 tools:
   declared:
-  - nl2sql_sqlite
+  - hkb_status
+  - list_hkb_documents
+  - list_knowledge
+  - read_knowledge
 knowledge:
   bindings:
-  - knowledge/contabilidad.db
-  - knowledge/transacciones.db
+  - knowledge/README.md
   - knowledge/embeddings.db
 composition:
   callable_as_skill: true
@@ -24,4 +25,5 @@ testing:
 execution:
   backend: native_python
 metadata:
-  domain: generic_sqlite
+  portability: self_contained_skill_bundle
+  language: es

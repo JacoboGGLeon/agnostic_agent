@@ -1,0 +1,10 @@
+tools:
+  - name: list_knowledge_sources
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: search_knowledge_base
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: rerank_docs
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

@@ -1,21 +1,20 @@
 api_version: skill/v1
 kind: skill
-name: nl2sql_sqlite
-version: 0.1.0
-description: Chat with SQLite databases by generating SQL from the real schema and
-  executing read-only queries.
+name: math_helper
+version: 1.0.0
+description: Operaciones matematicas deterministas.
 entrypoint: skill:build
 instructions: instructions.md
 input_schema: schemas/input.schema.json
 output_schema: schemas/output.schema.json
 tools:
   declared:
-  - nl2sql_sqlite
+  - eval_math_expression
+  - sum_numbers
+  - average_numbers
 knowledge:
   bindings:
-  - knowledge/contabilidad.db
-  - knowledge/transacciones.db
-  - knowledge/embeddings.db
+  - knowledge/README.md
 composition:
   callable_as_skill: true
   can_call_skills: false
@@ -24,4 +23,5 @@ testing:
 execution:
   backend: native_python
 metadata:
-  domain: generic_sqlite
+  portability: self_contained_skill_bundle
+  language: es

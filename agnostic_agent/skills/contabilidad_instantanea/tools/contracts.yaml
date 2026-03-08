@@ -1,0 +1,7 @@
+tools:
+  - name: query_transactions_db
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: query_accounting_db
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

@@ -19,7 +19,7 @@ def test_contabilidad_instantanea_skill_package_is_discoverable():
     skill = reg.get_skill("contabilidad_instantanea")
     assert skill is not None
     assert skill.source_type == "manifest"
-    assert skill.version == "1.1.0"
+    assert skill.version == "1.2.0"
     assert skill.tools == ["query_transactions_db", "query_accounting_db"]
     assert skill.input_schema == "schemas/input.schema.json"
     assert skill.output_schema == "schemas/output.schema.json"
@@ -29,13 +29,12 @@ def test_contabilidad_instantanea_build_and_run_contract():
     module = _load_skill_module()
     instance = module.build()
 
-    missing = instance.run({"credito_id": "LOC-0004"})
+    missing = instance.run({})
     assert missing["status"] == "error"
     assert missing["outputs"]["ok"] is False
-    assert "estatus" in missing["outputs"]["missing_fields"]
-    assert "saldo_total" in missing["outputs"]["missing_fields"]
+    assert "credito_id" in missing["outputs"]["missing_fields"]
 
-    ok = instance.run({"credito_id": "LOC-0004", "estatus": "Desembolsado", "saldo_total": 29440.64})
+    ok = instance.run({"credito_id": "LOC-0004"})
     assert ok["status"] == "success"
     out = ok["outputs"]
     assert out["ok"] is True
@@ -43,5 +42,10 @@ def test_contabilidad_instantanea_build_and_run_contract():
     calls = out["planned_tool_calls"]
     assert len(calls) == 2
     assert calls[0]["tool"] == "query_transactions_db"
+    assert calls[0]["args"]["query"] == "SELECT tipo, monto FROM movimientos WHERE credito_id = 'LOC-0004'"
     assert calls[1]["tool"] == "query_accounting_db"
+    assert calls[1]["args"]["query"] == (
+        "SELECT saldo_total, estatus, saneamiento_calculado FROM estados_cuenta WHERE credito_id = 'LOC-0004'"
+    )
+    assert len(out["pasos"]) == 5
     assert ok["metrics"]["planned_calls"] == 2

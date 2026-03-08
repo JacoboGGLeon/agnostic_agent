@@ -2,13 +2,13 @@
 from typing import Any, Dict, List
 
 
-REQUIRED_FIELDS = ("credito_id", "estatus", "saldo_total")
+REQUIRED_FIELDS = ("credito_id",)
 
 
 @dataclass
 class ContabilidadInstantaneaSkill:
     name: str = "contabilidad_instantanea"
-    version: str = "1.1.0"
+    version: str = "1.2.0"
 
     def run(self, request: Dict[str, Any]) -> Dict[str, Any]:
         missing = [field for field in REQUIRED_FIELDS if request.get(field) in (None, "")]
@@ -27,14 +27,12 @@ class ContabilidadInstantaneaSkill:
             }
 
         credito_id = str(request["credito_id"])
-        transacciones_sql = (
-            "SELECT tipo, monto FROM movimientos "
-            f"WHERE credito_id = '{credito_id}' ORDER BY fecha ASC"
-        )
+        transacciones_sql = f"SELECT tipo, monto FROM movimientos WHERE credito_id = '{credito_id}'"
         contabilidad_sql = (
-            "SELECT saldo_total, estatus, saneamiento_calculado FROM estados_cuenta "
-            f"WHERE credito_id = '{credito_id}'"
+            "SELECT saldo_total, estatus, saneamiento_calculado "
+            f"FROM estados_cuenta WHERE credito_id = '{credito_id}'"
         )
+
         planned_tool_calls: List[Dict[str, Any]] = [
             {
                 "tool": "query_transactions_db",
@@ -55,7 +53,13 @@ class ContabilidadInstantaneaSkill:
                 "credito_id": credito_id,
                 "estado_conciliacion": "PENDIENTE_EJECUCION_TOOLS",
                 "planned_tool_calls": planned_tool_calls,
-                "persona": "Contador IA",
+                "pasos": [
+                    "PASO 1: Obtener Flujos (Universo 1)",
+                    "PASO 2: Obtener Contabilidad (Universo 2)",
+                    "PASO 3: Verificar Ecuacion de Saldos",
+                    "PASO 4: Verificar Saneamiento",
+                    "PASO 5: Reportar Resultado",
+                ],
                 "canonical_skill_in_notebook": "reconcile_accounts",
             },
             "artifacts": [],

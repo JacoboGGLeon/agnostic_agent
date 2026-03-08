@@ -1,0 +1,4 @@
+tools:
+  - name: nl2sql_sqlite
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

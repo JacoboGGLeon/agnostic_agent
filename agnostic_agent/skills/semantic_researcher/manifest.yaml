@@ -1,22 +1,20 @@
 api_version: skill/v1
 kind: skill
-name: contabilidad_instantanea
-version: 1.2.0
-description: Conciliacion contable 1-a-1 por credito alineada al caso de uso financiero
-  del notebook de AIS.
+name: semantic_researcher
+version: 1.0.0
+description: RAG con retrieval y rerank basado en evidencia.
 entrypoint: skill:build
 instructions: instructions.md
 input_schema: schemas/input.schema.json
 output_schema: schemas/output.schema.json
 tools:
   declared:
-  - query_transactions_db
-  - query_accounting_db
+  - list_knowledge_sources
+  - search_knowledge_base
+  - rerank_docs
 knowledge:
   bindings:
-  - FinanceRulesKB
-  - knowledge/contabilidad.db
-  - knowledge/transacciones.db
+  - knowledge/embeddings.db
   - knowledge/rules.md
   - knowledge/dictionary.md
 composition:
@@ -27,7 +25,5 @@ testing:
 execution:
   backend: native_python
 metadata:
-  parity_target: notebook_finance_es.ipynb
-  canonical_skill_in_notebook: reconcile_accounts
-  persona: Contador IA
+  portability: self_contained_skill_bundle
   language: es

@@ -3,44 +3,25 @@
   "title": "ContabilidadInstantaneaOutput",
   "type": "object",
   "additionalProperties": true,
-  "required": ["ok", "credito_id", "estado_conciliacion"],
+  "required": ["ok", "credito_id", "estado_conciliacion", "planned_tool_calls"],
   "properties": {
-    "ok": {
-      "type": "boolean"
-    },
-    "credito_id": {
-      "type": "string"
-    },
+    "ok": {"type": "boolean"},
+    "credito_id": {"type": "string"},
     "estado_conciliacion": {
       "type": "string",
-      "enum": [
-        "CUADRADO (100% Match)",
-        "DRIFT DETECTADO",
-        "PENDIENTE_EJECUCION_TOOLS"
-      ]
+      "enum": ["CUADRADO (100% Match)", "DRIFT DETECTADO", "PENDIENTE_EJECUCION_TOOLS"]
     },
-    "diferencia_saldo": {
-      "type": "number"
-    },
-    "diferencia_saneamiento": {
-      "type": "number"
-    },
-    "evidencia_tool_calls": {
+    "planned_tool_calls": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": true
-      }
+      "items": {"type": "object", "additionalProperties": true}
     },
-    "summary": {
-      "type": "string"
-    },
-    "error_code": {
-      "type": "string"
-    },
-    "missing_fields": {
+    "pasos": {
       "type": "array",
       "items": {"type": "string"}
-    }
+    },
+    "diferencia_saldo": {"type": "number"},
+    "diferencia_reserva": {"type": "number"},
+    "error_code": {"type": "string"},
+    "missing_fields": {"type": "array", "items": {"type": "string"}}
   }
 }

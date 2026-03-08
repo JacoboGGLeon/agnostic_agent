@@ -1,0 +1,7 @@
+tools:
+  - name: knowledge_voyague_nl2sql_agent
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: knowledge_voyague_nl2semantic_agent
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

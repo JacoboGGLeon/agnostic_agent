@@ -1,0 +1,10 @@
+tools:
+  - name: to_upper
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: word_count
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: is_palindrome
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
