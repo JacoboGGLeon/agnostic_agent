@@ -6,13 +6,16 @@
 !setup.py
 !pyproject.toml
 !.pre-commit-config.yaml
+!.env.example
 !agnostic_agent/
 !tests/
 !tests/**
 !docs/
-docs/*
+!docs/**
 !docs/adr/
 !docs/adr/**
+!.github/
+!.github/**
 
 # Re-ignore pycache inside the whitelisted directory
 agnostic_agent/__pycache__/
