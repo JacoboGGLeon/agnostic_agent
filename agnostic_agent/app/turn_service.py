@@ -23,7 +23,7 @@ from agnostic_agent.core.pipeline_v2 import (
 from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
-from agnostic_agent.runtime import ArtifactEmitter
+from agnostic_agent.runtime import ArtifactEmitter, build_end_to_end_report
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +447,22 @@ class TurnService:
                 payload={"tool_runs": len(tool_runs)},
             )
             artifact_events = [e.model_dump() for e in emitter.list_events()]
+            protocol_checks = {
+                "pipeline_v2_enabled": {"ok": bool(self._use_pipeline_v2(meta)), "errors": []},
+                "typed_output_present": {
+                    "ok": all(k in {"dev", "deep", "user"} for k in views.keys()),
+                    "errors": [],
+                },
+            }
+            e2e_report = build_end_to_end_report(
+                run_id=run_id,
+                prompt_text=prompt_text,
+                tool_runs=[tr.model_dump() for tr in tool_runs],
+                protocol_checks=protocol_checks,
+                user_answer=views["user"].final_answer,
+            )
             views["dev"].raw_state.setdefault("artifacts", artifact_events)
+            views["dev"].raw_state.setdefault("e2e_report", e2e_report)
 
             self._persist_memory(
                 session_id=meta["session_id"],

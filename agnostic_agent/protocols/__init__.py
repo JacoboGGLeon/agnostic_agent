@@ -6,6 +6,7 @@ from .srp import (
     SkillRuntimeResponse,
 )
 from .scp import CompositionPlan, CompositionStep
+from .validator import validate_scp_plan, validate_srp_response
 
 __all__ = [
     "REQUIRED_MANIFEST_FIELDS",
@@ -16,4 +17,6 @@ __all__ = [
     "SkillRuntimeResponse",
     "CompositionPlan",
     "CompositionStep",
+    "validate_scp_plan",
+    "validate_srp_response",
 ]

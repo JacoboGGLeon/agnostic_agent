@@ -70,6 +70,9 @@ def test_turn_service_pipeline_v2_viewmodels(monkeypatch):
     assert isinstance(artifacts, list)
     assert any(evt.get("kind") == "run.started" for evt in artifacts)
     assert any(evt.get("kind") == "run.completed" for evt in artifacts)
+    e2e_report = out["dev_out"]["raw_state"].get("e2e_report", {})
+    assert e2e_report.get("run_id", "").startswith("run_")
+    assert e2e_report.get("protocol_checks", {}).get("srp_output_shape", {}).get("ok") is True
 
 
 def test_turn_service_pipeline_v2_enabled_by_default(monkeypatch):
