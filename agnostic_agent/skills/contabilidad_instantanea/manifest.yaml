@@ -1,0 +1,32 @@
+﻿api_version: skill/v1
+kind: skill
+name: contabilidad_instantanea
+version: 1.1.0
+description: Conciliacion contable 1-a-1 por credito alineada al caso de uso financiero del notebook de AIS.
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - query_transactions_db
+    - query_accounting_db
+knowledge:
+  bindings:
+    - FinanceRulesKB
+    - contabilidad.db
+    - transacciones.db
+    - rules.md
+    - dictionary.md
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+metadata:
+  parity_target: notebook_finance_es.ipynb
+  canonical_skill_in_notebook: reconcile_accounts
+  persona: Contador IA
+  language: es

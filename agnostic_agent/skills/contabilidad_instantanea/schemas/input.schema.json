@@ -1,0 +1,23 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContabilidadInstantaneaInput",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["credito_id", "estatus", "saldo_total"],
+  "properties": {
+    "credito_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identificador unico del credito (ej. LOC-0004)."
+    },
+    "estatus": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Estatus operativo del credito al corte."
+    },
+    "saldo_total": {
+      "type": "number",
+      "description": "Saldo reportado por contabilidad para ese credito."
+    }
+  }
+}

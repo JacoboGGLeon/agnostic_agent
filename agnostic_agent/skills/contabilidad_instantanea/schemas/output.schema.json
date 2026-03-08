@@ -1,0 +1,46 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContabilidadInstantaneaOutput",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "credito_id", "estado_conciliacion"],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "credito_id": {
+      "type": "string"
+    },
+    "estado_conciliacion": {
+      "type": "string",
+      "enum": [
+        "CUADRADO (100% Match)",
+        "DRIFT DETECTADO",
+        "PENDIENTE_EJECUCION_TOOLS"
+      ]
+    },
+    "diferencia_saldo": {
+      "type": "number"
+    },
+    "diferencia_saneamiento": {
+      "type": "number"
+    },
+    "evidencia_tool_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "error_code": {
+      "type": "string"
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
