@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import os
@@ -149,7 +149,7 @@ def list_tools(name_filter: Optional[str] = None) -> List[Dict[str, Any]]:
 @tool(mode="public")
 def read_tool(tool_name: str) -> Dict[str, Any]:
     """
-    Devuelve detalle de una tool: description, args y metadata agnóstica.
+    Devuelve detalle de una tool: description, args y metadata agnÃ³stica.
     """
     t = _find_tool(tool_name)
     if not t:
@@ -329,7 +329,23 @@ def read_knowledge(source_path: str, db_path: Optional[str] = None) -> Dict[str,
         conn.close()
 
 
-def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
+def _nl2sql_skill_knowledge_dir() -> str:
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, "skills", "nl2sql_sqlite", "knowledge")
+
+
+def _discover_nl2sql_skill_db_paths() -> List[str]:
+    knowledge_dir = _nl2sql_skill_knowledge_dir()
+    if not os.path.isdir(knowledge_dir):
+        return []
+    out: List[str] = []
+    for name in sorted(os.listdir(knowledge_dir)):
+        if name.lower().endswith(".db"):
+            out.append(os.path.join(knowledge_dir, name))
+    return out
+
+
+def _resolve_sqlite_db_candidates(db_path: str, user_request: str = "") -> List[str]:
     raw = (db_path or "").strip()
     candidates: List[str] = []
     alias_map: Dict[str, str] = {}
@@ -341,6 +357,8 @@ def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
                 alias_map = {str(k).lower(): str(v) for k, v in parsed.items()}
         except json.JSONDecodeError:
             alias_map = {}
+
+    skill_db_paths = _discover_nl2sql_skill_db_paths()
 
     if raw:
         candidates.append(raw)
@@ -354,7 +372,9 @@ def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
             alias = alias_map[raw.lower()]
             candidates.append(os.path.join(os.getcwd(), "session", alias))
             candidates.append(os.path.join(os.getcwd(), alias))
+        candidates.extend(skill_db_paths)
     else:
+        candidates.extend(skill_db_paths)
         req_lower = (user_request or "").lower()
         finance_hint = bool(re.search(r"\bloc-\d{3,}\b", user_request or "", flags=re.IGNORECASE)) or any(
             token in req_lower for token in ["credito", "crédito", "saldo", "saneamiento", "contabilidad"]
@@ -364,13 +384,6 @@ def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
                 [
                     os.path.join(os.getcwd(), "session", "contabilidad.db"),
                     os.path.join(os.getcwd(), "session", "transacciones.db"),
-                    os.path.join(os.getcwd(), "session", "embeddings.db"),
-                ]
-            )
-        else:
-            candidates.extend(
-                [
-                    os.path.join(os.getcwd(), "session", "embeddings.db"),
                 ]
             )
         for alias in alias_map.values():
@@ -378,15 +391,21 @@ def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
             candidates.append(os.path.join(os.getcwd(), alias))
 
     seen = set()
+    resolved: List[str] = []
     for candidate in candidates:
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)
         if os.path.exists(candidate):
-            return candidate
-    return raw
+            resolved.append(candidate)
+    return resolved
 
 
+def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
+    candidates = _resolve_sqlite_db_candidates(db_path, user_request=user_request)
+    if candidates:
+        return candidates[0]
+    return (db_path or "").strip()
 def _sqlite_schema(db_path: str) -> List[Dict[str, Any]]:
     conn = sqlite3.connect(db_path)
     try:
@@ -429,6 +448,24 @@ def _sqlite_schema(db_path: str) -> List[Dict[str, Any]]:
 
 def _tokenize(text: str) -> List[str]:
     return re.findall(r"[a-z0-9_]+", (text or "").lower())
+
+
+def _schema_match_score(user_request: str, schema: List[Dict[str, Any]]) -> int:
+    req_tokens = set(_tokenize(user_request or ""))
+    if not req_tokens or not schema:
+        return 0
+    best_score = 0
+    for entry in schema:
+        table_name = str(entry.get("table", ""))
+        col_names = [str(c.get("name", "")) for c in entry.get("columns", [])]
+        table_tokens = set(_tokenize(table_name))
+        col_tokens = set()
+        for name in col_names:
+            col_tokens.update(_tokenize(name))
+        score = len(req_tokens.intersection(table_tokens)) * 3 + len(req_tokens.intersection(col_tokens))
+        if score > best_score:
+            best_score = score
+    return best_score
 
 
 def _guess_table(user_request: str, schema: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -547,7 +584,7 @@ def _build_sql_from_request(
             if any(k in aggregate_col.lower() for k in ["saldo", "monto", "total", "importe"]):
                 break
 
-    if "cuantos" in req_lower or "cuántos" in req_lower or "count" in req_lower:
+    if "cuantos" in req_lower or "cuÃ¡ntos" in req_lower or "count" in req_lower:
         select_expr = "COUNT(*) AS total_rows"
         order_clause = ""
     elif ("promedio" in req_lower or "average" in req_lower or "avg" in req_lower) and aggregate_col:
@@ -556,10 +593,10 @@ def _build_sql_from_request(
     elif ("suma" in req_lower or "sum" in req_lower or "total" in req_lower) and aggregate_col:
         select_expr = f"SUM({aggregate_col}) AS sum_{aggregate_col}"
         order_clause = ""
-    elif ("max" in req_lower or "máximo" in req_lower) and aggregate_col:
+    elif ("max" in req_lower or "mÃ¡ximo" in req_lower) and aggregate_col:
         select_expr = f"MAX({aggregate_col}) AS max_{aggregate_col}"
         order_clause = ""
-    elif ("min" in req_lower or "mínimo" in req_lower) and aggregate_col:
+    elif ("min" in req_lower or "mÃ­nimo" in req_lower) and aggregate_col:
         select_expr = f"MIN({aggregate_col}) AS min_{aggregate_col}"
         order_clause = ""
     else:
@@ -581,6 +618,40 @@ def _build_sql_from_request(
         "select_expr": select_expr,
         "where_clauses": where_clauses,
     }
+
+
+def _select_best_db_for_request(
+    user_request: str,
+    db_path: str = "",
+) -> Dict[str, Any]:
+    candidates = _resolve_sqlite_db_candidates(db_path, user_request=user_request)
+    if not candidates:
+        return {"db_path": _resolve_sqlite_db_path(db_path, user_request=user_request), "schema": [], "chosen_table": None}
+
+    best: Dict[str, Any] = {"score": -1, "db_path": "", "schema": [], "chosen_table": None}
+    for candidate in candidates:
+        try:
+            schema = _sqlite_schema(candidate)
+        except Exception:
+            continue
+        if not schema:
+            continue
+        chosen_table = _guess_table(user_request, schema)
+        if not chosen_table:
+            continue
+        score = _schema_match_score(user_request, [chosen_table])
+        if score > int(best.get("score", -1)):
+            best = {
+                "score": score,
+                "db_path": candidate,
+                "schema": schema,
+                "chosen_table": chosen_table,
+            }
+
+    if best.get("db_path"):
+        return best
+    fallback = _resolve_sqlite_db_path(db_path, user_request=user_request)
+    return {"db_path": fallback, "schema": [], "chosen_table": None}
 
 
 def _run_readonly_sql(db_path: str, sql: str) -> Dict[str, Any]:
@@ -617,7 +688,8 @@ def nl2sql_sqlite(
     Genera SQL SELECT desde lenguaje natural usando el schema real de una SQLite.
     Opcionalmente ejecuta la consulta generada en modo read-only.
     """
-    target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
+    selected = _select_best_db_for_request(user_request, db_path=db_path)
+    target_db = str(selected.get("db_path") or "")
     if not target_db or not os.path.exists(target_db):
         return {
             "ok": False,
@@ -625,15 +697,18 @@ def nl2sql_sqlite(
             "db_path": target_db or db_path,
         }
 
-    try:
-        schema = _sqlite_schema(target_db)
-    except Exception as exc:
-        return {"ok": False, "error": f"Failed to inspect schema: {exc}", "db_path": target_db}
-
+    schema = selected.get("schema") if isinstance(selected.get("schema"), list) else []
+    if not schema:
+        try:
+            schema = _sqlite_schema(target_db)
+        except Exception as exc:
+            return {"ok": False, "error": f"Failed to inspect schema: {exc}", "db_path": target_db}
     if not schema:
         return {"ok": False, "error": "No user tables found in DB.", "db_path": target_db}
 
-    chosen_table = _guess_table(user_request, schema)
+    chosen_table = selected.get("chosen_table") if isinstance(selected.get("chosen_table"), dict) else None
+    if not chosen_table:
+        chosen_table = _guess_table(user_request, schema)
     if not chosen_table:
         return {"ok": False, "error": "Could not infer target table.", "db_path": target_db}
 
@@ -678,7 +753,8 @@ class _NL2SQLToolAgentSQLite:
     ) -> Dict[str, Any]:
         trace: List[Dict[str, Any]] = []
 
-        target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
+        selected = _select_best_db_for_request(user_request, db_path=db_path)
+        target_db = str(selected.get("db_path") or "")
         trace.append({"step": "resolve_db", "input": db_path, "output": target_db})
         if not target_db or not os.path.exists(target_db):
             return {
@@ -688,16 +764,17 @@ class _NL2SQLToolAgentSQLite:
                 "db_path": target_db or db_path,
             }
 
-        try:
-            schema = _sqlite_schema(target_db)
-        except Exception as exc:
-            return {
-                "ok": False,
-                "error": f"Failed to inspect schema: {exc}",
-                "trace": trace,
-                "db_path": target_db,
-            }
-
+        schema = selected.get("schema") if isinstance(selected.get("schema"), list) else []
+        if not schema:
+            try:
+                schema = _sqlite_schema(target_db)
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": f"Failed to inspect schema: {exc}",
+                    "trace": trace,
+                    "db_path": target_db,
+                }
         trace.append({"step": "inspect_schema", "tables": [t.get("table") for t in schema]})
         if not schema:
             return {
@@ -707,7 +784,9 @@ class _NL2SQLToolAgentSQLite:
                 "db_path": target_db,
             }
 
-        chosen_table = _guess_table(user_request, schema)
+        chosen_table = selected.get("chosen_table") if isinstance(selected.get("chosen_table"), dict) else None
+        if not chosen_table:
+            chosen_table = _guess_table(user_request, schema)
         if not chosen_table:
             return {
                 "ok": False,
@@ -1203,3 +1282,4 @@ def knowledge_voyague_nl2semantic_agent(
     if isinstance(result, dict):
         result.setdefault("alias_used", "knowledge_voyague_nl2semantic_agent")
     return result
+
