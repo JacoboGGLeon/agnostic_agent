@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NL2SQLSQLiteInput",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["user_request"],
+  "properties": {
+    "user_request": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Natural-language question to answer with SQL."
+    },
+    "db_path": {
+      "type": "string",
+      "description": "Path or alias of the target SQLite database."
+    },
+    "row_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "default": 50
+    },
+    "execute": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

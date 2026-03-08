@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NL2SQLSQLiteOutput",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok"],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "db_path": {
+      "type": "string"
+    },
+    "generated_sql": {
+      "type": "string"
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "string"
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

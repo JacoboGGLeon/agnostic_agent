@@ -1,0 +1,24 @@
+api_version: skill/v1
+kind: skill
+name: nl2sql_sqlite
+version: 0.1.0
+description: Chat with SQLite databases by generating SQL from the real schema and executing read-only queries.
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - nl2sql_sqlite
+knowledge:
+  bindings:
+    - "*.db"
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+metadata:
+  domain: generic_sqlite
