@@ -73,6 +73,7 @@ from .graph.runtime_utils import (
     summarize_tool_runs,
     summarize_tool_runs_compact,
 )
+from .tools.pipeline_runtime import CallablePipelineTool, invoke_pipeline_tool_or_raise
 
 
 
@@ -91,46 +92,152 @@ def build_graph_agent(
     """
     cfg = planner_config or PlannerConfig()
 
+    analyzer_tool = CallablePipelineTool(
+        name="pipeline.analyzer",
+        handler=lambda payload: execute_analyzer_node(
+            payload.state,
+            tools=payload.context["tools"],
+            cfg=payload.context["cfg"],
+            planner_llm=payload.context["planner_llm"],
+            skill_registry=payload.context["skill_registry"],
+            ai_message_type=payload.context["ai_message_type"],
+            human_message_type=payload.context["human_message_type"],
+            system_message_type=payload.context["system_message_type"],
+            coerce_content_str=payload.context["coerce_content_str"],
+            sanitize_subquery_text=payload.context["sanitize_subquery_text"],
+            extract_top_level_json_objects=payload.context["extract_top_level_json_objects"],
+            is_placeholder_subquery=payload.context["is_placeholder_subquery"],
+        ),
+    )
+    planner_tool = CallablePipelineTool(
+        name="pipeline.planner",
+        handler=lambda payload: execute_planner_node(
+            payload.state,
+            tools=payload.context["tools"],
+            cfg=payload.context["cfg"],
+            planner_llm=payload.context["planner_llm"],
+            skill_registry=payload.context["skill_registry"],
+            ai_message_type=payload.context["ai_message_type"],
+            human_message_type=payload.context["human_message_type"],
+            system_message_type=payload.context["system_message_type"],
+            planner_trajectory_type=payload.context["planner_trajectory_type"],
+            resolve_effective_skills=payload.context["resolve_effective_skills"],
+            is_pipeline_internal_ai=payload.context["is_pipeline_internal_ai"],
+            is_ai_with_tool_calls=payload.context["is_ai_with_tool_calls"],
+            strip_think=payload.context["strip_think"],
+            normalize_toolcalls_list=payload.context["normalize_toolcalls_list"],
+            extract_tool_calls_from_jsonish_text=payload.context["extract_tool_calls_from_jsonish_text"],
+            coerce_content_str=payload.context["coerce_content_str"],
+            canonical_tool_name=payload.context["canonical_tool_name"],
+        ),
+    )
+    executor_tool = CallablePipelineTool(
+        name="pipeline.executor",
+        handler=lambda payload: execute_executor_node(
+            payload.state,
+            tools=payload.context["tools"],
+            ai_message_type=payload.context["ai_message_type"],
+            tool_message_type=payload.context["tool_message_type"],
+            extract_tool_calls=payload.context["extract_tool_calls"],
+            canonical_tool_name=payload.context["canonical_tool_name"],
+            to_jsonable=payload.context["to_jsonable"],
+            json_default=payload.context["json_default"],
+        ),
+    )
+    catcher_tool = CallablePipelineTool(
+        name="pipeline.catcher",
+        handler=lambda payload: execute_catcher_node(
+            payload.state,
+            extract_tool_calls=payload.context["extract_tool_calls"],
+            decode_tool_content=payload.context["decode_tool_content"],
+            to_jsonable=payload.context["to_jsonable"],
+        ),
+    )
+    summarizer_tool = CallablePipelineTool(
+        name="pipeline.summarizer",
+        handler=lambda payload: execute_summarizer_node(
+            payload.state,
+            skill_registry=payload.context["skill_registry"],
+            tools=payload.context["tools"],
+            cfg=payload.context["cfg"],
+            planner_llm=payload.context["planner_llm"],
+            resolve_effective_skills=payload.context["resolve_effective_skills"],
+            json_default=payload.context["json_default"],
+            summarize_tool_runs=payload.context["summarize_tool_runs"],
+            summarize_tool_runs_compact=payload.context["summarize_tool_runs_compact"],
+            build_user_answer_from_runs=payload.context["build_user_answer_from_runs"],
+            is_technical_answer=payload.context["is_technical_answer"],
+            find_last_assistant_real=payload.context["find_last_assistant_real"],
+            extract_tool_calls=payload.context["extract_tool_calls"],
+            coerce_content_str=payload.context["coerce_content_str"],
+            strip_think=payload.context["strip_think"],
+        ),
+    )
+    validator_tool = CallablePipelineTool(
+        name="pipeline.validator",
+        handler=lambda payload: execute_validator_node(
+            payload.state,
+            skill_registry=payload.context["skill_registry"],
+            resolve_effective_skills=payload.context["resolve_effective_skills"],
+            is_placeholder_subquery=payload.context["is_placeholder_subquery"],
+            env_flag=payload.context["env_flag"],
+            extract_top_level_json_objects=payload.context["extract_top_level_json_objects"],
+            find_last_assistant_real=payload.context["find_last_assistant_real"],
+            coerce_content_str=payload.context["coerce_content_str"],
+            strip_think=payload.context["strip_think"],
+            build_user_answer_from_runs=payload.context["build_user_answer_from_runs"],
+            is_technical_answer=payload.context["is_technical_answer"],
+        ),
+    )
+
     # ANALYZER (LLM-based with Strict JSON)
     def analyzer_node(state: State) -> Dict[str, Any]:
         validate_node_input("analyzer", state)
-        out = execute_analyzer_node(
-            state,
-            tools=tools,
-            cfg=cfg,
-            planner_llm=planner_llm,
-            skill_registry=skill_registry,
-            ai_message_type=AIMessage,
-            human_message_type=HumanMessage,
-            system_message_type=SystemMessage,
-            coerce_content_str=_coerce_content_str,
-            sanitize_subquery_text=_sanitize_subquery_text,
-            extract_top_level_json_objects=_extract_top_level_json_objects,
-            is_placeholder_subquery=_is_placeholder_subquery,
+        out = invoke_pipeline_tool_or_raise(
+            analyzer_tool,
+            state=state,
+            context={
+                "tools": tools,
+                "cfg": cfg,
+                "planner_llm": planner_llm,
+                "skill_registry": skill_registry,
+                "ai_message_type": AIMessage,
+                "human_message_type": HumanMessage,
+                "system_message_type": SystemMessage,
+                "coerce_content_str": _coerce_content_str,
+                "sanitize_subquery_text": _sanitize_subquery_text,
+                "extract_top_level_json_objects": _extract_top_level_json_objects,
+                "is_placeholder_subquery": _is_placeholder_subquery,
+            },
+            metadata={"node": "analyzer"},
         )
         validate_node_output("analyzer", out)
         return out
 
     def planner_node(state: State) -> Dict[str, Any]:
         validate_node_input("planner", state)
-        out = execute_planner_node(
-            state,
-            tools=tools,
-            cfg=cfg,
-            planner_llm=planner_llm,
-            skill_registry=skill_registry,
-            ai_message_type=AIMessage,
-            human_message_type=HumanMessage,
-            system_message_type=SystemMessage,
-            planner_trajectory_type=PlannerTrajectory,
-            resolve_effective_skills=_resolve_effective_skills,
-            is_pipeline_internal_ai=_is_pipeline_internal_ai,
-            is_ai_with_tool_calls=_is_ai_with_tool_calls,
-            strip_think=strip_think,
-            normalize_toolcalls_list=_normalize_toolcalls_list,
-            extract_tool_calls_from_jsonish_text=_extract_tool_calls_from_jsonish_text,
-            coerce_content_str=_coerce_content_str,
-            canonical_tool_name=_canonical_tool_name,
+        out = invoke_pipeline_tool_or_raise(
+            planner_tool,
+            state=state,
+            context={
+                "tools": tools,
+                "cfg": cfg,
+                "planner_llm": planner_llm,
+                "skill_registry": skill_registry,
+                "ai_message_type": AIMessage,
+                "human_message_type": HumanMessage,
+                "system_message_type": SystemMessage,
+                "planner_trajectory_type": PlannerTrajectory,
+                "resolve_effective_skills": _resolve_effective_skills,
+                "is_pipeline_internal_ai": _is_pipeline_internal_ai,
+                "is_ai_with_tool_calls": _is_ai_with_tool_calls,
+                "strip_think": strip_think,
+                "normalize_toolcalls_list": _normalize_toolcalls_list,
+                "extract_tool_calls_from_jsonish_text": _extract_tool_calls_from_jsonish_text,
+                "coerce_content_str": _coerce_content_str,
+                "canonical_tool_name": _canonical_tool_name,
+            },
+            metadata={"node": "planner"},
         )
         validate_node_output("planner", out)
         return out
@@ -139,15 +246,19 @@ def build_graph_agent(
     # EXECUTOR
     def executor_node(state: State) -> Dict[str, Any]:
         validate_node_input("executor", state)
-        out = execute_executor_node(
-            state,
-            tools=tools,
-            ai_message_type=AIMessage,
-            tool_message_type=ToolMessage,
-            extract_tool_calls=extract_tool_calls,
-            canonical_tool_name=_canonical_tool_name,
-            to_jsonable=_to_jsonable,
-            json_default=_json_default,
+        out = invoke_pipeline_tool_or_raise(
+            executor_tool,
+            state=state,
+            context={
+                "tools": tools,
+                "ai_message_type": AIMessage,
+                "tool_message_type": ToolMessage,
+                "extract_tool_calls": extract_tool_calls,
+                "canonical_tool_name": _canonical_tool_name,
+                "to_jsonable": _to_jsonable,
+                "json_default": _json_default,
+            },
+            metadata={"node": "executor"},
         )
         validate_node_output("executor", out)
         return out
@@ -155,11 +266,15 @@ def build_graph_agent(
     # CATCHER
     def catcher_node(state: State) -> Dict[str, Any]:
         validate_node_input("catcher", state)
-        out = execute_catcher_node(
-            state,
-            extract_tool_calls=extract_tool_calls,
-            decode_tool_content=_decode_tool_content,
-            to_jsonable=_to_jsonable,
+        out = invoke_pipeline_tool_or_raise(
+            catcher_tool,
+            state=state,
+            context={
+                "extract_tool_calls": extract_tool_calls,
+                "decode_tool_content": _decode_tool_content,
+                "to_jsonable": _to_jsonable,
+            },
+            metadata={"node": "catcher"},
         )
         validate_node_output("catcher", out)
         return out
@@ -167,22 +282,26 @@ def build_graph_agent(
     # SUMMARIZER
     def summarizer_node(state: State) -> Dict[str, Any]:
         validate_node_input("summarizer", state)
-        out = execute_summarizer_node(
-            state,
-            skill_registry=skill_registry,
-            tools=tools,
-            cfg=cfg,
-            planner_llm=planner_llm,
-            resolve_effective_skills=_resolve_effective_skills,
-            json_default=_json_default,
-            summarize_tool_runs=summarize_tool_runs,
-            summarize_tool_runs_compact=summarize_tool_runs_compact,
-            build_user_answer_from_runs=build_user_answer_from_runs,
-            is_technical_answer=is_technical_answer,
-            find_last_assistant_real=find_last_assistant_real,
-            extract_tool_calls=extract_tool_calls,
-            coerce_content_str=_coerce_content_str,
-            strip_think=strip_think,
+        out = invoke_pipeline_tool_or_raise(
+            summarizer_tool,
+            state=state,
+            context={
+                "skill_registry": skill_registry,
+                "tools": tools,
+                "cfg": cfg,
+                "planner_llm": planner_llm,
+                "resolve_effective_skills": _resolve_effective_skills,
+                "json_default": _json_default,
+                "summarize_tool_runs": summarize_tool_runs,
+                "summarize_tool_runs_compact": summarize_tool_runs_compact,
+                "build_user_answer_from_runs": build_user_answer_from_runs,
+                "is_technical_answer": is_technical_answer,
+                "find_last_assistant_real": find_last_assistant_real,
+                "extract_tool_calls": extract_tool_calls,
+                "coerce_content_str": _coerce_content_str,
+                "strip_think": strip_think,
+            },
+            metadata={"node": "summarizer"},
         )
         validate_node_output("summarizer", out)
         return out
@@ -191,18 +310,22 @@ def build_graph_agent(
     # VALIDATOR (heurAstica simple, preparada para LLM en el futuro)
     def validator_node(state: State) -> Dict[str, Any]:
         validate_node_input("validator", state)
-        out = execute_validator_node(
-            state,
-            skill_registry=skill_registry,
-            resolve_effective_skills=_resolve_effective_skills,
-            is_placeholder_subquery=_is_placeholder_subquery,
-            env_flag=_env_flag,
-            extract_top_level_json_objects=_extract_top_level_json_objects,
-            find_last_assistant_real=find_last_assistant_real,
-            coerce_content_str=_coerce_content_str,
-            strip_think=strip_think,
-            build_user_answer_from_runs=build_user_answer_from_runs,
-            is_technical_answer=is_technical_answer,
+        out = invoke_pipeline_tool_or_raise(
+            validator_tool,
+            state=state,
+            context={
+                "skill_registry": skill_registry,
+                "resolve_effective_skills": _resolve_effective_skills,
+                "is_placeholder_subquery": _is_placeholder_subquery,
+                "env_flag": _env_flag,
+                "extract_top_level_json_objects": _extract_top_level_json_objects,
+                "find_last_assistant_real": find_last_assistant_real,
+                "coerce_content_str": _coerce_content_str,
+                "strip_think": strip_think,
+                "build_user_answer_from_runs": build_user_answer_from_runs,
+                "is_technical_answer": is_technical_answer,
+            },
+            metadata={"node": "validator"},
         )
         validate_node_output("validator", out)
         return out
