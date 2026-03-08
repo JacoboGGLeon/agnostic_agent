@@ -213,3 +213,13 @@ class BedrockProvider(LLMProvider):
             return self._chat_converse(messages, **kwargs)
 
         raise ProviderError(f"Unknown Bedrock API mode: {self.api}", provider="bedrock")
+
+    def chat_normalized(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        text = self.chat(messages, **kwargs)
+        return {
+            "text": text or "",
+            "tool_calls": [],
+            "usage": {},
+            "finish_reason": None,
+            "raw": {"provider": "bedrock", "api": self.api, "model": self.model},
+        }

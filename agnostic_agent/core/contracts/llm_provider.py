@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Generator, Union
+from typing import Any, Dict, List, Optional, Generator
 
 class LLMProvider(ABC):
     """
@@ -35,3 +35,21 @@ class LLMProvider(ABC):
     ) -> str:
         """Generate response from a list of messages."""
         pass
+
+    def chat_normalized(
+        self,
+        messages: List[Dict[str, str]],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Normalized response contract shared by all providers.
+        Providers can override this for richer metadata.
+        """
+        text = self.chat(messages, **kwargs)
+        return {
+            "text": text or "",
+            "tool_calls": [],
+            "usage": {},
+            "finish_reason": None,
+            "raw": {"text": text or ""},
+        }
