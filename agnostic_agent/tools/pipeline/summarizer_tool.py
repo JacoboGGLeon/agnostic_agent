@@ -19,7 +19,7 @@ def execute_summarizer_tool(
     json_default: Callable[[Any], Any],
     summarize_tool_runs: Callable[[str, List[Dict[str, Any]]], str],
     summarize_tool_runs_compact: Callable[[List[Dict[str, Any]]], str],
-    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]], List[str] | None], str],
     is_technical_answer: Callable[[str], bool],
     find_last_assistant_real: Callable[[List[Any]], Any],
     extract_tool_calls: Callable[[Any], List[Dict[str, Any]]],
@@ -457,7 +457,15 @@ def execute_summarizer_tool(
         }
     else:
         tools_summary_text = summarize_tool_runs(user_prompt, runs)
-        deterministic_user_answer = build_user_answer_from_runs(user_prompt, runs)
+        analyzer_subqueries = analyzer.get("subqueries") if isinstance(analyzer, dict) else None
+        try:
+            deterministic_user_answer = build_user_answer_from_runs(
+                user_prompt,
+                runs,
+                analyzer_subqueries if isinstance(analyzer_subqueries, list) else None,
+            )
+        except TypeError:
+            deterministic_user_answer = build_user_answer_from_runs(user_prompt, runs)  # type: ignore[misc]
         user_answer = deterministic_user_answer
 
         hybrid_sys = (

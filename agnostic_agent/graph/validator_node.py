@@ -16,7 +16,7 @@ def execute_validator_node(
     find_last_assistant_real: Callable[[List[Any]], Any],
     coerce_content_str: Callable[[Any], str],
     strip_think: Callable[[str], str],
-    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]], List[str] | None], str],
     is_technical_answer: Callable[[str], bool],
 ) -> Dict[str, Any]:
     # Structural wrapper: execution logic lives in pipeline tools.

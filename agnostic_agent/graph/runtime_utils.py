@@ -216,8 +216,12 @@ def summarize_tool_runs_compact(runs: List[Dict[str, Any]]) -> str:
     return summarize_tool_runs_compact_shared(runs)
 
 
-def build_user_answer_from_runs(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
-    return build_agnostic_user_answer(user_prompt, runs)
+def build_user_answer_from_runs(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> str:
+    return build_agnostic_user_answer(user_prompt, runs, analyzer_subqueries)
 
 
 def is_technical_answer(text: str) -> bool:

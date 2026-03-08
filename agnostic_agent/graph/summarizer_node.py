@@ -16,7 +16,7 @@ def execute_summarizer_node(
     json_default: Callable[[Any], Any],
     summarize_tool_runs: Callable[[str, List[Dict[str, Any]]], str],
     summarize_tool_runs_compact: Callable[[List[Dict[str, Any]]], str],
-    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]], List[str] | None], str],
     is_technical_answer: Callable[[str], bool],
     find_last_assistant_real: Callable[[List[Any]], Any],
     extract_tool_calls: Callable[[Any], List[Dict[str, Any]]],

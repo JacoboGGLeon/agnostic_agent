@@ -370,37 +370,72 @@ def _norm_status_key(text: str) -> str:
     return n
 
 
-def _finance_reconciliation_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
-    loc_match = re.search(r"\bLOC-\d{3,}\b", user_prompt or "", flags=re.IGNORECASE)
-    credito_id = loc_match.group(0).upper() if loc_match else ""
-    if not credito_id:
-        return ""
+def _extract_credit_id_from_text(text: str) -> str:
+    t = str(text or "")
+    m = re.search(r"credito_id\s*=\s*['\"]([^'\"]+)['\"]", t, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).strip().upper()
+    m = re.search(r"\bLOC-\d{3,}\b", t, flags=re.IGNORECASE)
+    if m:
+        return m.group(0).strip().upper()
+    return ""
 
-    tx_run = None
-    acc_run = None
+
+def _extract_credit_ids_from_subqueries(subqueries: List[str]) -> List[str]:
+    ids: List[str] = []
+    for sq in subqueries or []:
+        txt = str(sq or "").strip()
+        if not txt:
+            continue
+        found = ""
+        if txt.startswith("{") and txt.endswith("}"):
+            try:
+                obj = json.loads(txt)
+                if isinstance(obj, dict):
+                    found = str(obj.get("credito_id") or "").strip().upper()
+            except Exception:
+                found = ""
+        if not found:
+            found = _extract_credit_id_from_text(txt)
+        if found and found not in ids:
+            ids.append(found)
+    return ids
+
+
+def _finance_reconciliation_answer(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> str:
+    requested_order: List[str] = []
+    for cid in _extract_credit_ids_from_subqueries(analyzer_subqueries or []):
+        if cid not in requested_order:
+            requested_order.append(cid)
+    prompt_ids = [m.upper() for m in re.findall(r"\bLOC-\d{3,}\b", user_prompt or "", flags=re.IGNORECASE)]
+    for cid in prompt_ids:
+        if cid not in requested_order:
+            requested_order.append(cid)
+
+    by_credit: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for run in runs:
         name = str(run.get("name", ""))
         args = run.get("args", {}) if isinstance(run.get("args"), dict) else {}
         q = str(args.get("query", "") or "")
-        if credito_id.lower() not in q.lower():
+        cid = _extract_credit_id_from_text(q)
+        if not cid:
+            output_dict = _parse_output_json_dict(run.get("output"))
+            normalized_query = str(output_dict.get("normalized_query", "") or "")
+            cid = _extract_credit_id_from_text(normalized_query)
+        if not cid:
             continue
+        by_credit.setdefault(cid, {})
         if name == "query_transactions_db":
-            tx_run = run
+            by_credit[cid]["tx"] = run
         elif name == "query_accounting_db":
-            acc_run = run
-    if not tx_run or not acc_run:
-        return ""
-
-    tx_out = _parse_output_json_dict(tx_run.get("output"))
-    acc_out = _parse_output_json_dict(acc_run.get("output"))
-    if not tx_out or not acc_out:
-        return ""
-
-    tx_cols = tx_out.get("columns") if isinstance(tx_out.get("columns"), list) else []
-    tx_rows = tx_out.get("rows") if isinstance(tx_out.get("rows"), list) else []
-    acc_cols = acc_out.get("columns") if isinstance(acc_out.get("columns"), list) else []
-    acc_rows = acc_out.get("rows") if isinstance(acc_out.get("rows"), list) else []
-    if not tx_cols or not acc_cols or not acc_rows:
+            by_credit[cid]["acc"] = run
+    if not requested_order:
+        requested_order = list(by_credit.keys())
+    if not requested_order:
         return ""
 
     def _idx(cols: List[Any], target: str) -> int:
@@ -408,36 +443,6 @@ def _finance_reconciliation_answer(user_prompt: str, runs: List[Dict[str, Any]])
             if str(c).lower() == target:
                 return i
         return -1
-
-    tipo_i = _idx(tx_cols, "tipo")
-    monto_i = _idx(tx_cols, "monto")
-    saldo_i = _idx(acc_cols, "saldo_total")
-    estatus_i = _idx(acc_cols, "estatus")
-    saneamiento_i = _idx(acc_cols, "saneamiento_calculado")
-    if min(tipo_i, monto_i, saldo_i, estatus_i, saneamiento_i) < 0:
-        return ""
-
-    totals = {"DESEMBOLSO": 0.0, "PAGO": 0.0, "PENALIZACION": 0.0, "DESCUENTO": 0.0}
-    for row in tx_rows:
-        if not isinstance(row, (list, tuple)) or len(row) <= max(tipo_i, monto_i):
-            continue
-        tipo = str(row[tipo_i]).strip().upper()
-        try:
-            monto = float(row[monto_i])
-        except Exception:
-            monto = 0.0
-        if tipo in totals:
-            totals[tipo] += monto
-
-    acc = acc_rows[0]
-    if not isinstance(acc, (list, tuple)) or len(acc) <= max(saldo_i, estatus_i, saneamiento_i):
-        return ""
-    saldo_reportado = float(acc[saldo_i])
-    estatus = str(acc[estatus_i])
-    saneamiento_reportado = float(acc[saneamiento_i])
-
-    saldo_esperado = totals["DESEMBOLSO"] - totals["PAGO"] + totals["PENALIZACION"] - totals["DESCUENTO"]
-    diff_saldo = saldo_esperado - saldo_reportado
 
     rates = {
         "desembolsado": 0.01,
@@ -450,20 +455,74 @@ def _finance_reconciliation_answer(user_prompt: str, runs: List[Dict[str, Any]])
         "en cobranza externa / legal": 1.00,
         "liquidado / cerrado": 0.00,
     }
-    tasa = rates.get(_norm_status_key(estatus), 0.0)
-    reserva_esperada = saldo_reportado * tasa
-    diff_reserva = reserva_esperada - saneamiento_reportado
 
-    ok_saldo = abs(diff_saldo) < 0.01
-    ok_reserva = abs(diff_reserva) < 0.01
-    estado = "CUADRADO (100% Match)" if ok_saldo and ok_reserva else "DRIFT DETECTADO"
+    blocks: List[str] = []
+    for credito_id in requested_order:
+        pair = by_credit.get(credito_id, {})
+        tx_run = pair.get("tx")
+        acc_run = pair.get("acc")
+        if not tx_run or not acc_run:
+            continue
 
-    return (
-        f"Conciliacion del credito {credito_id}: {estado}.\n"
-        f"- Saldo esperado: {saldo_esperado:.2f} | Saldo reportado: {saldo_reportado:.2f} | Diferencia: {diff_saldo:.2f}\n"
-        f"- Reserva esperada: {reserva_esperada:.2f} (tasa {tasa*100:.2f}% por estatus '{estatus}') | "
-        f"Reserva reportada: {saneamiento_reportado:.2f} | Diferencia: {diff_reserva:.2f}"
-    )
+        tx_out = _parse_output_json_dict(tx_run.get("output"))
+        acc_out = _parse_output_json_dict(acc_run.get("output"))
+        if not tx_out or not acc_out:
+            continue
+
+        tx_cols = tx_out.get("columns") if isinstance(tx_out.get("columns"), list) else []
+        tx_rows = tx_out.get("rows") if isinstance(tx_out.get("rows"), list) else []
+        acc_cols = acc_out.get("columns") if isinstance(acc_out.get("columns"), list) else []
+        acc_rows = acc_out.get("rows") if isinstance(acc_out.get("rows"), list) else []
+        if not tx_cols or not acc_cols or not acc_rows:
+            continue
+
+        tipo_i = _idx(tx_cols, "tipo")
+        monto_i = _idx(tx_cols, "monto")
+        saldo_i = _idx(acc_cols, "saldo_total")
+        estatus_i = _idx(acc_cols, "estatus")
+        saneamiento_i = _idx(acc_cols, "saneamiento_calculado")
+        if min(tipo_i, monto_i, saldo_i, estatus_i, saneamiento_i) < 0:
+            continue
+
+        totals = {"DESEMBOLSO": 0.0, "PAGO": 0.0, "PENALIZACION": 0.0, "DESCUENTO": 0.0}
+        for row in tx_rows:
+            if not isinstance(row, (list, tuple)) or len(row) <= max(tipo_i, monto_i):
+                continue
+            tipo = str(row[tipo_i]).strip().upper()
+            try:
+                monto = float(row[monto_i])
+            except Exception:
+                monto = 0.0
+            if tipo in totals:
+                totals[tipo] += monto
+
+        acc = acc_rows[0]
+        if not isinstance(acc, (list, tuple)) or len(acc) <= max(saldo_i, estatus_i, saneamiento_i):
+            continue
+        saldo_reportado = float(acc[saldo_i])
+        estatus = str(acc[estatus_i])
+        saneamiento_reportado = float(acc[saneamiento_i])
+
+        saldo_esperado = totals["DESEMBOLSO"] - totals["PAGO"] + totals["PENALIZACION"] - totals["DESCUENTO"]
+        diff_saldo = saldo_esperado - saldo_reportado
+        tasa = rates.get(_norm_status_key(estatus), 0.0)
+        reserva_esperada = saldo_reportado * tasa
+        diff_reserva = reserva_esperada - saneamiento_reportado
+
+        ok_saldo = abs(diff_saldo) < 0.01
+        ok_reserva = abs(diff_reserva) < 0.01
+        estado = "CUADRADO (100% Match)" if ok_saldo and ok_reserva else "DRIFT DETECTADO"
+
+        blocks.append(
+            (
+                f"Conciliacion del credito {credito_id}: {estado}.\n"
+                f"- Saldo esperado: {saldo_esperado:.2f} | Saldo reportado: {saldo_reportado:.2f} | Diferencia: {diff_saldo:.2f}\n"
+                f"- Reserva esperada: {reserva_esperada:.2f} (tasa {tasa*100:.2f}% por estatus '{estatus}') | "
+                f"Reserva reportada: {saneamiento_reportado:.2f} | Diferencia: {diff_reserva:.2f}"
+            )
+        )
+
+    return "\n\n".join(blocks) if blocks else ""
 
 
 def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
@@ -556,11 +615,15 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     return f"Resultado: {status}."
 
 
-def build_agnostic_user_answer(user_prompt: str, runs: List[Dict[str, Any]]) -> str:
+def build_agnostic_user_answer(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> str:
     if not runs:
         return "No se obtuvo evidencia de herramientas para resolver la solicitud."
 
-    finance_answer = _finance_reconciliation_answer(user_prompt, runs)
+    finance_answer = _finance_reconciliation_answer(user_prompt, runs, analyzer_subqueries)
     if finance_answer:
         return finance_answer
 

@@ -23,7 +23,7 @@ def execute_validator_tool(
     find_last_assistant_real: Callable[[List[Any]], Any],
     coerce_content_str: Callable[[Any], str],
     strip_think: Callable[[str], str],
-    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]]], str],
+    build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]], List[str] | None], str],
     is_technical_answer: Callable[[str], bool],
 ) -> Dict[str, Any]:
     user_prompt = state.get("user_prompt") or ""
@@ -96,7 +96,14 @@ def execute_validator_tool(
         reasons.append(
             "La respuesta final parece una traza tecnica (no orientada a usuario)."
         )
-        repaired = build_user_answer_from_runs(user_prompt, runs)
+        try:
+            repaired = build_user_answer_from_runs(
+                user_prompt,
+                runs,
+                subqueries if isinstance(subqueries, list) else None,
+            )
+        except TypeError:
+            repaired = build_user_answer_from_runs(user_prompt, runs)  # type: ignore[misc]
         if repaired.strip():
             final_answer = repaired
             try:
