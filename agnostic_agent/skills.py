@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 from agnostic_agent.protocols.smp import validate_skill_manifest
+from agnostic_agent.runtime import append_tep_report, assess_skill_maturity
 
 
 def _parse_semver(value: Optional[str]) -> tuple[int, int, int]:
@@ -139,6 +140,40 @@ class SkillRegistry:
             metadata={"manifest": data},
         )
 
+    def _certify_loaded_skill(self, skill: Skill) -> None:
+        manifest_valid = skill.source_type == "manifest"
+        smoke_ok = bool((skill.instructions or "").strip())
+        schema_valid = bool(skill.input_schema and skill.output_schema) if skill.source_type == "manifest" else True
+        checks = {
+            "manifest_valid": manifest_valid,
+            "smoke_ok": smoke_ok,
+            "schema_valid": schema_valid,
+            "errors_normalized": True,
+            "tool_contracts": bool(skill.tools),
+            "knowledge_contracts": bool(skill.knowledge),
+            "artifacts_emitted": False,
+            "observability_complete": False,
+            "version_stable": bool(skill.version),
+        }
+        report = assess_skill_maturity(
+            skill_name=skill.name,
+            checks=checks,
+            notes={"source_type": skill.source_type},
+        )
+        skill.metadata["certification"] = report.model_dump()
+        skill.metadata["maturity_level"] = report.level
+
+        auto_record = os.getenv("AGNOSTIC_TEP_AUTO_RECORD", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+        if auto_record:
+            report_path = os.getenv("AGNOSTIC_TEP_REPORT_PATH", "documents/tep_reports.json")
+            append_tep_report(report_path, report)
+
     def load_skills(self) -> None:
         """Scans for markdown and manifest skills and loads them."""
         self.skills = {}
@@ -164,6 +199,9 @@ class SkillRegistry:
                     self._merge_skill(skill)
             except Exception as e:
                 print(f"Error loading manifest skill from {manifest_path}: {e}")
+
+        for skill in self.skills.values():
+            self._certify_loaded_skill(skill)
 
     def get_skill(self, name: str) -> Optional[Skill]:
         return self.skills.get(name)

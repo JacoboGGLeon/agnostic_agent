@@ -24,6 +24,7 @@ from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
 from agnostic_agent.runtime import ArtifactEmitter, build_end_to_end_report
+from agnostic_agent.protocols.validator import validate_srp_response
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,12 @@ class TurnService:
         if env_val.strip():
             return env_val.strip().lower() in {"1", "true", "yes", "y", "on"}
         return True
+
+    def _strict_protocols_enabled(self) -> bool:
+        import os
+
+        value = os.getenv("AGNOSTIC_STRICT_PROTOCOLS", "true")
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
     def _resolve_knowledge_names(self, agent_in: AgentInput) -> List[str]:
         if agent_in.knowledge_names:
@@ -461,6 +468,26 @@ class TurnService:
                 protocol_checks=protocol_checks,
                 user_answer=views["user"].final_answer,
             )
+            srp_ok, srp_errors = validate_srp_response(
+                {
+                    "status": "success",
+                    "outputs": {"final_answer": views["user"].final_answer},
+                    "artifacts": artifact_events,
+                    "errors": [],
+                    "metrics": {"tool_runs": len(tool_runs)},
+                    "children": [],
+                }
+            )
+            e2e_report.setdefault("protocol_checks", {})["srp_runtime_boundary"] = {
+                "ok": srp_ok,
+                "errors": srp_errors,
+            }
+            if self._strict_protocols_enabled() and not srp_ok:
+                raise TurnExecutionError(
+                    message="SRP protocol validation failed at runtime boundary.",
+                    step="protocol_enforcement",
+                    details={"srp_errors": srp_errors},
+                )
             views["dev"].raw_state.setdefault("artifacts", artifact_events)
             views["dev"].raw_state.setdefault("e2e_report", e2e_report)
 

@@ -112,3 +112,25 @@ output_schema: missing_output.json
     )
     reg = SkillRegistry(str(tmp_path))
     assert reg.get_skill("bad_skill") is None
+
+
+def test_skill_registry_assigns_maturity_metadata(tmp_path: Path):
+    md_skill = tmp_path / "text_basic.md"
+    md_skill.write_text(
+        """---
+name: text_basic
+description: markdown skill
+tools: [to_upper]
+knowledge: []
+version: 0.1.0
+---
+markdown instructions
+""",
+        encoding="utf-8",
+    )
+    reg = SkillRegistry(str(tmp_path))
+    skill = reg.get_skill("text_basic")
+    assert skill is not None
+    assert skill.metadata.get("maturity_level") in {"L0 Runnable", "L1 Validated", "L2 Certified", "L3 Production"}
+    cert = skill.metadata.get("certification", {})
+    assert cert.get("skill_name") == "text_basic"
