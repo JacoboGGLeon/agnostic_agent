@@ -15,7 +15,6 @@ knowledge:
   bindings:
   - knowledge/contabilidad.db
   - knowledge/transacciones.db
-  - knowledge/embeddings.db
 composition:
   callable_as_skill: true
   can_call_skills: false

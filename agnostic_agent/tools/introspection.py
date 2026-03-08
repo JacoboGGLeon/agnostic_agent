@@ -329,7 +329,7 @@ def read_knowledge(source_path: str, db_path: Optional[str] = None) -> Dict[str,
         conn.close()
 
 
-def _resolve_sqlite_db_path(db_path: str) -> str:
+def _resolve_sqlite_db_path(db_path: str, user_request: str = "") -> str:
     raw = (db_path or "").strip()
     candidates: List[str] = []
     alias_map: Dict[str, str] = {}
@@ -355,11 +355,24 @@ def _resolve_sqlite_db_path(db_path: str) -> str:
             candidates.append(os.path.join(os.getcwd(), "session", alias))
             candidates.append(os.path.join(os.getcwd(), alias))
     else:
-        candidates.extend(
-            [
-                os.path.join(os.getcwd(), "session", "embeddings.db"),
-            ]
+        req_lower = (user_request or "").lower()
+        finance_hint = bool(re.search(r"\bloc-\d{3,}\b", user_request or "", flags=re.IGNORECASE)) or any(
+            token in req_lower for token in ["credito", "crédito", "saldo", "saneamiento", "contabilidad"]
         )
+        if finance_hint:
+            candidates.extend(
+                [
+                    os.path.join(os.getcwd(), "session", "contabilidad.db"),
+                    os.path.join(os.getcwd(), "session", "transacciones.db"),
+                    os.path.join(os.getcwd(), "session", "embeddings.db"),
+                ]
+            )
+        else:
+            candidates.extend(
+                [
+                    os.path.join(os.getcwd(), "session", "embeddings.db"),
+                ]
+            )
         for alias in alias_map.values():
             candidates.append(os.path.join(os.getcwd(), "session", alias))
             candidates.append(os.path.join(os.getcwd(), alias))
@@ -473,15 +486,23 @@ def _preferred_select_cols(columns: List[Dict[str, Any]], max_cols: int = 6) -> 
     return chosen
 
 
-def _build_where_clauses(user_request: str, columns: List[Dict[str, Any]]) -> List[str]:
+def _build_where_clauses(
+    user_request: str,
+    columns: List[Dict[str, Any]],
+    entity_id: str = "",
+) -> List[str]:
     req = user_request or ""
     req_lower = req.lower()
     col_names = [str(c.get("name", "")) for c in columns]
     where: List[str] = []
 
     loc_match = re.search(r"\bLOC-\d{3,}\b", req, flags=re.IGNORECASE)
+    loc_id = ""
     if loc_match:
         loc_id = loc_match.group(0).upper()
+    elif entity_id and re.fullmatch(r"LOC-\d{3,}", str(entity_id).strip(), flags=re.IGNORECASE):
+        loc_id = str(entity_id).strip().upper()
+    if loc_id:
         target_col = None
         for candidate in ["credito_id", "id_credito", "credit_id", "id"]:
             if candidate in col_names:
@@ -508,7 +529,12 @@ def _build_where_clauses(user_request: str, columns: List[Dict[str, Any]]) -> Li
     return where
 
 
-def _build_sql_from_request(user_request: str, table_entry: Dict[str, Any], row_limit: int) -> Dict[str, Any]:
+def _build_sql_from_request(
+    user_request: str,
+    table_entry: Dict[str, Any],
+    row_limit: int,
+    entity_id: str = "",
+) -> Dict[str, Any]:
     table_name = str(table_entry.get("table", ""))
     columns = list(table_entry.get("columns", []) or [])
     col_names = [str(c.get("name", "")) for c in columns]
@@ -546,7 +572,7 @@ def _build_sql_from_request(user_request: str, table_entry: Dict[str, Any], row_
         else:
             order_clause = ""
 
-    where_clauses = _build_where_clauses(user_request, columns)
+    where_clauses = _build_where_clauses(user_request, columns, entity_id=entity_id)
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     sql = f"SELECT {select_expr} FROM {table_name}{where_sql}{order_clause} LIMIT {max(1, min(row_limit, 500))}"
     return {
@@ -585,12 +611,13 @@ def nl2sql_sqlite(
     db_path: str = "",
     row_limit: int = 50,
     execute: bool = False,
+    entity_id: str = "",
 ) -> Dict[str, Any]:
     """
     Genera SQL SELECT desde lenguaje natural usando el schema real de una SQLite.
     Opcionalmente ejecuta la consulta generada en modo read-only.
     """
-    target_db = _resolve_sqlite_db_path(db_path)
+    target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
     if not target_db or not os.path.exists(target_db):
         return {
             "ok": False,
@@ -610,11 +637,17 @@ def nl2sql_sqlite(
     if not chosen_table:
         return {"ok": False, "error": "Could not infer target table.", "db_path": target_db}
 
-    plan = _build_sql_from_request(user_request, chosen_table, row_limit=row_limit)
+    plan = _build_sql_from_request(
+        user_request,
+        chosen_table,
+        row_limit=row_limit,
+        entity_id=entity_id,
+    )
     result: Dict[str, Any] = {
         "ok": True,
         "db_path": target_db,
         "user_request": user_request,
+        "entity_id": entity_id or None,
         "generated_sql": plan["sql"],
         "chosen_table": plan["table"],
         "where_clauses": plan["where_clauses"],
@@ -641,10 +674,11 @@ class _NL2SQLToolAgentSQLite:
         db_path: str,
         row_limit: int,
         execute: bool,
+        entity_id: str = "",
     ) -> Dict[str, Any]:
         trace: List[Dict[str, Any]] = []
 
-        target_db = _resolve_sqlite_db_path(db_path)
+        target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
         trace.append({"step": "resolve_db", "input": db_path, "output": target_db})
         if not target_db or not os.path.exists(target_db):
             return {
@@ -684,7 +718,12 @@ class _NL2SQLToolAgentSQLite:
             }
 
         trace.append({"step": "choose_table", "table": chosen_table.get("table")})
-        plan = _build_sql_from_request(user_request, chosen_table, row_limit=row_limit)
+        plan = _build_sql_from_request(
+            user_request,
+            chosen_table,
+            row_limit=row_limit,
+            entity_id=entity_id,
+        )
         trace.append(
             {
                 "step": "generate_sql",
@@ -698,6 +737,7 @@ class _NL2SQLToolAgentSQLite:
             "agent": "nl2sql_agent_sqlite",
             "db_path": target_db,
             "user_request": user_request,
+            "entity_id": entity_id or None,
             "chosen_table": plan.get("table"),
             "generated_sql": plan.get("sql"),
             "where_clauses": plan.get("where_clauses", []),
@@ -717,6 +757,7 @@ def nl2sql_agent_sqlite(
     db_path: str = "",
     row_limit: int = 50,
     execute: bool = True,
+    entity_id: str = "",
 ) -> Dict[str, Any]:
     """
     NL2SQL como agente independiente (tool-agent).
@@ -1138,6 +1179,7 @@ def knowledge_voyague_nl2sql_agent(
         db_path=db_path,
         row_limit=row_limit,
         execute=execute,
+        entity_id=entity_id,
     )
     if isinstance(result, dict):
         result.setdefault("alias_used", "knowledge_voyague_nl2sql_agent")

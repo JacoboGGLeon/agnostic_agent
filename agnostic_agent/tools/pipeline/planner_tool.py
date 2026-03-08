@@ -76,6 +76,12 @@ def _extract_requested_db_filename(subquery_text: str) -> str:
     return m.group(1)
 
 
+def _extract_credito_id(subquery_text: str) -> str:
+    text = _sanitize_text(subquery_text)
+    match = re.search(r"\bLOC-\d{3,}\b", text, flags=re.IGNORECASE)
+    return match.group(0).upper() if match else ""
+
+
 def _align_call_ids_to_subquery(
     *,
     subquery_text: str,
@@ -343,6 +349,73 @@ def execute_planner_tool(
             subqs = build_subqueries_from_prompt(last_user.content)
     if not subqs:
         subqs = build_subqueries_from_prompt(state.get("user_prompt") or "")
+
+    # Deterministic planner path for accounting reconciliation skill (1:1 contract).
+    if skill_mode and "contabilidad_instantanea" in set(active_skills):
+        deterministic_calls: List[Dict[str, Any]] = []
+        deterministic_trajs: List[Dict[str, str]] = []
+        planner_calls_by_subquery: List[Dict[str, Any]] = []
+
+        for idx, subq in enumerate(subqs, start=1):
+            credito_id = _extract_credito_id(str(subq))
+            subq_call_count = 0
+            desc_lines: List[str] = []
+            if credito_id:
+                tx_sql = f"SELECT tipo, monto FROM movimientos WHERE credito_id = '{credito_id}'"
+                acc_sql = (
+                    "SELECT saldo_total, estatus, saneamiento_calculado "
+                    f"FROM estados_cuenta WHERE credito_id = '{credito_id}'"
+                )
+                deterministic_calls.append(
+                    {
+                        "name": "query_transactions_db",
+                        "args": {"query": tx_sql},
+                        "id": f"call_s{idx}_{uuid.uuid4().hex[:10]}",
+                        "type": "tool_call",
+                    }
+                )
+                deterministic_calls.append(
+                    {
+                        "name": "query_accounting_db",
+                        "args": {"query": acc_sql},
+                        "id": f"call_s{idx}_{uuid.uuid4().hex[:10]}",
+                        "type": "tool_call",
+                    }
+                )
+                subq_call_count = 2
+                desc_lines.append(f"step 1: tool=query_transactions_db, credito_id={credito_id}")
+                desc_lines.append(f"step 2: tool=query_accounting_db, credito_id={credito_id}")
+            else:
+                desc_lines.append("No credito_id found in subquery; planner skipped deterministic calls.")
+
+            deterministic_trajs.append(
+                {
+                    "subquery": _sanitize_text(subq),
+                    "description": _sanitize_text("\n".join(desc_lines)),
+                }
+            )
+            planner_calls_by_subquery.append(
+                {
+                    "subquery_idx": idx,
+                    "subquery": _sanitize_text(subq),
+                    "planned_calls": subq_call_count,
+                    "skipped_reason": "" if subq_call_count else "missing_credito_id",
+                }
+            )
+
+        ai_msg = ai_message_type(
+            content="Deterministic accounting plan generated from contabilidad_instantanea contract.",
+            tool_calls=deterministic_calls,
+            additional_kwargs={"dag_raw": "deterministic_contabilidad_plan"},
+        )
+        return {
+            "messages": [ai_msg],
+            "planner_trajs": deterministic_trajs,
+            "planner_calls_by_subquery": planner_calls_by_subquery,
+            "llm_raw_out": "deterministic_contabilidad_plan",
+            "llm_clean_out": "deterministic_contabilidad_plan",
+            "_planner_scope_internal": planner_scope,
+        }
 
     seen_calls_keys = set()
 

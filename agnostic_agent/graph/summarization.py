@@ -3,6 +3,7 @@
 import json
 import re
 from typing import Any, Callable, Dict, List, Optional
+import os
 
 
 def fmt_args(args: Dict[str, Any]) -> str:
@@ -377,12 +378,28 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
             err = output.get("error") or "fallo en consulta SQL"
             return f"No pude consultar la base de datos: {err}."
 
+        req_text = str(output.get("user_request") or "")
+        where_clauses = output.get("where_clauses") or []
+        loc_match = re.search(r"\bLOC-\d{3,}\b", req_text, flags=re.IGNORECASE)
+        loc_id = loc_match.group(0).upper() if loc_match else ""
+        if not loc_id and output.get("entity_id"):
+            loc_id = str(output.get("entity_id")).strip().upper()
+
         chosen_table = output.get("chosen_table")
+        db_label = os.path.basename(str(output.get("db_path") or ""))
+        if loc_id and not where_clauses:
+            return (
+                f"No pude filtrar por {loc_id} en la base `{db_label}`. "
+                "Necesito consultar `session/contabilidad.db` o `session/transacciones.db` para ese credito."
+            )
+
         execution = output.get("execution") if isinstance(output.get("execution"), dict) else {}
         if execution and execution.get("ok"):
             rows = execution.get("rows") if isinstance(execution.get("rows"), list) else []
             row_count = execution.get("row_count")
             if isinstance(row_count, int):
+                if loc_id and row_count == 0:
+                    return f"No encontre registros para {loc_id}."
                 if rows:
                     preview = _fmt_row_preview(rows[0])
                     table_txt = f" de {chosen_table}" if chosen_table else ""

@@ -249,3 +249,44 @@ def test_execute_planner_node_injects_db_path_hint_for_sql_tools():
     ai_msg = out["messages"][0]
     assert len(ai_msg.tool_calls) == 1
     assert ai_msg.tool_calls[0]["args"]["db_path"] == "transacciones.db"
+
+
+def test_execute_planner_node_contabilidad_is_deterministic_1_to_1():
+    llm = _PlannerLLM([])  # Should not be used in deterministic branch.
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {
+            "subqueries": [
+                "Realiza la conciliacion del Credito LOC-0005. Estatus: Vigente / Al corriente. Saldo: 19789.9."
+            ]
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("query_transactions_db"), _Tool("query_accounting_db")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry([_Skill("contabilidad_instantanea", tools=["query_transactions_db", "query_accounting_db"])]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["contabilidad_instantanea"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 2
+    assert ai_msg.tool_calls[0]["name"] == "query_transactions_db"
+    assert ai_msg.tool_calls[0]["args"]["query"] == "SELECT tipo, monto FROM movimientos WHERE credito_id = 'LOC-0005'"
+    assert ai_msg.tool_calls[1]["name"] == "query_accounting_db"
+    assert ai_msg.tool_calls[1]["args"]["query"] == (
+        "SELECT saldo_total, estatus, saneamiento_calculado FROM estados_cuenta WHERE credito_id = 'LOC-0005'"
+    )
+    assert out["planner_calls_by_subquery"][0]["planned_calls"] == 2

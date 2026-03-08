@@ -99,6 +99,8 @@ def _normalize_finance_sql(query: str) -> str:
     normalized = query or ""
     normalized = re.sub(r"\bcreditos\b", "estados_cuenta", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\btransacciones\b", "movimientos", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bcodigo\b", "credito_id", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bsaldo\b", "saldo_total", normalized, flags=re.IGNORECASE)
     return normalized
 
 
