@@ -20,6 +20,6 @@ def test_build_agnostic_user_answer_returns_user_facing_markdown():
         {"name": "tool_b", "args": {}, "output": {"error": "timeout"}},
     ]
     out = build_agnostic_user_answer("haz algo", runs)
-    assert out.startswith("## Resultado")
+    assert out.startswith("Ya lo revise.")
     assert "tool_call_id" not in out
-    assert "Se procesaron 2 ejecuciones" in out
+    assert "Detecte 1 ejecuciones con error" in out
