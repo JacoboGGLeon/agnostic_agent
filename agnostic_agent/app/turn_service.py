@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -22,6 +23,7 @@ from agnostic_agent.core.pipeline_v2 import (
 from agnostic_agent.knowledge import KnowledgeBase, select_knowledge_bases
 from agnostic_agent.logic import State
 from agnostic_agent.memory import read_memory, write_memory
+from agnostic_agent.runtime import ArtifactEmitter
 
 logger = logging.getLogger(__name__)
 
@@ -387,9 +389,17 @@ class TurnService:
         Executes a conversation turn.
         """
         try:
+            run_id = f"run_{uuid4().hex[:12]}"
+            emitter = ArtifactEmitter()
             agent_in = self._coerce_input(user_input)
             prompt_text = self._resolve_prompt_text(agent_in)
             meta = self._resolve_metadata(agent_in)
+            emitter.emit(
+                run_id=run_id,
+                kind="run.started",
+                producer="turn_service",
+                payload={"session_id": meta.get("session_id", "default")},
+            )
             knowledge_names = self._resolve_knowledge_names(agent_in)
             knowledge_selected = select_knowledge_bases(knowledge_names, self.knowledge_bases)
             memory_context = read_memory(session_id=meta["session_id"])
@@ -408,6 +418,13 @@ class TurnService:
             last_ai_text = self._extract_last_ai_text(out_state)
             summary_obj = self._build_summary_obj(out_state)
             tool_runs = self._build_tool_runs(out_state)
+            for idx, tr in enumerate(tool_runs):
+                emitter.emit(
+                    run_id=run_id,
+                    kind="tool.called",
+                    producer="turn_service",
+                    payload={"index": idx, "name": tr.name, "id": tr.id},
+                )
             views = self._build_views(
                 out_state=out_state,
                 summary_obj=summary_obj,
@@ -422,6 +439,15 @@ class TurnService:
                     tool_runs=tool_runs,
                     fallback_final_user=views["user"].final_answer,
                 )
+            artifact_events = [e.model_dump() for e in emitter.list_events()]
+            emitter.emit(
+                run_id=run_id,
+                kind="run.completed",
+                producer="turn_service",
+                payload={"tool_runs": len(tool_runs)},
+            )
+            artifact_events = [e.model_dump() for e in emitter.list_events()]
+            views["dev"].raw_state.setdefault("artifacts", artifact_events)
 
             self._persist_memory(
                 session_id=meta["session_id"],

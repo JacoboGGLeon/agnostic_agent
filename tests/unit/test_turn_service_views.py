@@ -66,6 +66,10 @@ def test_turn_service_pipeline_v2_viewmodels(monkeypatch):
     assert "## Deep Summary" in out["deep_out"]["final_answer"]
     assert "## Dev Summary" in out["dev_out"]["final_answer"]
     assert out["user_out"]["final_answer"] == "Respuesta visible para usuario"
+    artifacts = out["dev_out"]["raw_state"].get("artifacts", [])
+    assert isinstance(artifacts, list)
+    assert any(evt.get("kind") == "run.started" for evt in artifacts)
+    assert any(evt.get("kind") == "run.completed" for evt in artifacts)
 
 
 def test_turn_service_pipeline_v2_enabled_by_default(monkeypatch):
