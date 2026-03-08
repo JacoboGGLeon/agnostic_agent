@@ -75,3 +75,18 @@ def test_execute_composition_tree():
     assert out["status"] == "success"
     assert len(out["children"]) == 3
     assert out["children"][0]["skill"] == "root_skill"
+
+
+def test_execute_composition_uses_srp_normalization_for_bad_skill_result():
+    def _bad_invoke(_skill_name, _inputs):
+        return "not-a-dict"
+
+    plan = {
+        "op": "sequential",
+        "steps": [{"skill": "bad_skill", "inputs": {"x": 1}}],
+    }
+    out = execute_composition(plan=plan, invoke_skill=_bad_invoke, run_id="run_bad")
+    assert out["status"] == "success"
+    child = out["children"][0]["result"]
+    assert child["status"] == "error"
+    assert child["errors"][0]["code"] == "INVALID_SKILL_RESULT"

@@ -34,6 +34,7 @@ from .knowledge import (  # ✅ KBs externas/tabulares
 from .skills import SkillRegistry  # ✅ registro de skills
 from .app.turn_service import TurnService
 from .app.errors import TurnExecutionError
+from .runtime import register_skill_invoker
 
 class Agent:
     """
@@ -274,6 +275,24 @@ class Agent:
              skills_path = os.path.join(base_dir, "skills")
         
         skill_registry = SkillRegistry(skills_path)
+        def _default_skill_invoker(skill_name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+            skill = skill_registry.get_skill(skill_name) if skill_registry else None
+            if skill is None:
+                return {
+                    "status": "error",
+                    "errors": [{"code": "SKILL_NOT_FOUND", "message": f"Skill '{skill_name}' not found"}],
+                    "outputs": {},
+                }
+            return {
+                "status": "success",
+                "outputs": {
+                    "skill_name": skill.name,
+                    "description": skill.description,
+                    "inputs": inputs,
+                },
+            }
+
+        register_skill_invoker(_default_skill_invoker)
 
         # 6) LLM planner bindeado a las tools
         planner_llm = build_planner_llm(cfg)

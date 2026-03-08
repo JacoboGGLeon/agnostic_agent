@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List
 
 from agnostic_agent.protocols.scp import CompositionPlan
 from agnostic_agent.runtime.artifacts import ArtifactEmitter
+from agnostic_agent.runtime.skill_runtime import invoke_skill_srp
 
 
 def _safe_invoke(
@@ -23,7 +24,17 @@ def _safe_invoke(
         payload={"index": idx, "skill": skill},
     )
     try:
-        result = invoke_skill(skill, inputs)
+        result = invoke_skill_srp(
+            request_payload={
+                "run_id": f"{run_id}_s{idx}",
+                "skill": {"name": skill},
+                "goal": "composition-step",
+                "inputs": inputs,
+                "context": {},
+                "constraints": {},
+            },
+            invoke_skill_impl=invoke_skill,
+        )
         emitter.emit(
             run_id=run_id,
             kind="skill.completed",

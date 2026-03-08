@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Importamos los módulos de tools explícitamente para llenar el registro
 # Usamos imports relativos para evitar circularidad si se importara agnostic_agent.tools antes
-from . import basic, math, semantic, finance, introspection
+from . import basic, math, semantic, finance, introspection, composition_tools
 
 # Construimos el registro global agregando las tools de cada submódulo
 TOOL_REGISTRY: Dict[str, Any] = {}
@@ -36,6 +36,7 @@ _register_module_tools(math)
 _register_module_tools(semantic)
 _register_module_tools(finance)
 _register_module_tools(introspection)
+_register_module_tools(composition_tools)
 
 # Re-exportamos funciones clave para compatibilidad hacia atrás si alguien importaba directamente
 # (Aunque lo ideal es usar el registro)
@@ -61,6 +62,7 @@ nl2sql_sqlite = introspection.nl2sql_sqlite
 nl2sql_agent_sqlite = introspection.nl2sql_agent_sqlite
 knowledge_voyague_nl2sql_agent = introspection.knowledge_voyague_nl2sql_agent
 knowledge_voyague_nl2semantic_agent = introspection.knowledge_voyague_nl2semantic_agent
+compose_skills = composition_tools.compose_skills
 
 
 def get_default_tools(enabled_names: List[str] | None = None) -> List[Any]:
