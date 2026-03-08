@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
-from langchain_core.messages import AIMessage, ToolMessage
+from agnostic_agent.tools.pipeline.catcher_tool import execute_catcher_tool
 
 
 def execute_catcher_node(
@@ -12,28 +12,10 @@ def execute_catcher_node(
     decode_tool_content: Callable[[Any], Any],
     to_jsonable: Callable[[Any], Any],
 ) -> Dict[str, Any]:
-    messages = state["messages"]
-
-    ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
-    ai_plan = next((m for m in reversed(ai_msgs) if extract_tool_calls(m)), None)
-    tool_calls = extract_tool_calls(ai_plan) if ai_plan else []
-
-    tmsgs: List[ToolMessage] = [m for m in messages if isinstance(m, ToolMessage)]
-
-    runs: List[Dict[str, Any]] = []
-    for tc in tool_calls:
-        tm = next((t for t in tmsgs if t.tool_call_id == tc["id"]), None)
-        if tm is None:
-            continue
-        raw = tm.content
-        output = decode_tool_content(raw)
-        runs.append(
-            {
-                "id": tc["id"],
-                "name": tc["name"],
-                "args": tc.get("args", {}) or {},
-                "output": to_jsonable(output),
-            }
-        )
-
-    return {"tool_runs": runs}
+    # Structural wrapper: execution logic lives in pipeline tools.
+    return execute_catcher_tool(
+        state,
+        extract_tool_calls=extract_tool_calls,
+        decode_tool_content=decode_tool_content,
+        to_jsonable=to_jsonable,
+    )
