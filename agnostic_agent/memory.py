@@ -27,6 +27,7 @@ _RECENT_TURNS_MAXLEN = 20
 _RECENT_ENTITIES_MAXLEN = 25
 _RECENT_SOURCES_MAXLEN = 12
 _FOCUS_STACK_MAXLEN = 10
+_RECENT_FINANCE_RESULTS_MAXLEN = 25
 
 
 def _ensure_dict(value: Any) -> Dict[str, Any]:
@@ -91,6 +92,49 @@ def _normalize_entity_groups(value: Any) -> Dict[str, List[str]]:
     return normalized
 
 
+def _normalize_scalar_entity_map(value: Any) -> Dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    normalized: Dict[str, str] = {}
+    for key, item in value.items():
+        key_text = _normalize_text(key)
+        item_text = _normalize_text(item)
+        if key_text and item_text:
+            normalized[key_text] = item_text
+    return normalized
+
+
+def _normalize_finance_result(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    payload = dict(value)
+    credito_id = _normalize_text(payload.get("credito_id"))
+    if not credito_id:
+        return {}
+    normalized: Dict[str, Any] = {
+        "credito_id": credito_id,
+        "status": _normalize_text(payload.get("status")),
+        "estatus": _normalize_text(payload.get("estatus")),
+    }
+    for key in ("flujos", "saldo", "saneamiento"):
+        section = payload.get(key)
+        if isinstance(section, Mapping):
+            normalized[key] = dict(section)
+    return normalized
+
+
+def _extract_finance_results_from_state(out_state: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    for run in out_state.get("tool_runs") or []:
+        if not isinstance(run, Mapping):
+            continue
+        output = run.get("output")
+        normalized = _normalize_finance_result(output)
+        if normalized:
+            results.append(normalized)
+    return results
+
+
 def _extract_entity_groups_from_state(out_state: Mapping[str, Any]) -> Dict[str, List[str]]:
     grouped: Dict[str, List[str]] = {}
     for entity_group in out_state.get("entities_by_subquery") or []:
@@ -139,7 +183,16 @@ def _extract_operation_label(user_prompt: str, out_state: Mapping[str, Any]) -> 
     prompt_text = (user_prompt or "").lower()
     intents = out_state.get("subquery_intents") or []
     flat_intents = {str(intent) for group in intents if isinstance(group, list) for intent in group}
-    if any(intent in {"batch_reconcile", "reconcile_credit", "audit_drift"} for intent in flat_intents):
+    if any(
+        intent in {
+            "batch_reconcile",
+            "reconcile_credit",
+            "audit_drift",
+            "explain_reconciliation_result",
+            "explain_reconciliation_flows",
+        }
+        for intent in flat_intents
+    ):
         return "reconcile"
     if any(intent in {"explain_rule", "semantic_lookup", "semantic_synthesis"} for intent in flat_intents):
         return "knowledge_lookup"
@@ -159,11 +212,21 @@ def _ensure_working_memory(mem: MutableMapping[str, Any]) -> Dict[str, Any]:
     working["focus_stack"] = _ensure_deque(working.get("focus_stack"), maxlen=_FOCUS_STACK_MAXLEN)
     working["active_entities_by_type"] = _normalize_entity_groups(working.get("active_entities_by_type"))
     working["last_listed_entities_by_type"] = _normalize_entity_groups(working.get("last_listed_entities_by_type"))
+    working["last_focus_entity_by_type"] = _normalize_scalar_entity_map(working.get("last_focus_entity_by_type"))
+    working["last_finance_artifact"] = _normalize_finance_result(working.get("last_finance_artifact"))
     recent_entities_raw = _ensure_dict(working.get("recent_entities_by_type"))
     working["recent_entities_by_type"] = {
         key: _ensure_deque(values, maxlen=_RECENT_ENTITIES_MAXLEN)
         for key, values in _normalize_entity_groups(recent_entities_raw).items()
     }
+    finance_results = working.get("recent_finance_results")
+    finance_results_deque = _ensure_deque(finance_results, maxlen=_RECENT_FINANCE_RESULTS_MAXLEN)
+    normalized_finance = deque(maxlen=_RECENT_FINANCE_RESULTS_MAXLEN)
+    for item in finance_results_deque:
+        normalized_item = _normalize_finance_result(item)
+        if normalized_item:
+            normalized_finance.append(normalized_item)
+    working["recent_finance_results"] = normalized_finance
     working["last_operation"] = _normalize_text(working.get("last_operation"))
     mem["working_memory"] = working
     return working
@@ -183,10 +246,21 @@ def _snapshot_memory(mem: Mapping[str, Any]) -> Dict[str, Any]:
         working_snapshot["last_listed_entities_by_type"] = _normalize_entity_groups(
             working_snapshot.get("last_listed_entities_by_type")
         )
+        working_snapshot["last_focus_entity_by_type"] = _normalize_scalar_entity_map(
+            working_snapshot.get("last_focus_entity_by_type")
+        )
+        working_snapshot["last_finance_artifact"] = _normalize_finance_result(
+            working_snapshot.get("last_finance_artifact")
+        )
         recent_entities = _ensure_dict(working_snapshot.get("recent_entities_by_type"))
         working_snapshot["recent_entities_by_type"] = {
             key: _deque_snapshot(value) for key, value in recent_entities.items()
         }
+        working_snapshot["recent_finance_results"] = [
+            _normalize_finance_result(item)
+            for item in _deque_snapshot(working_snapshot.get("recent_finance_results"))
+            if _normalize_finance_result(item)
+        ]
         snapshot["working_memory"] = working_snapshot
     return snapshot
 
@@ -234,6 +308,30 @@ def _append_focus(
     if entity_groups or sources:
         focus_stack.append(focus_item)
     working["focus_stack"] = focus_stack
+
+
+def _remember_finance_focus(
+    working: MutableMapping[str, Any],
+    finance_results: List[Dict[str, Any]],
+) -> None:
+    if not finance_results:
+        return
+    recent_finance = _ensure_deque(working.get("recent_finance_results"), maxlen=_RECENT_FINANCE_RESULTS_MAXLEN)
+    for result in finance_results:
+        normalized = _normalize_finance_result(result)
+        if normalized:
+            recent_finance.append(normalized)
+    working["recent_finance_results"] = recent_finance
+
+    if len(finance_results) != 1:
+        return
+    normalized = _normalize_finance_result(finance_results[0])
+    if not normalized:
+        return
+    last_focus = _normalize_scalar_entity_map(working.get("last_focus_entity_by_type"))
+    last_focus["credito_id"] = normalized["credito_id"]
+    working["last_focus_entity_by_type"] = last_focus
+    working["last_finance_artifact"] = normalized
 
 
 def _build_turn_snapshot(
@@ -312,6 +410,7 @@ def write_memory(
         entity_groups=entity_groups,
         sources=turn_snapshot["sources"],
     )
+    _remember_finance_focus(working, _extract_finance_results_from_state(state_snapshot))
 
     update_session_memory(session_id, mem)
 

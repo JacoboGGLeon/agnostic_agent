@@ -1,7 +1,7 @@
 import datetime
 import html
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 import markdown
 import streamlit as st
@@ -33,37 +33,97 @@ def _display_name_from_path(raw_value: str) -> str:
     return stem.replace("_", " ")
 
 
-def _render_active_world_summary(skill_obj) -> None:
+def _world_summary_payload(skill_obj) -> Dict[str, Any]:
     if skill_obj is None:
-        return
+        return {
+            "world_label": "Auto",
+            "world_description": "Auto: el Agentic OS selecciona el mundo adecuado para cada solicitud.",
+            "tools": [],
+            "knowledge": [],
+        }
     ui_meta = getattr(skill_obj, "ui", {}) if isinstance(getattr(skill_obj, "ui", {}), dict) else {}
     world_label = str(ui_meta.get("world_label") or skill_obj.name).strip()
     world_description = str(ui_meta.get("world_description") or skill_obj.description or "").strip()
     tools = [str(tool_name).strip() for tool_name in (getattr(skill_obj, "tools", []) or []) if str(tool_name).strip()]
-    knowledge = [
+    knowledge_all = [
         _display_name_from_path(source)
         for source in (getattr(skill_obj, "knowledge", []) or [])
         if _display_name_from_path(source)
     ]
-    tools_markup = "".join(f'<span class="composer-pill">{html.escape(tool)}</span>' for tool in tools)
-    knowledge_markup = "".join(f'<span class="composer-pill composer-pill-subtle">{html.escape(item)}</span>' for item in knowledge[:4])
-    knowledge_suffix = ""
-    if len(knowledge) > 4:
-        knowledge_suffix = f'<span class="composer-caption">+{len(knowledge) - 4} fuentes</span>'
+    return {
+        "world_label": world_label,
+        "world_description": world_description,
+        "tools": tools,
+        "knowledge": knowledge_all,
+    }
 
+
+def _render_mode_selector(skills: List[str]) -> str:
+    st.markdown(
+        """
+        <div class="composer-toolbar-shell">
+          <div class="composer-toolbar-title">Modo de trabajo</div>
+          <div class="composer-toolbar-copy">Fija un mundo si quieres trabajar con un universo concreto. Si no, deja Auto.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return st.selectbox(
+        "Modo de trabajo",
+        ["Auto (Analyzer)"] + skills,
+        index=0,
+        key="debug_skill_selector",
+        format_func=_format_skill_option,
+        label_visibility="collapsed",
+        help="Selecciona un mundo especifico para fijar el contexto de trabajo.",
+    )
+
+
+def _render_active_mode_summary(selected_skill: str, skill_obj: Any) -> None:
+    payload = _world_summary_payload(skill_obj if selected_skill != "Auto (Analyzer)" else None)
+    world_label = str(payload.get("world_label") or "Auto").strip()
+    world_description = str(payload.get("world_description") or "").strip()
+    tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
+    knowledge = payload.get("knowledge") if isinstance(payload.get("knowledge"), list) else []
+    tool_preview = tools[:4]
+    knowledge_preview = knowledge[:3]
+    tools_markup = "".join(f'<span class="composer-pill">{html.escape(str(tool))}</span>' for tool in tool_preview)
+    knowledge_markup = "".join(
+        f'<span class="composer-pill composer-pill-subtle">{html.escape(str(item))}</span>'
+        for item in knowledge_preview
+    )
+    tool_suffix = (
+        f'<span class="composer-caption">+{len(tools) - len(tool_preview)} tools</span>'
+        if len(tools) > len(tool_preview)
+        else ""
+    )
+    knowledge_suffix = (
+        f'<span class="composer-caption">+{len(knowledge) - len(knowledge_preview)} fuentes</span>'
+        if len(knowledge) > len(knowledge_preview)
+        else ""
+    )
+    mode_label = "Auto" if selected_skill == "Auto (Analyzer)" else _format_skill_option(selected_skill)
     st.markdown(
         f"""
         <div class="composer-context-card">
           <div class="composer-context-head">
             <div>
+              <div class="composer-fixed-kicker">Modo activo</div>
               <div class="composer-context-title">{html.escape(world_label)}</div>
               <div class="composer-context-copy">{html.escape(world_description)}</div>
             </div>
+            <div class="composer-fixed-mode">{html.escape(mode_label)}</div>
           </div>
-          <div class="composer-section-label">Tools disponibles</div>
-          <div class="composer-pill-row">{tools_markup or '<span class="composer-caption">Sin tools declaradas</span>'}</div>
-          <div class="composer-section-label">Knowledge activa</div>
-          <div class="composer-pill-row">{knowledge_markup or '<span class="composer-caption">Sin fuentes declaradas</span>'}{knowledge_suffix}</div>
+          <div class="composer-fixed-meta">
+            <div class="composer-fixed-group">
+              <div class="composer-section-label">Tools</div>
+              <div class="composer-pill-row">{tools_markup or '<span class="composer-caption">Orquestacion automatica</span>'}{tool_suffix}</div>
+            </div>
+            <div class="composer-fixed-group">
+              <div class="composer-section-label">Knowledge</div>
+              <div class="composer-pill-row">{knowledge_markup or '<span class="composer-caption">Contexto automatico</span>'}{knowledge_suffix}</div>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -76,6 +136,17 @@ def render_online_tab(agent_factory, *, show_history: bool = True, show_inspecto
 
     if agent_error:
         st.error(f"Error iniciando agente: {agent_error}")
+
+    skills: List[str] = []
+    agent = agent_factory()
+    if agent and agent.skill_registry:
+        skills = [s.name for s in agent.skill_registry.list_skills()]
+
+    selected_skill = _render_mode_selector(skills)
+    active_skill_obj = None
+    if selected_skill != "Auto (Analyzer)" and agent and agent.skill_registry:
+        active_skill_obj = agent.skill_registry.get_skill(selected_skill)
+    _render_active_mode_summary(selected_skill, active_skill_obj)
 
     if show_history and has_interaction:
         feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
@@ -144,46 +215,8 @@ def render_online_tab(agent_factory, *, show_history: bool = True, show_inspecto
             if show_inspector:
                 render_inspector()
 
-    skills: List[str] = []
-    agent = agent_factory()
-    if agent and agent.skill_registry:
-        skills = [s.name for s in agent.skill_registry.list_skills()]
-
-    st.markdown('<div class="studio-composer-spacer"></div>', unsafe_allow_html=True)
-
-    with st.container(border=True):
-        st.markdown('<div class="studio-composer-marker"></div>', unsafe_allow_html=True)
-        st.markdown(
-            """
-            <div class="composer-shell">
-              <div class="composer-header">
-                <div>
-                  <div class="composer-title">Modo de trabajo</div>
-                  <div class="composer-subtitle">Selecciona un universo fijo o deja que el analyzer enrute automaticamente.</div>
-                </div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        selected_skill = st.selectbox(
-            "Modo de trabajo",
-            ["Auto (Analyzer)"] + skills,
-            index=0,
-            key="debug_skill_selector",
-            format_func=_format_skill_option,
-            label_visibility="collapsed",
-            help="Selecciona un mundo especifico para fijar el contexto de trabajo.",
-        )
-
-        if selected_skill == "Auto (Analyzer)":
-            st.caption("Auto: el Agentic OS selecciona el mundo mas adecuado para la solicitud.")
-        elif agent and agent.skill_registry:
-            skill_obj = agent.skill_registry.get_skill(selected_skill)
-            _render_active_world_summary(skill_obj)
-
-        prompt = st.chat_input("Escribe tu mensaje...")
+    st.markdown('<div class="studio-feed-spacer"></div>', unsafe_allow_html=True)
+    prompt = st.chat_input("Escribe tu mensaje...")
 
     if prompt:
         uid = next_id()

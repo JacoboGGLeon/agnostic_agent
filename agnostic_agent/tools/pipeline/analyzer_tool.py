@@ -38,8 +38,35 @@ _REFERENTIAL_HINTS = (
     "mismos",
     "mismas",
     "detalle",
+    "dicha",
+    "dicho",
+    "esa",
+    "ese",
+    "esta",
+    "este",
+    "esto",
+    "resultado",
+    "conciliacion",
+    "conciliación",
+    "flujos",
 )
 _REFERENTIAL_PRONOUN_RE = re.compile(r"\b\w+(?:los|las)\b", flags=re.IGNORECASE)
+_SINGULAR_REFERENTIAL_HINTS = (
+    "dicha",
+    "dicho",
+    "esa conciliacion",
+    "esa conciliación",
+    "este resultado",
+    "ese resultado",
+    "esta conciliacion",
+    "esta conciliación",
+    "como llegaste",
+    "cómo llegaste",
+    "detallame",
+    "detállame",
+    "flujos",
+    "esto",
+)
 
 
 def _guess_response_mode(user_prompt: str, subqueries: List[str]) -> str:
@@ -109,6 +136,15 @@ def _normalize_memory_context(memory_context: Any) -> Dict[str, Any]:
         "active_entities_by_type": _normalize_entity_groups(working.get("active_entities_by_type")),
         "last_listed_entities_by_type": _normalize_entity_groups(working.get("last_listed_entities_by_type")),
         "recent_entities_by_type": _normalize_entity_groups(working.get("recent_entities_by_type")),
+        "last_focus_entity_by_type": {
+            str(key).strip(): str(value).strip()
+            for key, value in (working.get("last_focus_entity_by_type") or {}).items()
+            if str(key).strip() and str(value).strip()
+        },
+        "last_finance_artifact": dict(working.get("last_finance_artifact") or {})
+        if isinstance(working.get("last_finance_artifact"), dict)
+        else {},
+        "recent_finance_results": list(working.get("recent_finance_results") or []),
         "last_operation": str(working.get("last_operation") or "").strip(),
         "focus_stack": list(working.get("focus_stack") or []),
     }
@@ -122,6 +158,18 @@ def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]
             return ["semantic_synthesis"]
         return ["semantic_lookup"]
     if skill == "contabilidad_automatica":
+        if any(tok in text for tok in ["flujo", "flujos"]) and (
+            _looks_like_referential_request(text) or "concili" in text or "loc-" in text
+        ):
+            return ["explain_reconciliation_flows"]
+        if any(tok in text for tok in ["como llegaste", "cómo llegaste", "detalle", "detall", "explicame", "explícame"]) and (
+            _looks_like_referential_request(text)
+            or "loc-" in text
+            or "concili" in text
+            or "cuadrado" in text
+            or "diferencia de saldo" in text
+        ):
+            return ["explain_reconciliation_result"]
         if any(tok in text for tok in ["drift", "descuadre", "concili", "cuadr"]):
             return ["reconcile_credit"]
         if any(tok in text for tok in ["regla", "tasa", "saneamiento"]):
@@ -153,6 +201,11 @@ def _looks_like_batch_request(text: str) -> bool:
 def _looks_like_referential_request(text: str) -> bool:
     lowered = (text or "").lower()
     return any(token in lowered for token in _REFERENTIAL_HINTS) or bool(_REFERENTIAL_PRONOUN_RE.search(text or ""))
+
+
+def _looks_like_singular_referential_request(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in _SINGULAR_REFERENTIAL_HINTS)
 
 
 def _extract_json_entity_batches(text: str, declared_entities: List[str]) -> Dict[str, List[str]]:
@@ -340,6 +393,28 @@ def _resolve_entities_from_memory(
         return {}
 
     normalized_memory = _normalize_memory_context(memory_context)
+    if _looks_like_singular_referential_request(subquery_text):
+        last_focus = normalized_memory.get("last_focus_entity_by_type", {})
+        if isinstance(last_focus, dict):
+            for entity_name in declared_entities:
+                value = str(last_focus.get(entity_name) or "").strip()
+                if value:
+                    return {entity_name: [value]}
+        finance_artifact = normalized_memory.get("last_finance_artifact", {})
+        if isinstance(finance_artifact, dict):
+            for entity_name in declared_entities:
+                value = str(finance_artifact.get(entity_name) or "").strip()
+                if value:
+                    return {entity_name: [value]}
+        recent_finance = normalized_memory.get("recent_finance_results", [])
+        if isinstance(recent_finance, list):
+            for item in reversed(recent_finance):
+                if not isinstance(item, dict):
+                    continue
+                for entity_name in declared_entities:
+                    value = str(item.get(entity_name) or "").strip()
+                    if value:
+                        return {entity_name: [value]}
     sources = [
         normalized_memory.get("last_listed_entities_by_type", {}),
         normalized_memory.get("active_entities_by_type", {}),
@@ -439,7 +514,16 @@ def _expand_memory_references(
 
 def _infer_finance_required_sources(subquery: str, intents: List[str]) -> List[str]:
     text = (subquery or "").lower()
-    if any(intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} for intent in intents):
+    if any(
+        intent in {
+            "reconcile_credit",
+            "audit_drift",
+            "batch_reconcile",
+            "explain_reconciliation_result",
+            "explain_reconciliation_flows",
+        }
+        for intent in intents
+    ):
         return ["contabilidad.db", "transacciones.db"]
     explicit_db_matches = re.findall(r"\b([A-Za-z0-9_.-]+\.db)\b", subquery or "", flags=re.IGNORECASE)
     if explicit_db_matches:
@@ -488,7 +572,16 @@ def _derive_composition_mode(
         for source in group
         if isinstance(source, str)
     }
-    if any(intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} for intent in flat_intents):
+    if any(
+        intent in {
+            "reconcile_credit",
+            "audit_drift",
+            "batch_reconcile",
+            "explain_reconciliation_result",
+            "explain_reconciliation_flows",
+        }
+        for intent in flat_intents
+    ):
         return "reconcile"
     if selected_skill_world == "contabilidad_automatica" and len(flat_sources) > 1:
         return "merge"

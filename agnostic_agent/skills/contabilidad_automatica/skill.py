@@ -17,6 +17,14 @@ from agnostic_agent.tools.introspection import nl2sql
 
 def _infer_intent(user_request: str) -> str:
     text = (user_request or "").lower()
+    if any(tok in text for tok in ["flujo", "flujos"]) and (
+        "concili" in text or "loc-" in text or "resultado" in text or "detalle" in text
+    ):
+        return "explain_reconciliation_flows"
+    if any(tok in text for tok in ["como llegaste", "cómo llegaste", "detalle", "detall", "explicame", "explícame"]) and (
+        "concili" in text or "loc-" in text or "resultado" in text or "cuadrado" in text
+    ):
+        return "explain_reconciliation_result"
     if any(tok in text for tok in ["drift", "descuadre", "concili", "cuadra"]):
         return "reconcile_credit"
     if any(tok in text for tok in ["regla", "tasa", "saneamiento", "reserva esperada"]):
@@ -85,7 +93,7 @@ class ContabilidadAutomaticaSkill:
         estatus = _extract_estatus(user_request, request)
         artifacts: List[Dict[str, Any]] = []
 
-        if intent in {"reconcile_credit", "audit_drift", "batch_reconcile"}:
+        if intent in {"reconcile_credit", "audit_drift", "batch_reconcile", "explain_reconciliation_result", "explain_reconciliation_flows"}:
             if not credito_id:
                 return {
                     "status": "error",

@@ -11,7 +11,7 @@
   --r: 18px;
   --r2: 14px;
   --shadow: 0 12px 35px rgba(0, 0, 0, .35);
-  --composer-height: 300px;
+  --composer-height: 120px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-ui: "Segoe UI", "Source Sans Pro", "Helvetica Neue", sans-serif;
 }
@@ -299,23 +299,89 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-feed-marker) {
   min-height: 12rem;
 }
 
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) {
-  position: fixed !important;
-  left: 1rem;
-  right: 1rem;
+.studio-feed-spacer {
+  height: calc(var(--composer-height) + 1.5rem);
+}
+
+.composer-toolbar-shell {
+  margin: 0 0 0.9rem 0;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(73, 165, 230, .18);
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
+}
+
+.composer-toolbar-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+
+.composer-toolbar-copy {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.composer-fixed-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .58);
+}
+
+.composer-fixed-mode {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, .82);
+}
+
+.composer-fixed-title {
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.composer-fixed-copy {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.composer-fixed-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.composer-fixed-group {
+  min-width: 0;
+}
+
+div[data-testid="stChatInput"] {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(980px, calc(100vw - 2rem));
   bottom: 1rem;
   z-index: 30;
-  border-color: rgba(73, 165, 230, .28) !important;
-  background: linear-gradient(180deg, rgba(4, 23, 49, .96), rgba(7, 33, 70, .98)) !important;
+  margin: 0;
+}
+
+div[data-testid="stChatInput"] > div {
+  border-radius: 18px;
+  border: 1px solid rgba(73, 165, 230, .26);
+  background: linear-gradient(180deg, rgba(4, 23, 49, .96), rgba(7, 33, 70, .98));
+  box-shadow: 0 12px 35px rgba(0, 0, 0, .32);
   backdrop-filter: blur(18px);
+  padding: 0.35rem 0.45rem;
 }
 
-.studio-composer-spacer {
-  height: var(--composer-height);
-}
-
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) [data-testid="stChatInput"] {
-  margin-top: .85rem;
+div[data-testid="stChatInput"] textarea,
+div[data-testid="stChatInput"] input {
+  background: transparent !important;
 }
 
 .composer-shell {
@@ -345,6 +411,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) [da
 
 .composer-context-card {
   margin-top: 6px;
+  margin-bottom: 14px;
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(73, 165, 230, .22);
@@ -407,6 +474,18 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) [da
   align-items: center;
   font-size: 11px;
   color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .composer-fixed-meta {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  div[data-testid="stChatInput"] {
+    width: calc(100vw - 1.5rem);
+    bottom: 0.75rem;
+  }
 }
 
 .stCheckbox label,

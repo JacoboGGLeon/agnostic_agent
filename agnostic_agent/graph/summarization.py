@@ -494,11 +494,92 @@ def _extract_credit_ids_from_subqueries(subqueries: List[str]) -> List[str]:
     return ids
 
 
+def _normalize_finance_artifact(output: Any) -> Dict[str, Any]:
+    payload = _parse_output_json_dict(output)
+    if not payload:
+        return {}
+    credito_id = _extract_credit_id_from_text(str(payload.get("credito_id") or ""))
+    if not credito_id:
+        credito_id = str(payload.get("credito_id") or "").strip().upper()
+    if not credito_id:
+        return {}
+    if not isinstance(payload.get("saldo"), dict) and not isinstance(payload.get("saneamiento"), dict):
+        return {}
+    normalized = dict(payload)
+    normalized["credito_id"] = credito_id
+    return normalized
+
+
+def _render_finance_result_detail(output: Dict[str, Any], *, flow_only: bool = False) -> str:
+    payload = _normalize_finance_artifact(output)
+    if not payload:
+        return ""
+
+    credito_id = str(payload.get("credito_id") or "").strip()
+    estatus = str(payload.get("estatus") or "").strip()
+    status = str(payload.get("status") or ("OK" if payload.get("ok") else "Revisar")).strip()
+    flujos = payload.get("flujos") if isinstance(payload.get("flujos"), dict) else {}
+    saldo = payload.get("saldo") if isinstance(payload.get("saldo"), dict) else {}
+    saneamiento = payload.get("saneamiento") if isinstance(payload.get("saneamiento"), dict) else {}
+
+    desembolso = _fmt_number(flujos.get("DESEMBOLSO", 0))
+    pago = _fmt_number(flujos.get("PAGO", 0))
+    penalizacion = _fmt_number(flujos.get("PENALIZACION", 0))
+    descuento = _fmt_number(flujos.get("DESCUENTO", 0))
+    saldo_esperado = _fmt_number(saldo.get("esperado", 0))
+    saldo_reportado = _fmt_number(saldo.get("reportado", 0))
+    saldo_diferencia = _fmt_number(saldo.get("diferencia", 0))
+    tasa = saneamiento.get("tasa", 0)
+    try:
+        tasa_pct = f"{float(tasa) * 100:.2f}%"
+    except Exception:
+        tasa_pct = str(tasa)
+    saneamiento_esperado = _fmt_number(saneamiento.get("esperado", 0))
+    saneamiento_reportado = _fmt_number(saneamiento.get("reportado", 0))
+    saneamiento_diferencia = _fmt_number(saneamiento.get("diferencia", 0))
+
+    intro = f"Conciliacion del credito {credito_id}: {status}."
+    if estatus:
+        intro += f" Estatus actual: {estatus}."
+
+    flow_explanation = (
+        f"Los flujos considerados fueron: desembolso {desembolso}, pagos {pago}, "
+        f"penalizaciones {penalizacion} y descuentos {descuento}."
+    )
+    saldo_explanation = (
+        f"Saldo esperado: se calculo como desembolsos - pagos + penalizaciones - descuentos, "
+        f"es decir {desembolso} - {pago} + {penalizacion} - {descuento} = {saldo_esperado}. "
+        f"El saldo reportado fue {saldo_reportado}, con una diferencia de {saldo_diferencia}."
+    )
+    saneamiento_explanation = (
+        f"Saneamiento esperado / Reserva esperada: se aplico una tasa de {tasa_pct}. "
+        f"El saneamiento esperado fue {saneamiento_esperado} y el reportado fue {saneamiento_reportado}, "
+        f"con una diferencia de {saneamiento_diferencia}."
+    )
+    close = (
+        "No se detectaron diferencias en saldo ni saneamiento."
+        if "DRIFT" not in status.upper()
+        else "Se detecto drift y conviene revisar las diferencias reportadas."
+    )
+
+    if flow_only:
+        return " ".join([intro, flow_explanation, saldo_explanation]).strip()
+    return " ".join([intro, flow_explanation, saldo_explanation, saneamiento_explanation, close]).strip()
+
+
 def _finance_reconciliation_answer(
     user_prompt: str,
     runs: List[Dict[str, Any]],
     analyzer_subqueries: Optional[List[str]] = None,
 ) -> str:
+    reconcile_results: Dict[str, Dict[str, Any]] = {}
+    for run in runs:
+        if str(run.get("name", "")) != "reconcile_credit_accounting":
+            continue
+        normalized = _normalize_finance_artifact(run.get("output"))
+        if normalized:
+            reconcile_results[normalized["credito_id"]] = normalized
+
     requested_order: List[str] = []
     for cid in _extract_credit_ids_from_subqueries(analyzer_subqueries or []):
         if cid not in requested_order:
@@ -507,6 +588,33 @@ def _finance_reconciliation_answer(
     for cid in prompt_ids:
         if cid not in requested_order:
             requested_order.append(cid)
+
+    if reconcile_results:
+        for cid in reconcile_results:
+            if cid not in requested_order:
+                requested_order.append(cid)
+        normalized_prompt = _normalize_query_text(user_prompt)
+        flow_only = any(token in normalized_prompt for token in ["flujo", "flujos"])
+        blocks = [
+            _render_finance_result_detail(reconcile_results[cid], flow_only=flow_only)
+            for cid in requested_order
+            if cid in reconcile_results
+        ]
+        if not blocks:
+            return ""
+        if len(blocks) == 1 and any(
+            token in normalized_prompt
+            for token in ["como llegaste", "cómo llegaste", "detalle", "detall", "explicame", "explícame", "flujo", "flujos"]
+        ):
+            return blocks[0]
+        square_count = sum(1 for cid in requested_order if "DRIFT" not in str(reconcile_results.get(cid, {}).get("status", "")).upper())
+        drift_count = sum(1 for cid in requested_order if "DRIFT" in str(reconcile_results.get(cid, {}).get("status", "")).upper())
+        intro = f"Realice la conciliacion de {len(blocks)} credito(s)."
+        if drift_count == 0:
+            intro += " Todos quedaron CUADRADOS."
+        else:
+            intro += f" {square_count} quedaron CUADRADOS y {drift_count} presentan DRIFT."
+        return "\n\n".join([intro] + blocks)
 
     by_credit: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for run in runs:
@@ -606,12 +714,26 @@ def _finance_reconciliation_answer(
         estado = "CUADRADO (100% Match)" if ok_saldo and ok_reserva else "DRIFT DETECTADO"
 
         blocks.append(
-            (
-                f"Conciliacion del credito {credito_id}: {estado}.\n"
-                f"- Saldo esperado: {saldo_esperado:.2f} | Saldo reportado: {saldo_reportado:.2f} | Diferencia: {diff_saldo:.2f}\n"
-                f"- Reserva esperada: {reserva_esperada:.2f} (tasa {tasa*100:.2f}% por estatus '{estatus}') | "
-                f"Reserva reportada: {saneamiento_reportado:.2f} | Diferencia: {diff_reserva:.2f}"
-            )
+            " ".join(
+                [
+                    f"Conciliacion del credito {credito_id}: {estado}. Estatus actual: {estatus}.",
+                    (
+                        "Los flujos considerados fueron: "
+                        f"desembolso {totals['DESEMBOLSO']:.2f}, pagos {totals['PAGO']:.2f}, "
+                        f"penalizaciones {totals['PENALIZACION']:.2f} y descuentos {totals['DESCUENTO']:.2f}."
+                    ),
+                    (
+                        "Saldo esperado: se calculo como desembolsos - pagos + penalizaciones - descuentos, "
+                        f"es decir {totals['DESEMBOLSO']:.2f} - {totals['PAGO']:.2f} + {totals['PENALIZACION']:.2f} - {totals['DESCUENTO']:.2f} = {saldo_esperado:.2f}. "
+                        f"El saldo reportado fue {saldo_reportado:.2f}, con una diferencia de {diff_saldo:.2f}."
+                    ),
+                    (
+                        f"Saneamiento esperado / Reserva esperada: se aplico una tasa de {tasa*100:.2f}%, "
+                        f"por lo que la reserva esperada fue {reserva_esperada:.2f} y la reportada {saneamiento_reportado:.2f}, "
+                        f"con una diferencia de {diff_reserva:.2f}."
+                    ),
+                ]
+            ).strip()
         )
 
     return "\n\n".join(blocks) if blocks else ""
@@ -626,12 +748,10 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     if isinstance(output, dict) and (
         isinstance(output.get("saldo"), dict) or isinstance(output.get("saneamiento"), dict)
     ):
-        status = output.get("status") or ("OK" if output.get("ok") else "Revisar")
-        saldo = output.get("saldo") if isinstance(output.get("saldo"), dict) else {}
-        saneamiento = output.get("saneamiento") if isinstance(output.get("saneamiento"), dict) else {}
-        d_saldo = _fmt_number(saldo.get("diferencia", 0))
-        d_san = _fmt_number(saneamiento.get("diferencia", 0))
-        return f"{status}. Diferencia de saldo: {d_saldo}. Diferencia de saneamiento: {d_san}."
+        flow_only = any(token in _normalize_query_text(str(run.get("args", {}).get("user_request") or "")) for token in ["flujo", "flujos"])
+        detailed = _render_finance_result_detail(output, flow_only=flow_only)
+        if detailed:
+            return detailed
 
     if isinstance(output, dict) and "tasa_saneamiento" in output:
         tasa = output.get("tasa_saneamiento")
@@ -786,7 +906,13 @@ def _build_response_items(
         if entity and entity in by_entity:
             entity_runs = by_entity.get(entity, [])
             ranked = sorted(entity_runs, key=_score_run_for_user_answer, reverse=True)
-            message = _summarize_single_run_natural(ranked[0])
+            if ranked:
+                low_sq = _normalize_query_text(sq_text)
+                finance_output = _parse_output_json_dict(ranked[0].get("output"))
+                if any(token in low_sq for token in ["flujo", "flujos"]) and finance_output:
+                    message = _render_finance_result_detail(finance_output, flow_only=True)
+                else:
+                    message = _summarize_single_run_natural(ranked[0])
         elif no_entity_runs:
             # Map free-form queries to no-entity runs in order.
             run_idx = idx - 1

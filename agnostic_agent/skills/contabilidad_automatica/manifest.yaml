@@ -12,6 +12,8 @@ intents:
   - query_financial_data
   - explain_rule
   - batch_reconcile
+  - explain_reconciliation_result
+  - explain_reconciliation_flows
 entities:
   - credito_id
   - saldo_total
@@ -43,6 +45,12 @@ intent_entity_requirements:
   batch_reconcile:
     required:
       - credito_id[]
+  explain_reconciliation_result:
+    required:
+      - credito_id
+  explain_reconciliation_flows:
+    required:
+      - credito_id
 knowledge_access:
   semantic_lookups:
     - lookup_finance_rule
@@ -58,6 +66,8 @@ instruction_expectations:
     - batch_reconcile
     - explain_rule
     - query_financial_data
+    - explain_reconciliation_result
+    - explain_reconciliation_flows
 knowledge:
   bindings:
     - ../contabilidad_instantanea/knowledge/contabilidad.db
@@ -92,6 +102,10 @@ planner:
       - lookup_finance_dictionary
     batch_reconcile:
       - reconcile_credit_accounting
+    explain_reconciliation_result:
+      - reconcile_credit_accounting
+    explain_reconciliation_flows:
+      - reconcile_credit_accounting
   intent_to_knowledge:
     reconcile_credit:
       - ../contabilidad_instantanea/knowledge/contabilidad.db
@@ -112,6 +126,12 @@ planner:
     batch_reconcile:
       - ../contabilidad_instantanea/knowledge/contabilidad.db
       - ../contabilidad_instantanea/knowledge/transacciones.db
+    explain_reconciliation_result:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    explain_reconciliation_flows:
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
   intent_to_workflows: {}
   tool_priority:
     - reconcile_credit_accounting

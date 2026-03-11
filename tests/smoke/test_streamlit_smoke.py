@@ -20,6 +20,10 @@ def test_streamlit_smoke():
     assert not at.exception, f"App crashed with exception: {at.exception}"
     assert len(at.tabs) >= 2
     assert [tab.label for tab in at.tabs[:2]] == ["Online Chat", "Offline Manager"]
+    online_markdown = [getattr(item, "value", "") for item in at.tabs[0].markdown]
+    assert any("Modo de trabajo" in value for value in online_markdown)
+    assert len(at.chat_input) == 1
+    assert getattr(at.chat_input[0], "placeholder", "") == "Escribe tu mensaje..."
 
     offline_tab = at.tabs[1]
     offline_markdown = [getattr(item, "value", "") for item in offline_tab.markdown]

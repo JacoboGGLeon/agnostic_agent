@@ -414,11 +414,22 @@ def _deterministic_finance_calls(
     desc_lines: List[str] = []
     dag_nodes: List[Dict[str, Any]] = []
     block_reason = ""
-    if intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} and credito_id:
+    if intent in {
+        "reconcile_credit",
+        "audit_drift",
+        "batch_reconcile",
+        "explain_reconciliation_result",
+        "explain_reconciliation_flows",
+    } and credito_id:
         planner_policy = world_contract.get("planner") if isinstance(world_contract.get("planner"), dict) else {}
         intent_tools = planner_policy.get("intent_to_tools") if isinstance(planner_policy.get("intent_to_tools"), dict) else {}
         reconcile_tools = intent_tools.get("reconcile_credit") if isinstance(intent_tools.get("reconcile_credit"), list) else []
-        use_det_reconcile = "reconcile_credit_accounting" in reconcile_tools or "reconcile_credit_accounting" in set(world_contract.get("tools", []))
+        explicit_intent_tools = intent_tools.get(intent) if isinstance(intent_tools.get(intent), list) else []
+        use_det_reconcile = (
+            "reconcile_credit_accounting" in reconcile_tools
+            or "reconcile_credit_accounting" in explicit_intent_tools
+            or "reconcile_credit_accounting" in set(world_contract.get("tools", []))
+        )
         if use_det_reconcile:
             calls.append(
                 {
