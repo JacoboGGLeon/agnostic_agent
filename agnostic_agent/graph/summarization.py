@@ -284,6 +284,98 @@ def _fmt_row_preview(row: Any, max_items: int = 4) -> str:
     return str(row)
 
 
+def _normalize_query_text(text: str) -> str:
+    t = unicodedata.normalize("NFKD", str(text or ""))
+    t = "".join(ch for ch in t if not unicodedata.combining(ch)).lower().strip()
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+
+def _rows_to_dicts(columns: List[Any], rows: List[Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    col_names = [str(c) for c in columns]
+    for row in rows or []:
+        if isinstance(row, dict):
+            out.append({str(k): v for k, v in row.items()})
+            continue
+        if isinstance(row, (list, tuple)):
+            out.append({col_names[idx]: row[idx] for idx in range(min(len(col_names), len(row)))})
+    return out
+
+
+def _looks_like_top_n_request(query_text: str) -> bool:
+    q = _normalize_query_text(query_text)
+    return bool(re.search(r"\btop\s+\d+\b", q)) or any(tok in q for tok in ["mas alto", "más alto", "mas grande", "mayor", "ranking"])
+
+
+def _looks_like_aggregate_request(query_text: str) -> bool:
+    q = _normalize_query_text(query_text)
+    return any(tok in q for tok in ["promedio", "avg", "suma", "sum", "count", "cuantos", "cuántos", "agrupa", "group by", "por tipo", "por estatus"])
+
+
+def _render_result_table(rows: List[Dict[str, Any]], columns: List[Any], max_rows: int = 5) -> str:
+    if not rows:
+        return ""
+    lines: List[str] = []
+    for idx, row in enumerate(rows[:max_rows], start=1):
+        parts = [f"{key}={value}" for key, value in row.items()]
+        lines.append(f"{idx}. " + " | ".join(parts))
+    return "\n".join(lines)
+
+
+def _infer_sql_response_shape(query_text: str, output: Dict[str, Any]) -> Dict[str, Any]:
+    execution = output.get("execution") if isinstance(output.get("execution"), dict) else {}
+    columns = execution.get("columns") if isinstance(execution.get("columns"), list) else output.get("columns")
+    rows = execution.get("rows") if isinstance(execution.get("rows"), list) else output.get("rows")
+    row_count = execution.get("row_count") if isinstance(execution.get("row_count"), int) else (len(rows) if isinstance(rows, list) else 0)
+    columns = columns if isinstance(columns, list) else []
+    rows = rows if isinstance(rows, list) else []
+    row_dicts = _rows_to_dicts(columns, rows)
+    q = _normalize_query_text(query_text)
+
+    if row_count == 1 and row_dicts:
+        return {"shape": "single_record", "rows": row_dicts, "columns": columns, "row_count": row_count}
+    if _looks_like_top_n_request(q) and row_dicts:
+        return {"shape": "top_n_list", "rows": row_dicts, "columns": columns, "row_count": row_count}
+    if _looks_like_aggregate_request(q) and row_dicts:
+        if row_count == 1 and len(columns) == 1:
+            return {"shape": "aggregate_scalar", "rows": row_dicts, "columns": columns, "row_count": row_count}
+        return {"shape": "grouped_aggregate", "rows": row_dicts, "columns": columns, "row_count": row_count}
+    if row_dicts:
+        return {"shape": "record_list", "rows": row_dicts, "columns": columns, "row_count": row_count}
+    return {"shape": "unknown", "rows": [], "columns": columns, "row_count": row_count}
+
+
+def _render_sql_shape(shape_info: Dict[str, Any], output: Dict[str, Any]) -> str:
+    shape = str(shape_info.get("shape") or "unknown")
+    rows = shape_info.get("rows") if isinstance(shape_info.get("rows"), list) else []
+    row_count = int(shape_info.get("row_count") or 0)
+    chosen_table = output.get("chosen_table")
+
+    if shape == "single_record" and rows:
+        row = rows[0]
+        parts = [f"{key}={value}" for key, value in row.items()]
+        return "Encontré 1 registro" + (f" en {chosen_table}" if chosen_table else "") + ": " + ", ".join(parts) + "."
+
+    if shape == "top_n_list" and rows:
+        title = f"Top {min(row_count, len(rows))} resultado(s)" + (f" en {chosen_table}" if chosen_table else "")
+        return title + ":\n" + _render_result_table(rows, shape_info.get("columns") or [], max_rows=min(10, len(rows)))
+
+    if shape == "aggregate_scalar" and rows:
+        row = rows[0]
+        parts = [f"{key}={value}" for key, value in row.items()]
+        return "Resultado agregado: " + ", ".join(parts) + "."
+
+    if shape == "grouped_aggregate" and rows:
+        return "Resultados agregados:\n" + _render_result_table(rows, shape_info.get("columns") or [], max_rows=min(10, len(rows)))
+
+    if shape == "record_list" and rows:
+        preview_rows = rows[: min(5, len(rows))]
+        return f"Encontré {row_count} registro(s)" + (f" en {chosen_table}" if chosen_table else "") + ":\n" + _render_result_table(preview_rows, shape_info.get("columns") or [], max_rows=len(preview_rows))
+
+    return ""
+
+
 def _score_run_for_user_answer(run: Dict[str, Any]) -> int:
     """
     Prefer runs that contain richer structured evidence over generic status-only runs.
@@ -586,10 +678,10 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
             if isinstance(row_count, int):
                 if loc_id and row_count == 0:
                     return f"No encontre registros para {loc_id}."
-                if rows:
-                    preview = _fmt_row_preview(rows[0])
-                    table_txt = f" de {chosen_table}" if chosen_table else ""
-                    return f"Encontré {row_count} registro(s){table_txt}. Ejemplo: {preview}."
+                shape_info = _infer_sql_response_shape(req_text, output)
+                rendered = _render_sql_shape(shape_info, output)
+                if rendered:
+                    return rendered
                 table_txt = f" en {chosen_table}" if chosen_table else ""
                 return f"La consulta devolvió {row_count} registro(s){table_txt}."
         if loc_id and not has_entity_filter:
