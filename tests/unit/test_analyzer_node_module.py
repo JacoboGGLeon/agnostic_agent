@@ -293,3 +293,51 @@ def test_execute_analyzer_node_resolves_singular_finance_reference_from_last_foc
     analyzer = out["analyzer"]
     assert analyzer["subquery_intents"] == [["explain_reconciliation_flows"]]
     assert analyzer["entities_by_subquery"] == [{"credito_id": "LOC-0004"}]
+
+
+def test_execute_analyzer_node_does_not_treat_estatus_query_as_referential_memory_lookup():
+    llm_payload = json.dumps(
+        {
+            "subqueries": ["¿Cuántos créditos hay por estatus en contabilidad?"],
+            "logic_form": "q1",
+            "selected_skills": ["contabilidad_automatica"],
+            "selected_skill_world": "contabilidad_automatica",
+        },
+        ensure_ascii=False,
+    )
+    state = {
+        "messages": [HumanMessage(content="¿Cuántos créditos hay por estatus en contabilidad?")],
+        "forced_skill": "contabilidad_automatica",
+        "skills_allowlist": ["contabilidad_automatica"],
+        "memory_context": {
+            "working_memory": {
+                "last_listed_entities_by_type": {
+                    "credito_id": ["LOC-0006", "LOC-0007", "LOC-0008"]
+                },
+                "active_entities_by_type": {
+                    "credito_id": ["LOC-0006", "LOC-0007", "LOC-0008"]
+                },
+                "last_operation": "reconcile",
+            }
+        },
+    }
+
+    out = execute_analyzer_node(
+        state,
+        tools=[],
+        cfg=None,
+        planner_llm=_StubLLM(llm_payload),
+        skill_registry=_Registry([_Skill("contabilidad_automatica")]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        sanitize_subquery_text=lambda s: str(s).strip(),
+        extract_top_level_json_objects=lambda _t: [],
+        is_placeholder_subquery=lambda _s: False,
+    )
+
+    analyzer = out["analyzer"]
+    assert analyzer["subqueries"] == ["¿Cuántos créditos hay por estatus en contabilidad?"]
+    assert analyzer["entities_by_subquery"] == [{}]
+    assert analyzer["decomposition_strategy"] == "as_is"

@@ -198,14 +198,23 @@ def _looks_like_batch_request(text: str) -> bool:
     return any(token in lowered for token in _PLURAL_BATCH_HINTS)
 
 
-def _looks_like_referential_request(text: str) -> bool:
+def _contains_hint_token(text: str, token: str) -> bool:
     lowered = (text or "").lower()
-    return any(token in lowered for token in _REFERENTIAL_HINTS) or bool(_REFERENTIAL_PRONOUN_RE.search(text or ""))
+    normalized_token = (token or "").strip().lower()
+    if not lowered or not normalized_token:
+        return False
+    pattern = r"(?<!\w)" + re.escape(normalized_token).replace(r"\ ", r"\s+") + r"(?!\w)"
+    return re.search(pattern, lowered, flags=re.IGNORECASE) is not None
+
+
+def _looks_like_referential_request(text: str) -> bool:
+    return any(_contains_hint_token(text, token) for token in _REFERENTIAL_HINTS) or bool(
+        _REFERENTIAL_PRONOUN_RE.search(text or "")
+    )
 
 
 def _looks_like_singular_referential_request(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(token in lowered for token in _SINGULAR_REFERENTIAL_HINTS)
+    return any(_contains_hint_token(text, token) for token in _SINGULAR_REFERENTIAL_HINTS)
 
 
 def _extract_json_entity_batches(text: str, declared_entities: List[str]) -> Dict[str, List[str]]:
