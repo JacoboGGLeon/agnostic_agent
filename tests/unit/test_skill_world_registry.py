@@ -14,6 +14,7 @@ def test_skill_worlds_are_discoverable():
     assert "query_data" in chat_db.intents
     assert isinstance(chat_db.consistency_report, dict)
     assert isinstance(chat_db.capability_contract, dict)
+    assert chat_db.consistency_report.get("status") == "healthy"
 
     contabilidad = reg.get_skill("contabilidad_automatica")
     assert contabilidad is not None
@@ -22,12 +23,13 @@ def test_skill_worlds_are_discoverable():
     assert "reconcile_credit_accounting" in contabilidad.tools
     assert "lookup_finance_rule" in contabilidad.tools
     assert contabilidad.intent_entity_requirements["explain_rule"]["required"] == ["estatus"]
+    assert contabilidad.consistency_report.get("status") == "healthy"
 
     semantic = reg.get_skill("semantic_researcher")
     assert semantic is not None
     assert semantic.world == "semantic_researcher"
     assert "semantic_lookup" in semantic.intents
-    assert semantic.consistency_report.get("status") in {"healthy", "degraded", "broken"}
+    assert semantic.consistency_report.get("status") == "healthy"
 
     visible_names = sorted(skill.name for skill in reg.list_skills(enabled_only=False))
     assert visible_names == ["chat_db", "contabilidad_automatica", "semantic_researcher"]

@@ -2,6 +2,10 @@
 
 Usa este mundo para retrieval y sintesis basada en evidencia documental.
 
+Intents principales:
+- `semantic_lookup`: recuperar evidencia relevante desde las fuentes declaradas.
+- `semantic_synthesis`: sintetizar evidencia recuperada con foco en claridad y citas.
+
 Pipeline base:
 - `list_knowledge_sources` para inspeccionar fuentes disponibles.
 - `search_knowledge_base(top_k=15)` para recuperar evidencia inicial.

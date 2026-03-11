@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -42,6 +43,9 @@ def _planner_policy_issues(skill: Any, tool_registry: Dict[str, Any]) -> List[st
 def _instruction_issues(skill: Any) -> List[str]:
     issues: List[str] = []
     instruction_text = str(skill.instructions or "").lower()
+    normalized_instruction_text = "".join(
+        ch for ch in unicodedata.normalize("NFKD", instruction_text) if not unicodedata.combining(ch)
+    )
     if not instruction_text.strip():
         return ["instructions.md is empty"]
     world_name = str(skill.world or skill.name).replace("_", " ").lower()
@@ -67,9 +71,26 @@ def _instruction_issues(skill: Any) -> List[str]:
     if missing_tools:
         issues.append(f"instructions omit critical tools: {', '.join(missing_tools)}")
 
+    def _topic_is_mentioned(topic: str) -> bool:
+        raw = str(topic or "").strip().lower()
+        if not raw:
+            return True
+        humanized = raw.replace("_", " ")
+        kebab = raw.replace("_", "-")
+        normalized_candidates = {
+            raw,
+            humanized,
+            kebab,
+        }
+        normalized_candidates |= {
+            "".join(ch for ch in unicodedata.normalize("NFKD", candidate) if not unicodedata.combining(ch))
+            for candidate in list(normalized_candidates)
+        }
+        return any(candidate in normalized_instruction_text for candidate in normalized_candidates if candidate)
+
     required_topics = expectations.get("required_topics") if isinstance(expectations.get("required_topics"), list) else []
     topics = [str(topic).strip() for topic in required_topics if str(topic).strip()] or list(skill.intents or [])
-    missing_intents = [intent for intent in topics if intent.lower().replace("_", " ") not in instruction_text]
+    missing_intents = [intent for intent in topics if not _topic_is_mentioned(intent)]
     if len(missing_intents) == len(topics) and missing_intents:
         issues.append("instructions do not describe the declared intents")
     return issues
