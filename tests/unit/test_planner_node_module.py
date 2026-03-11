@@ -4,11 +4,18 @@ from agnostic_agent.graph.planner_node import execute_planner_node
 
 
 class _Skill:
-    def __init__(self, name, tools=None, knowledge=None):
+    def __init__(self, name, tools=None, knowledge=None, world=None, intents=None, planner_policy=None):
         self.name = name
         self.tools = tools or []
         self.knowledge = knowledge or []
         self.description = name
+        self.world = world or name
+        self.intents = intents or []
+        self.entities = []
+        self.planner_policy = planner_policy or {}
+        self.summarizer_policy = {}
+        self.validator_policy = {}
+        self.ui = {}
 
 
 class _Registry:
@@ -16,6 +23,9 @@ class _Registry:
         self._skills = {s.name: s for s in skills}
 
     def get_skill(self, name):
+        return self._skills.get(name)
+
+    def get_world(self, name):
         return self._skills.get(name)
 
     def list_skills(self):
@@ -291,3 +301,49 @@ def test_execute_planner_node_contabilidad_is_deterministic_1_to_1():
         "SELECT saldo_total, estatus, saneamiento_calculado FROM estados_cuenta WHERE credito_id = 'LOC-0005'"
     )
     assert out["planner_calls_by_subquery"][0]["planned_calls"] == 2
+
+
+def test_execute_planner_node_chat_db_is_deterministic_by_intent():
+    llm = _PlannerLLM([])  # Should not be used in deterministic branch.
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {
+            "subqueries": ["muestrame el schema de transacciones.db"],
+            "subquery_intents": [["explain_schema"]],
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("inspect_sqlite_schema"), _Tool("nl2sql")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry(
+            [
+                _Skill(
+                    "chat_db",
+                    tools=["inspect_sqlite_schema", "nl2sql"],
+                    world="chat_db",
+                    intents=["query_data", "explain_schema"],
+                    planner_policy={"allowed_dag_patterns": ["deterministic_chat_db_query"]},
+                )
+            ]
+        ),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["chat_db"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 1
+    assert ai_msg.tool_calls[0]["name"] == "inspect_sqlite_schema"
+    assert ai_msg.tool_calls[0]["args"]["db_path"] == "transacciones.db"
+    assert out["planner_trajs"][0]["intent"] == "explain_schema"

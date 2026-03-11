@@ -40,6 +40,7 @@ execution:
 planner:
   allowed_dag_patterns:
     - chat_db_query
+    - deterministic_chat_db_query
   intent_to_tools:
     query_data:
       - nl2sql

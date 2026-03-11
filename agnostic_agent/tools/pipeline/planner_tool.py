@@ -397,6 +397,56 @@ def _deterministic_finance_calls(
     return calls, dag_nodes, desc_lines
 
 
+def _deterministic_chat_db_calls(
+    *,
+    subquery_idx: int,
+    subquery_text: str,
+    subquery_intents: List[str],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    requested_db = _extract_requested_db_filename(subquery_text)
+    expected_ids = _extract_expected_id_constraints(subquery_text)
+    entity_id = (
+        str(expected_ids.get("entity_id") or expected_ids.get("credito_id") or "")
+        if isinstance(expected_ids, dict)
+        else ""
+    )
+    intent = subquery_intents[0] if subquery_intents else "query_data"
+    call_args: Dict[str, Any] = {"user_request": _sanitize_text(subquery_text)}
+    if requested_db:
+        call_args["db_path"] = requested_db
+    if entity_id:
+        call_args["entity_id"] = entity_id
+
+    if intent == "explain_schema":
+        call_name = "inspect_sqlite_schema"
+        call_args = {
+            "db_path": requested_db,
+            "user_request": _sanitize_text(subquery_text),
+        }
+    else:
+        call_name = "nl2sql"
+        call_args["execute"] = True
+
+    call = {
+        "name": call_name,
+        "args": call_args,
+        "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+        "type": "tool_call",
+    }
+    desc = [f"step 1: tool={call_name}, intent={intent}"]
+    if requested_db:
+        desc.append(f"db_path={requested_db}")
+    if entity_id:
+        desc.append(f"entity_id={entity_id}")
+    dag_nodes = _build_dag_nodes_for_calls(
+        subquery_idx=subquery_idx,
+        subquery_text=subquery_text,
+        subquery_intents=subquery_intents,
+        subquery_calls=[call],
+    )
+    return [call], dag_nodes, desc
+
+
 def execute_planner_tool(
     state: Dict[str, Any],
     *,
@@ -513,6 +563,8 @@ def execute_planner_tool(
     is_finance_world = world_contract.get("world") in {"contabilidad_automatica", "contabilidad_instantanea"}
     allowed_patterns = planner_policy.get("allowed_dag_patterns") if isinstance(planner_policy.get("allowed_dag_patterns"), list) else []
     deterministic_finance = is_finance_world and ("deterministic_reconcile" in allowed_patterns or not allowed_patterns)
+    is_chat_db_world = world_contract.get("world") == "chat_db"
+    deterministic_chat_db = is_chat_db_world and "deterministic_chat_db_query" in allowed_patterns
     if skill_mode and deterministic_finance:
         deterministic_calls: List[Dict[str, Any]] = []
         deterministic_trajs: List[Dict[str, str]] = []
@@ -558,6 +610,59 @@ def execute_planner_tool(
             "dags_by_subquery": dags_by_subquery,
             "llm_raw_out": "deterministic_contabilidad_plan",
             "llm_clean_out": "deterministic_contabilidad_plan",
+            "_planner_scope_internal": planner_scope,
+            "selected_skill_world": planner_scope["selected_skill_world"],
+            "world_contract": world_contract,
+        }
+
+    if skill_mode and deterministic_chat_db:
+        deterministic_calls = []
+        deterministic_trajs: List[Dict[str, str]] = []
+        planner_calls_by_subquery: List[Dict[str, Any]] = []
+
+        for idx, subq in enumerate(subqs, start=1):
+            current_intents = (
+                subquery_intents[idx - 1]
+                if isinstance(subquery_intents, list) and idx - 1 < len(subquery_intents) and isinstance(subquery_intents[idx - 1], list)
+                else ["query_data"]
+            )
+            calls, dag_nodes, desc_lines = _deterministic_chat_db_calls(
+                subquery_idx=idx,
+                subquery_text=str(subq),
+                subquery_intents=current_intents,
+            )
+            deterministic_calls.extend(calls)
+            dags_by_subquery.append({"subquery_idx": idx, "subquery": _sanitize_text(subq), "dag": dag_nodes})
+            deterministic_trajs.append(
+                {
+                    "subquery": _sanitize_text(subq),
+                    "description": _sanitize_text("\n".join(desc_lines)),
+                    "subquery_id": f"q{idx}",
+                    "intent": current_intents[0] if current_intents else "query_data",
+                    "dag": dag_nodes,
+                }
+            )
+            planner_calls_by_subquery.append(
+                {
+                    "subquery_idx": idx,
+                    "subquery": _sanitize_text(subq),
+                    "planned_calls": len(calls),
+                    "skipped_reason": "" if calls else "missing_plan",
+                }
+            )
+
+        ai_msg = ai_message_type(
+            content="Deterministic chat_db plan generated from chat_db contract.",
+            tool_calls=deterministic_calls,
+            additional_kwargs={"dag_raw": "deterministic_chat_db_plan"},
+        )
+        return {
+            "messages": [ai_msg],
+            "planner_trajs": deterministic_trajs,
+            "planner_calls_by_subquery": planner_calls_by_subquery,
+            "dags_by_subquery": dags_by_subquery,
+            "llm_raw_out": "deterministic_chat_db_plan",
+            "llm_clean_out": "deterministic_chat_db_plan",
             "_planner_scope_internal": planner_scope,
             "selected_skill_world": planner_scope["selected_skill_world"],
             "world_contract": world_contract,
