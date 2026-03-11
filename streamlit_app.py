@@ -299,12 +299,17 @@ st.markdown(
 )
 
 # 3. Main Tabs
-tab_online, tab_offline = st.tabs(["Online Chat", "Offline Manager"])
+has_interaction = bool(st.session_state.get("messages"))
 
-with tab_online:
-    render_online_tab(get_or_init_agent)
+if has_interaction:
+    tab_online, tab_offline = st.tabs(["Online Chat", "Offline Manager"])
 
-with tab_offline:
-    render_offline_tab(get_or_init_agent)
+    with tab_online:
+        render_online_tab(get_or_init_agent)
+
+    with tab_offline:
+        render_offline_tab(get_or_init_agent)
+else:
+    render_online_tab(get_or_init_agent, show_history=False, show_inspector=False)
 
 # force reload
