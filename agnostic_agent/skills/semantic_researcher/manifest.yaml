@@ -2,7 +2,15 @@ api_version: skill/v1
 kind: skill
 name: semantic_researcher
 version: 1.0.0
+world: semantic_researcher
 description: RAG con retrieval y rerank basado en evidencia.
+intents:
+- semantic_lookup
+- semantic_synthesis
+entities:
+- source_path
+- query
+- page
 entrypoint: skill:build
 instructions: instructions.md
 input_schema: schemas/input.schema.json
@@ -24,6 +32,39 @@ testing:
   mode: explicit_or_auto
 execution:
   backend: native_python
+planner:
+  allowed_dag_patterns:
+  - semantic_lookup
+  intent_to_tools:
+    semantic_lookup:
+    - search_knowledge_base
+    - rerank_docs
+  intent_to_knowledge:
+    semantic_lookup:
+    - knowledge/embeddings.db
+    - knowledge/rules.md
+    - knowledge/dictionary.md
+  intent_to_workflows: {}
+  tool_priority:
+  - search_knowledge_base
+  - rerank_docs
+  default_row_limits: {}
+summarizer:
+  response_modes:
+  - user
+  - audit
+  output_style: evidence_first
+  required_sections:
+  - resumen
+  - evidencia
+validator:
+  coverage_rules:
+  - every_subquery_requires_evidence
+  required_artifacts:
+  - semantic_evidence
+ui:
+  world_label: Semantic Researcher
+  world_description: Mundo especializado en evidencia documental y RAG.
 metadata:
   portability: self_contained_skill_bundle
   language: es

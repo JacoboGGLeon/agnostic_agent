@@ -13,6 +13,7 @@ def execute_catcher_tool(
     to_jsonable: Callable[[Any], Any],
 ) -> Dict[str, Any]:
     messages = state["messages"]
+    prev_artifacts = state.get("artifacts", []) or []
 
     ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
     ai_plan = next((m for m in reversed(ai_msgs) if extract_tool_calls(m)), None)
@@ -21,12 +22,21 @@ def execute_catcher_tool(
     tmsgs: List[ToolMessage] = [m for m in messages if isinstance(m, ToolMessage)]
 
     runs: List[Dict[str, Any]] = []
+    artifacts: List[Dict[str, Any]] = list(prev_artifacts)
     for tc in tool_calls:
         tm = next((t for t in tmsgs if t.tool_call_id == tc["id"]), None)
         if tm is None:
             continue
         raw = tm.content
         output = decode_tool_content(raw)
+        artifact = {
+            "artifact_id": f"catch_{tc['id']}",
+            "kind": "tool_run",
+            "producer": tc["name"],
+            "payload": to_jsonable(output),
+            "tool_call_id": tc["id"],
+        }
+        artifacts.append(artifact)
         runs.append(
             {
                 "id": tc["id"],
@@ -36,5 +46,5 @@ def execute_catcher_tool(
             }
         )
 
-    return {"tool_runs": runs}
+    return {"tool_runs": runs, "artifacts": artifacts}
 

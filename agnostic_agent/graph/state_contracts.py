@@ -13,17 +13,30 @@ _NODE_INPUT_REQUIRED: Dict[str, Set[str]] = {
 }
 
 _NODE_OUTPUT_ALLOWED: Dict[str, Set[str]] = {
-    "analyzer": {"analyzer", "_active_skills_internal", "_analyzer_skill_selection", "messages"},
+    "analyzer": {
+        "analyzer",
+        "_active_skills_internal",
+        "_analyzer_skill_selection",
+        "messages",
+        "selected_skill_world",
+        "subquery_intents",
+        "entities_by_subquery",
+        "constraints_by_subquery",
+        "world_contract",
+    },
     "planner": {
         "messages",
         "planner_trajs",
         "planner_calls_by_subquery",
+        "dags_by_subquery",
         "llm_raw_out",
         "llm_clean_out",
         "_planner_scope_internal",
+        "selected_skill_world",
+        "world_contract",
     },
-    "executor": {"messages", "executor_steps"},
-    "catcher": {"tool_runs"},
+    "executor": {"messages", "executor_steps", "artifacts"},
+    "catcher": {"tool_runs", "artifacts"},
     "summarizer": {"messages", "summary", "pipeline_summary", "dev_out", "deep_out", "user_out"},
     "validator": {
         "validator",

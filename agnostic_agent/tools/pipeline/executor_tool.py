@@ -70,19 +70,26 @@ def execute_executor_tool(
     json_default: Callable[[Any], Any],
 ) -> Dict[str, Any]:
     messages = state["messages"]
+    dags_by_subquery = state.get("dags_by_subquery") or []
+    dag_index: Dict[str, Dict[str, Any]] = {}
+    for subq in dags_by_subquery:
+        for node in subq.get("dag", []) if isinstance(subq, dict) else []:
+            if isinstance(node, dict) and node.get("name"):
+                dag_index[str(node.get("name"))] = node
     ai_msgs = [m for m in messages if isinstance(m, ai_message_type)]
     if not ai_msgs:
-        return {"messages": [], "executor_steps": []}
+        return {"messages": [], "executor_steps": [], "artifacts": []}
 
     ai_plan = ai_msgs[-1]
     tool_calls = getattr(ai_plan, "tool_calls", None)
     if not tool_calls:
         tool_calls = extract_tool_calls(ai_plan)
     if not tool_calls:
-        return {"messages": [], "executor_steps": []}
+        return {"messages": [], "executor_steps": [], "artifacts": []}
 
     tool_msgs: List[ToolMessage] = []
     exec_steps: List[Dict[str, Any]] = []
+    artifacts: List[Dict[str, Any]] = []
     local_results: Dict[str, Any] = {}
 
     for tc in tool_calls:
@@ -109,13 +116,35 @@ def execute_executor_tool(
         if t_id:
             local_results[t_id] = observation
 
+        dag_meta = dag_index.get(name, {})
+        artifacts.append(
+            {
+                "artifact_id": f"artifact_{t_id or name}",
+                "kind": dag_meta.get("expected_artifact", "tool_output"),
+                "producer": name,
+                "subquery_id": dag_meta.get("subquery_id", ""),
+                "node_id": dag_meta.get("node_id", ""),
+                "payload": observation,
+            }
+        )
+
         try:
             payload = json.dumps({"value": observation}, ensure_ascii=False, default=json_default)
         except TypeError:
             payload = json.dumps({"value": str(observation)}, ensure_ascii=False)
 
         tool_msgs.append(tool_message_type(content=payload, tool_call_id=t_id, name=name))
-        exec_steps.append({"tool_name": name, "args": args, "tool_call_id": t_id})
+        exec_steps.append(
+            {
+                "tool_name": name,
+                "args": args,
+                "tool_call_id": t_id,
+                "node_id": dag_meta.get("node_id", ""),
+                "subquery_id": dag_meta.get("subquery_id", ""),
+                "kind": dag_meta.get("kind", "tool"),
+                "expected_artifact": dag_meta.get("expected_artifact", "tool_output"),
+            }
+        )
 
-    return {"messages": tool_msgs, "executor_steps": exec_steps}
+    return {"messages": tool_msgs, "executor_steps": exec_steps, "artifacts": artifacts}
 

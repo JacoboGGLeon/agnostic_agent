@@ -94,7 +94,7 @@ def _align_call_ids_to_subquery(
     """
     normalized = dict(args or {})
     tool_low = str(tool_name or "").lower()
-    if tool_low in {"nl2sql_sqlite", "nl2sql_agent_sqlite", "knowledge_nl2sql_agent"}:
+    if tool_low in {"nl2sql", "nl2sql_sqlite", "nl2sql_agent_sqlite", "knowledge_nl2sql_agent"}:
         normalized.setdefault("execute", True)
     requested_db = _extract_requested_db_filename(subquery_text)
     expected = _extract_expected_id_constraints(subquery_text)
@@ -251,6 +251,152 @@ def _knowledge_name_or_path_matches(
     return False
 
 
+def _world_contract_for_active_skill(
+    *,
+    state: Dict[str, Any],
+    skill_registry: Any,
+    active_skills: List[str],
+) -> Dict[str, Any]:
+    existing = state.get("world_contract")
+    if isinstance(existing, dict) and existing:
+        return existing
+    if not skill_registry or not active_skills:
+        return {}
+    skill = skill_registry.get_skill(active_skills[0])
+    if skill is None and hasattr(skill_registry, "get_world"):
+        skill = skill_registry.get_world(active_skills[0])
+    if skill is None:
+        return {}
+    return {
+        "name": skill.name,
+        "world": getattr(skill, "world", skill.name) or skill.name,
+        "description": skill.description,
+        "tools": list(skill.tools or []),
+        "knowledge": list(skill.knowledge or []),
+        "intents": list(getattr(skill, "intents", []) or []),
+        "entities": list(getattr(skill, "entities", []) or []),
+        "planner": dict(getattr(skill, "planner_policy", {}) or {}),
+        "summarizer": dict(getattr(skill, "summarizer_policy", {}) or {}),
+        "validator": dict(getattr(skill, "validator_policy", {}) or {}),
+        "ui": dict(getattr(skill, "ui", {}) or {}),
+    }
+
+
+def _default_expected_artifact(tool_name: str) -> str:
+    low = (tool_name or "").lower()
+    if "sql" in low:
+        return "sql_result"
+    if "semantic" in low or "knowledge" in low:
+        return "semantic_evidence"
+    if "query_" in low:
+        return "query_result"
+    return "tool_output"
+
+
+def _build_dag_nodes_for_calls(
+    *,
+    subquery_idx: int,
+    subquery_text: str,
+    subquery_intents: List[str],
+    subquery_calls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    dag_nodes: List[Dict[str, Any]] = []
+    prev_node_id = ""
+    for step_idx, call in enumerate(subquery_calls, start=1):
+        node_id = f"sq{subquery_idx}_n{step_idx}"
+        dag_nodes.append(
+            {
+                "node_id": node_id,
+                "subquery_id": f"q{subquery_idx}",
+                "kind": "tool",
+                "name": call.get("name", ""),
+                "args": call.get("args", {}) or {},
+                "depends_on": [prev_node_id] if prev_node_id else [],
+                "expected_artifact": _default_expected_artifact(str(call.get("name", ""))),
+                "success_condition": "tool_call_succeeds",
+                "intent": subquery_intents[0] if subquery_intents else "general_query",
+                "subquery": _sanitize_text(subquery_text),
+            }
+        )
+        prev_node_id = node_id
+    if not dag_nodes:
+        dag_nodes.append(
+            {
+                "node_id": f"sq{subquery_idx}_n0",
+                "subquery_id": f"q{subquery_idx}",
+                "kind": "evidence",
+                "name": "no_op",
+                "args": {},
+                "depends_on": [],
+                "expected_artifact": "reasoning_only",
+                "success_condition": "planner_generated_no_calls",
+                "intent": subquery_intents[0] if subquery_intents else "general_query",
+                "subquery": _sanitize_text(subquery_text),
+            }
+        )
+    return dag_nodes
+
+
+def _deterministic_finance_calls(
+    *,
+    subquery_idx: int,
+    subquery_text: str,
+    world_contract: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    credito_id = _extract_credito_id(subquery_text)
+    calls: List[Dict[str, Any]] = []
+    desc_lines: List[str] = []
+    dag_nodes: List[Dict[str, Any]] = []
+    if credito_id:
+        planner_policy = world_contract.get("planner") if isinstance(world_contract.get("planner"), dict) else {}
+        intent_tools = planner_policy.get("intent_to_tools") if isinstance(planner_policy.get("intent_to_tools"), dict) else {}
+        reconcile_tools = intent_tools.get("reconcile_credit") if isinstance(intent_tools.get("reconcile_credit"), list) else []
+        use_det_reconcile = "reconcile_credit_accounting" in reconcile_tools or "reconcile_credit_accounting" in set(world_contract.get("tools", []))
+        if use_det_reconcile:
+            calls.append(
+                {
+                    "name": "reconcile_credit_accounting",
+                    "args": {"credito_id": credito_id},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            desc_lines.append(f"step 1: tool=reconcile_credit_accounting, credito_id={credito_id}")
+        else:
+            tx_sql = f"SELECT tipo, monto FROM movimientos WHERE credito_id = '{credito_id}'"
+            acc_sql = (
+                "SELECT saldo_total, estatus, saneamiento_calculado "
+                f"FROM estados_cuenta WHERE credito_id = '{credito_id}'"
+            )
+            calls.append(
+                {
+                    "name": "query_transactions_db",
+                    "args": {"query": tx_sql},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            calls.append(
+                {
+                    "name": "query_accounting_db",
+                    "args": {"query": acc_sql},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            desc_lines.append(f"step 1: tool=query_transactions_db, credito_id={credito_id}")
+            desc_lines.append(f"step 2: tool=query_accounting_db, credito_id={credito_id}")
+    else:
+        desc_lines.append("No credito_id found in subquery; planner skipped deterministic finance calls.")
+    dag_nodes = _build_dag_nodes_for_calls(
+        subquery_idx=subquery_idx,
+        subquery_text=subquery_text,
+        subquery_intents=["reconcile_credit"],
+        subquery_calls=calls,
+    )
+    return calls, dag_nodes, desc_lines
+
+
 def execute_planner_tool(
     state: Dict[str, Any],
     *,
@@ -275,19 +421,28 @@ def execute_planner_tool(
     knowledge_selected = state.get("knowledge_selected") or []
     analyzer = state.get("analyzer") or {}
     subqs = analyzer.get("subqueries") or []
+    subquery_intents = analyzer.get("subquery_intents") or state.get("subquery_intents") or []
 
     active_skills = resolve_effective_skills(state, skill_registry)
     skill_mode = len(active_skills) > 0
+    world_contract = _world_contract_for_active_skill(
+        state=state,
+        skill_registry=skill_registry,
+        active_skills=active_skills,
+    )
     required_tool_names = set()
     required_knowledge_names = set()
     if skill_mode and skill_registry:
         for skill_name in active_skills:
             skill = skill_registry.get_skill(skill_name)
+            if skill is None and hasattr(skill_registry, "get_world"):
+                skill = skill_registry.get_world(skill_name)
             if skill:
                 if skill.tools:
                     required_tool_names.update(skill.tools)
                 if skill.knowledge:
                     required_knowledge_names.update(skill.knowledge)
+    planner_policy = world_contract.get("planner") if isinstance(world_contract.get("planner"), dict) else {}
 
     if skill_mode:
         if required_tool_names:
@@ -309,6 +464,7 @@ def execute_planner_tool(
     planner_scope = {
         "skill_mode": skill_mode,
         "active_skills": list(active_skills),
+        "selected_skill_world": world_contract.get("world") or state.get("selected_skill_world") or (active_skills[0] if active_skills else ""),
         "allowed_tools": [t.name for t in active_tools],
         "allowed_knowledge": [
             k.get("name") for k in active_knowledge_objects if isinstance(k, dict)
@@ -340,6 +496,7 @@ def execute_planner_tool(
     all_tool_calls: List[Dict[str, Any]] = []
     planner_blocks: List[Dict[str, Any]] = []
     plan_trajs: List[Any] = []
+    dags_by_subquery: List[Dict[str, Any]] = []
     global_llm_clean = ""
     global_llm_raw = ""
 
@@ -351,48 +508,33 @@ def execute_planner_tool(
     if not subqs:
         subqs = build_subqueries_from_prompt(state.get("user_prompt") or "")
 
-    # Deterministic planner path for accounting reconciliation skill (1:1 contract).
-    if skill_mode and "contabilidad_instantanea" in set(active_skills):
+    # Deterministic planner path for finance reconciliation worlds when contract asks for it.
+    contract_tools = set(world_contract.get("tools", []) if isinstance(world_contract.get("tools"), list) else [])
+    is_finance_world = world_contract.get("world") in {"contabilidad_automatica", "contabilidad_instantanea"}
+    allowed_patterns = planner_policy.get("allowed_dag_patterns") if isinstance(planner_policy.get("allowed_dag_patterns"), list) else []
+    deterministic_finance = is_finance_world and ("deterministic_reconcile" in allowed_patterns or not allowed_patterns)
+    if skill_mode and deterministic_finance:
         deterministic_calls: List[Dict[str, Any]] = []
         deterministic_trajs: List[Dict[str, str]] = []
         planner_calls_by_subquery: List[Dict[str, Any]] = []
 
         for idx, subq in enumerate(subqs, start=1):
-            credito_id = _extract_credito_id(str(subq))
-            subq_call_count = 0
-            desc_lines: List[str] = []
-            if credito_id:
-                tx_sql = f"SELECT tipo, monto FROM movimientos WHERE credito_id = '{credito_id}'"
-                acc_sql = (
-                    "SELECT saldo_total, estatus, saneamiento_calculado "
-                    f"FROM estados_cuenta WHERE credito_id = '{credito_id}'"
-                )
-                deterministic_calls.append(
-                    {
-                        "name": "query_transactions_db",
-                        "args": {"query": tx_sql},
-                        "id": f"call_s{idx}_{uuid.uuid4().hex[:10]}",
-                        "type": "tool_call",
-                    }
-                )
-                deterministic_calls.append(
-                    {
-                        "name": "query_accounting_db",
-                        "args": {"query": acc_sql},
-                        "id": f"call_s{idx}_{uuid.uuid4().hex[:10]}",
-                        "type": "tool_call",
-                    }
-                )
-                subq_call_count = 2
-                desc_lines.append(f"step 1: tool=query_transactions_db, credito_id={credito_id}")
-                desc_lines.append(f"step 2: tool=query_accounting_db, credito_id={credito_id}")
-            else:
-                desc_lines.append("No credito_id found in subquery; planner skipped deterministic calls.")
+            calls, dag_nodes, desc_lines = _deterministic_finance_calls(
+                subquery_idx=idx,
+                subquery_text=str(subq),
+                world_contract=world_contract,
+            )
+            deterministic_calls.extend(calls)
+            subq_call_count = len(calls)
+            dags_by_subquery.append({"subquery_idx": idx, "subquery": _sanitize_text(subq), "dag": dag_nodes})
 
             deterministic_trajs.append(
                 {
                     "subquery": _sanitize_text(subq),
                     "description": _sanitize_text("\n".join(desc_lines)),
+                    "subquery_id": f"q{idx}",
+                    "intent": "reconcile_credit",
+                    "dag": dag_nodes,
                 }
             )
             planner_calls_by_subquery.append(
@@ -413,9 +555,12 @@ def execute_planner_tool(
             "messages": [ai_msg],
             "planner_trajs": deterministic_trajs,
             "planner_calls_by_subquery": planner_calls_by_subquery,
+            "dags_by_subquery": dags_by_subquery,
             "llm_raw_out": "deterministic_contabilidad_plan",
             "llm_clean_out": "deterministic_contabilidad_plan",
             "_planner_scope_internal": planner_scope,
+            "selected_skill_world": planner_scope["selected_skill_world"],
+            "world_contract": world_contract,
         }
 
     seen_calls_keys = set()
@@ -457,6 +602,11 @@ def execute_planner_tool(
     for i, subq in enumerate(subqs, start=1):
         try:
             logger.debug("planner subquery %s/%s: %s", i, len(subqs), subq)
+            current_intents = (
+                subquery_intents[i - 1]
+                if isinstance(subquery_intents, list) and i - 1 < len(subquery_intents) and isinstance(subquery_intents[i - 1], list)
+                else []
+            )
             user_msg_content = f"""CONTEXTO DISPONIBLE:
 {rich_context_text}
 
@@ -532,6 +682,13 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 )
 
             planner_blocks.append({"subquery_idx": i, "tool_calls": subq_calls})
+            dag_nodes = _build_dag_nodes_for_calls(
+                subquery_idx=i,
+                subquery_text=str(subq),
+                subquery_intents=current_intents,
+                subquery_calls=subq_calls,
+            )
+            dags_by_subquery.append({"subquery_idx": i, "subquery": _sanitize_text(subq), "dag": dag_nodes})
 
             if not subq_calls:
                 desc_lines.append(
@@ -542,6 +699,9 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 planner_trajectory_type(
                     subquery=_sanitize_text(subq),
                     description=_sanitize_text("\n".join(desc_lines)),
+                    subquery_id=f"q{i}",
+                    intent=current_intents[0] if current_intents else "general_query",
+                    dag=dag_nodes,
                 )
             )
         except Exception as exc:
@@ -550,18 +710,28 @@ Genera el DAG exclusivo para resolver: "{subq}"
                 planner_trajectory_type(
                     subquery=_sanitize_text(subq),
                     description=_sanitize_text(f"Error: {exc}"),
+                    subquery_id=f"q{i}",
+                    intent="general_query",
+                    dag=[],
                 )
             )
+            dags_by_subquery.append({"subquery_idx": i, "subquery": _sanitize_text(subq), "dag": []})
 
-    normalized_trajs: List[Dict[str, str]] = []
+    normalized_trajs: List[Dict[str, Any]] = []
     for tr in plan_trajs:
         if isinstance(tr, dict):
             sq = _sanitize_text(tr.get("subquery", ""))
             ds = _sanitize_text(tr.get("description", ""))
+            sqid = str(tr.get("subquery_id", ""))
+            intent = str(tr.get("intent", "general_query"))
+            dag = tr.get("dag", [])
         else:
             sq = _sanitize_text(getattr(tr, "subquery", ""))
             ds = _sanitize_text(getattr(tr, "description", ""))
-        normalized_trajs.append({"subquery": sq, "description": ds})
+            sqid = str(getattr(tr, "subquery_id", ""))
+            intent = str(getattr(tr, "intent", "general_query"))
+            dag = getattr(tr, "dag", [])
+        normalized_trajs.append({"subquery": sq, "description": ds, "subquery_id": sqid, "intent": intent, "dag": dag})
 
     normalized_calls = flatten_tool_calls_by_subquery(planner_blocks)
     calls_by_subquery: Dict[int, int] = {}
@@ -607,8 +777,11 @@ Genera el DAG exclusivo para resolver: "{subq}"
         "messages": [ai_msg],
         "planner_trajs": normalized_trajs,
         "planner_calls_by_subquery": planner_calls_by_subquery,
+        "dags_by_subquery": dags_by_subquery,
         "llm_raw_out": _sanitize_text(global_llm_raw),
         "llm_clean_out": _sanitize_text(global_llm_clean),
         "_planner_scope_internal": planner_scope,
+        "selected_skill_world": planner_scope["selected_skill_world"],
+        "world_contract": world_contract,
     }
 

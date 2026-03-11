@@ -2,15 +2,26 @@ api_version: skill/v1
 kind: skill
 name: nl2sql_sqlite
 version: 0.1.0
+world: chat_db_legacy
 description: Chat with SQLite databases by generating SQL from the real schema and
   executing read-only queries.
+intents:
+- query_data
+- aggregate_data
+- explain_schema
+entities:
+- db_path
+- entity_id
 entrypoint: skill:build
 instructions: instructions.md
 input_schema: schemas/input.schema.json
 output_schema: schemas/output.schema.json
 tools:
   declared:
+  - nl2sql
   - nl2sql_sqlite
+  - inspect_sqlite_schema
+  - execute_sql_readonly
 knowledge:
   bindings:
   - knowledge/contabilidad.db
@@ -22,5 +33,41 @@ testing:
   mode: explicit_or_auto
 execution:
   backend: native_python
+planner:
+  allowed_dag_patterns:
+  - legacy_chat_db
+  intent_to_tools:
+    query_data:
+    - nl2sql
+    aggregate_data:
+    - nl2sql
+    explain_schema:
+    - inspect_sqlite_schema
+  intent_to_knowledge:
+    query_data:
+    - knowledge/contabilidad.db
+    - knowledge/transacciones.db
+  intent_to_workflows: {}
+  tool_priority:
+  - nl2sql
+  - inspect_sqlite_schema
+  default_row_limits:
+    query_data: 50
+summarizer:
+  response_modes:
+  - user
+  - technical
+  output_style: db_analyst
+  required_sections:
+  - resumen
+validator:
+  coverage_rules:
+  - every_subquery_requires_artifact
+  required_artifacts:
+  - sql_result
+ui:
+  world_label: Chat DB Legacy
+  world_description: Compatibilidad hacia atras para el skill legacy NL2SQL.
 metadata:
   domain: generic_sqlite
+  deprecated: true

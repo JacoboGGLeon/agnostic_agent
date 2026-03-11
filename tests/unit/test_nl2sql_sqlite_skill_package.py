@@ -9,6 +9,8 @@ def test_nl2sql_sqlite_skill_package_is_discoverable():
     skill = reg.get_skill("nl2sql_sqlite")
     assert skill is not None
     assert skill.source_type == "manifest"
+    assert skill.world == "chat_db_legacy"
+    assert "nl2sql" in skill.tools
     assert "nl2sql_sqlite" in skill.tools
     assert skill.input_schema == "schemas/input.schema.json"
     assert skill.output_schema == "schemas/output.schema.json"

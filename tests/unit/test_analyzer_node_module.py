@@ -56,3 +56,8 @@ def test_execute_analyzer_node_splits_multi_json_prompt():
     assert "analyzer" in out
     assert len(out["analyzer"]["subqueries"]) == 2
     assert out["_active_skills_internal"] == ["contabilidad_instantanea"]
+    assert out["analyzer"]["selected_skill_world"] == "contabilidad_instantanea"
+    assert out["analyzer"]["selection_mode"] == "auto"
+    assert len(out["analyzer"]["subquery_intents"]) == 2
+    assert len(out["analyzer"]["entities_by_subquery"]) == 2
+    assert out["selected_skill_world"] == "contabilidad_instantanea"

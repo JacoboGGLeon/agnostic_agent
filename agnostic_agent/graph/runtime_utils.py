@@ -305,8 +305,22 @@ def _resolve_effective_skills(
             s_name = str(s).strip()
             if not s_name or s_name == "Auto (Analyzer)":
                 continue
-            if skill_registry is None or skill_registry.get_skill(s_name):
+            if skill_registry is None:
                 resolved.append(s_name)
+                continue
+            skill_obj = skill_registry.get_skill(s_name)
+            if skill_obj is None and hasattr(skill_registry, "get_world"):
+                skill_obj = skill_registry.get_world(s_name)
+            if skill_obj is not None:
+                resolved.append(getattr(skill_obj, "name", s_name))
+    if not resolved:
+        selected_world = str(state.get("selected_skill_world") or "").strip()
+        if selected_world and selected_world != "Auto (Analyzer)" and skill_registry is not None:
+            skill_obj = None
+            if hasattr(skill_registry, "get_world"):
+                skill_obj = skill_registry.get_world(selected_world)
+            if skill_obj is not None:
+                resolved.append(getattr(skill_obj, "name", selected_world))
     return resolved
 
 

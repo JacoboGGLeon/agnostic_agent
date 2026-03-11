@@ -1,0 +1,103 @@
+{
+  "version": "2.0",
+  "engine": "sqlite",
+  "source_db": "agnostic_agent\\skills\\nl2sql_sqlite\\knowledge\\contabilidad.db",
+  "allowed_schemas": [
+    "main"
+  ],
+  "defaults": {
+    "row_limit": 50
+  },
+  "business_glossary": {
+    "saldo_total": "Saldo reportado del credito",
+    "saneamiento_calculado": "Reserva calculada segun estatus"
+  },
+  "schemas": {
+    "main": {
+      "tables": {
+        "estados_cuenta": {
+          "description": "Estado contable actual del credito, saldo y saneamiento reportado.",
+          "primary_key": [
+            "credito_id"
+          ],
+          "columns": [
+            {
+              "name": "credito_id",
+              "type": "TEXT",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": [
+                "PRIMARY KEY"
+              ]
+            },
+            {
+              "name": "cliente_id",
+              "type": "TEXT",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            },
+            {
+              "name": "estatus",
+              "type": "TEXT",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            },
+            {
+              "name": "saldo_total",
+              "type": "REAL",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            },
+            {
+              "name": "capital_vigente",
+              "type": "REAL",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            },
+            {
+              "name": "interes_vigente",
+              "type": "REAL",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            },
+            {
+              "name": "saneamiento_calculado",
+              "type": "REAL",
+              "nullable": true,
+              "description": "",
+              "examples": [],
+              "constraints": []
+            }
+          ],
+          "foreign_keys": [],
+          "indexes": [
+            {
+              "name": "sqlite_autoindex_estados_cuenta_1",
+              "columns": [
+                "credito_id"
+              ],
+              "unique": true
+            }
+          ],
+          "row_count_hint": null
+        }
+      },
+      "views": {}
+    }
+  },
+  "relationships": [],
+  "table_summaries": {
+    "estados_cuenta": "Estado contable actual del credito, saldo y saneamiento reportado."
+  }
+}

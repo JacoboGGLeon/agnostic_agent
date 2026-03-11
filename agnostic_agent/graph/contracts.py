@@ -9,20 +9,33 @@ from typing_extensions import Annotated, TypedDict
 
 class AnalyzerResult(TypedDict, total=False):
     input_payload: Dict[str, Any]
+    selected_skill_world: str
+    selection_mode: str
     propositional_logic: str
     subqueries: List[str]
     subqueries_logic: List[str]
+    subquery_intents: List[List[str]]
+    entities_by_subquery: List[Dict[str, Any]]
+    constraints_by_subquery: List[Dict[str, Any]]
+    response_mode: str
 
 
 class PlannerTrajectory(TypedDict, total=False):
     subquery: str
     description: str
+    subquery_id: str
+    intent: str
+    dag: List[Dict[str, Any]]
 
 
 class ExecutorStep(TypedDict, total=False):
+    node_id: str
+    subquery_id: str
+    kind: str
     tool_call_id: str
     tool_name: str
     args: Dict[str, Any]
+    expected_artifact: str
 
 
 class SummaryDict(TypedDict, total=False):
@@ -50,6 +63,13 @@ class State(TypedDict, total=False):
     pipeline_summary: Optional[SummaryDict]
     validator: Optional[ValidatorResult]
     coverage_report: List[Dict[str, Any]]
+    artifacts: List[Dict[str, Any]]
+    dags_by_subquery: List[Dict[str, Any]]
+    selected_skill_world: Optional[str]
+    world_contract: Optional[Dict[str, Any]]
+    subquery_intents: List[List[str]]
+    entities_by_subquery: List[Dict[str, Any]]
+    constraints_by_subquery: List[Dict[str, Any]]
     forced_skill: Optional[str]
     skills_allowlist: Optional[List[str]]
     user_prompt: Optional[str]

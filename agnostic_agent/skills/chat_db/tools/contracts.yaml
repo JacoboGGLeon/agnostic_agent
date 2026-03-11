@@ -1,0 +1,10 @@
+tools:
+  - name: nl2sql
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: inspect_sqlite_schema
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: execute_sql_readonly
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

@@ -1,0 +1,100 @@
+api_version: skill/v1
+kind: skill
+name: contabilidad_automatica
+version: 1.0.0
+world: contabilidad_automatica
+description: Mundo financiero para conciliacion, auditoria y exploracion contable sobre transacciones, contabilidad, reglas y diccionario.
+intents:
+  - reconcile_credit
+  - audit_drift
+  - query_financial_data
+  - explain_rule
+  - batch_reconcile
+entities:
+  - credito_id
+  - saldo_total
+  - estatus
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - reconcile_credit_accounting
+    - query_transactions_db
+    - query_accounting_db
+    - get_saneamiento_rate
+    - finance_sources_status
+    - nl2sql
+knowledge:
+  bindings:
+    - ../contabilidad_instantanea/knowledge/contabilidad.db
+    - ../contabilidad_instantanea/knowledge/transacciones.db
+    - ../contabilidad_instantanea/knowledge/rules.md
+    - ../contabilidad_instantanea/knowledge/dictionary.md
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+planner:
+  allowed_dag_patterns:
+    - deterministic_reconcile
+    - financial_query
+  intent_to_tools:
+    reconcile_credit:
+      - reconcile_credit_accounting
+    audit_drift:
+      - reconcile_credit_accounting
+      - get_saneamiento_rate
+    query_financial_data:
+      - nl2sql
+    explain_rule:
+      - get_saneamiento_rate
+    batch_reconcile:
+      - reconcile_credit_accounting
+  intent_to_knowledge:
+    reconcile_credit:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    audit_drift:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+    query_financial_data:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    explain_rule:
+      - ../contabilidad_instantanea/knowledge/rules.md
+      - ../contabilidad_instantanea/knowledge/dictionary.md
+    batch_reconcile:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+  intent_to_workflows: {}
+  tool_priority:
+    - reconcile_credit_accounting
+    - nl2sql
+    - get_saneamiento_rate
+  default_row_limits:
+    query_financial_data: 50
+summarizer:
+  response_modes:
+    - user
+    - audit
+    - batch_summary
+  output_style: finance_audit
+  required_sections:
+    - estado_final
+    - hallazgos
+validator:
+  coverage_rules:
+    - every_subquery_requires_artifact
+  required_artifacts:
+    - query_result
+ui:
+  world_label: Contabilidad Automatica
+  world_description: Mundo financiero especializado en conciliacion y exploracion.
+metadata:
+  replaces: contabilidad_instantanea

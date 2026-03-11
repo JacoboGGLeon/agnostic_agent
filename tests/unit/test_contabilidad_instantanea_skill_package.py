@@ -20,7 +20,10 @@ def test_contabilidad_instantanea_skill_package_is_discoverable():
     assert skill is not None
     assert skill.source_type == "manifest"
     assert skill.version == "1.2.0"
-    assert skill.tools == ["query_transactions_db", "query_accounting_db"]
+    assert skill.world == "contabilidad_automatica"
+    assert "reconcile_credit_accounting" in skill.tools
+    assert "query_transactions_db" in skill.tools
+    assert "query_accounting_db" in skill.tools
     assert skill.input_schema == "schemas/input.schema.json"
     assert skill.output_schema == "schemas/output.schema.json"
 

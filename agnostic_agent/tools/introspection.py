@@ -329,19 +329,21 @@ def read_knowledge(source_path: str, db_path: Optional[str] = None) -> Dict[str,
         conn.close()
 
 
-def _nl2sql_skill_knowledge_dir() -> str:
+def _nl2sql_skill_knowledge_dirs() -> List[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, "skills", "nl2sql_sqlite", "knowledge")
+    candidates = [
+        os.path.join(base_dir, "skills", "chat_db", "knowledge"),
+        os.path.join(base_dir, "skills", "nl2sql_sqlite", "knowledge"),
+    ]
+    return [path for path in candidates if os.path.isdir(path)]
 
 
 def _discover_nl2sql_skill_db_paths() -> List[str]:
-    knowledge_dir = _nl2sql_skill_knowledge_dir()
-    if not os.path.isdir(knowledge_dir):
-        return []
     out: List[str] = []
-    for name in sorted(os.listdir(knowledge_dir)):
-        if name.lower().endswith(".db"):
-            out.append(os.path.join(knowledge_dir, name))
+    for knowledge_dir in _nl2sql_skill_knowledge_dirs():
+        for name in sorted(os.listdir(knowledge_dir)):
+            if name.lower().endswith(".db"):
+                out.append(os.path.join(knowledge_dir, name))
     return out
 
 
@@ -677,6 +679,34 @@ def _run_readonly_sql(db_path: str, sql: str) -> Dict[str, Any]:
 
 
 @tool(mode="public")
+def inspect_sqlite_schema(db_path: str = "", user_request: str = "") -> Dict[str, Any]:
+    """
+    Inspecciona el schema real de una SQLite resolviendo aliases/rutas de forma flexible.
+    """
+    target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
+    if not target_db or not os.path.exists(target_db):
+        return {"ok": False, "error": f"SQLite DB not found: {target_db or db_path}", "db_path": target_db or db_path}
+    try:
+        schema = _sqlite_schema(target_db)
+    except Exception as exc:
+        return {"ok": False, "error": f"Failed to inspect schema: {exc}", "db_path": target_db}
+    return {"ok": True, "db_path": target_db, "schema": schema}
+
+
+@tool(mode="public")
+def execute_sql_readonly(sql: str, db_path: str = "", user_request: str = "") -> Dict[str, Any]:
+    """
+    Ejecuta SQL de solo lectura sobre una SQLite resuelta por path o por contexto.
+    """
+    target_db = _resolve_sqlite_db_path(db_path, user_request=user_request)
+    if not target_db or not os.path.exists(target_db):
+        return {"ok": False, "error": f"SQLite DB not found: {target_db or db_path}", "db_path": target_db or db_path}
+    out = _run_readonly_sql(target_db, sql)
+    out["db_path"] = target_db
+    return out
+
+
+@tool(mode="public")
 def nl2sql_sqlite(
     user_request: str,
     db_path: str = "",
@@ -733,6 +763,31 @@ def nl2sql_sqlite(
         exec_out = _run_readonly_sql(target_db, plan["sql"])
         result["execution"] = exec_out
     return result
+
+
+@tool(mode="public")
+def nl2sql(
+    user_request: str,
+    db_path: str = "",
+    row_limit: int = 50,
+    execute: bool = False,
+    entity_id: str = "",
+) -> Dict[str, Any]:
+    """
+    Alias moderno y reusable para NL2SQL sobre SQLite.
+    """
+    out = nl2sql_sqlite.invoke(
+        {
+            "user_request": user_request,
+            "db_path": db_path,
+            "row_limit": row_limit,
+            "execute": execute,
+            "entity_id": entity_id,
+        }
+    )
+    if isinstance(out, dict):
+        out.setdefault("alias_used", "nl2sql")
+    return out
 
 
 class _NL2SQLToolAgentSQLite:

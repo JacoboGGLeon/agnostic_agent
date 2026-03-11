@@ -33,6 +33,13 @@ class Skill:
     instructions: str
     tools: List[str] = field(default_factory=list)
     knowledge: List[str] = field(default_factory=list)
+    world: Optional[str] = None
+    intents: List[str] = field(default_factory=list)
+    entities: List[str] = field(default_factory=list)
+    planner_policy: Dict[str, Any] = field(default_factory=dict)
+    summarizer_policy: Dict[str, Any] = field(default_factory=dict)
+    validator_policy: Dict[str, Any] = field(default_factory=dict)
+    ui: Dict[str, Any] = field(default_factory=dict)
 
     # Metadata for UI / debugging / compatibility
     file_path: Optional[str] = None
@@ -86,6 +93,13 @@ class SkillRegistry:
             instructions=instructions,
             tools=meta.get("tools", []),
             knowledge=kv,
+            world=str(meta.get("world", "")).strip() or name,
+            intents=[str(i).strip() for i in (meta.get("intents") or []) if str(i).strip()],
+            entities=[str(i).strip() for i in (meta.get("entities") or []) if str(i).strip()],
+            planner_policy=(meta.get("planner") if isinstance(meta.get("planner"), dict) else {}),
+            summarizer_policy=(meta.get("summarizer") if isinstance(meta.get("summarizer"), dict) else {}),
+            validator_policy=(meta.get("validator") if isinstance(meta.get("validator"), dict) else {}),
+            ui=(meta.get("ui") if isinstance(meta.get("ui"), dict) else {}),
             file_path=file_path,
             version=meta.get("version"),
             source_type="markdown",
@@ -125,12 +139,27 @@ class SkillRegistry:
             if isinstance(bindings, list):
                 knowledge_bindings = [str(k).strip() for k in bindings if str(k).strip()]
 
+        intents = data.get("intents") or []
+        if not isinstance(intents, list):
+            intents = []
+
+        entities = data.get("entities") or []
+        if not isinstance(entities, list):
+            entities = []
+
         return Skill(
             name=name.strip(),
             description=str(data.get("description", "")),
             instructions=instructions,
             tools=tool_declared,
             knowledge=knowledge_bindings,
+            world=str(data.get("world", "")).strip() or name.strip(),
+            intents=[str(i).strip() for i in intents if str(i).strip()],
+            entities=[str(i).strip() for i in entities if str(i).strip()],
+            planner_policy=(data.get("planner") if isinstance(data.get("planner"), dict) else {}),
+            summarizer_policy=(data.get("summarizer") if isinstance(data.get("summarizer"), dict) else {}),
+            validator_policy=(data.get("validator") if isinstance(data.get("validator"), dict) else {}),
+            ui=(data.get("ui") if isinstance(data.get("ui"), dict) else {}),
             file_path=str(manifest_path),
             version=str(data.get("version", "")).strip() or None,
             source_type="manifest",
@@ -214,3 +243,12 @@ class SkillRegistry:
     def set_enabled(self, name: str, enabled: bool) -> None:
         if name in self.skills:
             self.skills[name].enabled = enabled
+
+    def get_world(self, name: str) -> Optional[Skill]:
+        skill = self.get_skill(name)
+        if skill is not None:
+            return skill
+        for candidate in self.skills.values():
+            if (candidate.world or candidate.name) == name:
+                return candidate
+        return None

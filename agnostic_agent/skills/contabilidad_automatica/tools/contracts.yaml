@@ -1,0 +1,19 @@
+tools:
+  - name: reconcile_credit_accounting
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: query_transactions_db
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: query_accounting_db
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: get_saneamiento_rate
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: finance_sources_status
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py
+  - name: nl2sql
+    contract: runtime_tool
+    local_wrapper: tools/local_tools.py

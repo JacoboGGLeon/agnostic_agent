@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContabilidadAutomaticaInput",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "credito_id": {
+      "type": "string"
+    },
+    "saldo_total": {
+      "type": "number"
+    },
+    "estatus": {
+      "type": "string"
+    },
+    "user_request": {
+      "type": "string"
+    }
+  }
+}
