@@ -17,98 +17,104 @@ from agnostic_agent.ui.panels.helpers import (
 from agnostic_agent.ui.panels.inspector import render_inspector
 
 
-def render_online_tab(agent_factory):
-    # Row 1: [Online Chat box][Inspector box]
-    feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
+def render_online_tab(agent_factory, *, show_history: bool = True, show_inspector: bool = True):
+    has_interaction = bool(st.session_state.get("messages"))
 
-    with feed_col:
-        with st.container(border=True):
-            for msg in st.session_state.messages:
-                role = msg.get("role", "user")
+    if show_history and has_interaction:
+        feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
 
-                if role == "user":
-                    with st.chat_message("user"):
-                        content = msg.get("content", "")
-                        st.markdown(
-                            f"""
-                            <div class="bubble-user">
-                              {html.escape(content)}
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
+        with feed_col:
+            with st.container(border=True):
+                st.markdown('<div class="studio-feed-marker"></div>', unsafe_allow_html=True)
+                for msg in st.session_state.messages:
+                    role = msg.get("role", "user")
+
+                    if role == "user":
+                        with st.chat_message("user"):
+                            content = msg.get("content", "")
+                            st.markdown(
+                                f"""
+                                <div class="bubble-user">
+                                  {html.escape(content)}
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                    elif role == "assistant":
+                        out = msg.get("out") or {}
+                        content = msg.get("content") or ""
+                        used_mode = out.get("agent_mode", "")
+                        raw_state = get_raw_state(out)
+                        tool_runs = extract_tool_runs(out, raw_state)
+
+                        badge_html = (
+                            f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>'
+                            if used_mode
+                            else ""
                         )
 
-                elif role == "assistant":
-                    out = msg.get("out") or {}
-                    content = msg.get("content") or ""
-                    used_mode = out.get("agent_mode", "")
-                    raw_state = get_raw_state(out)
-                    tool_runs = extract_tool_runs(out, raw_state)
+                        with st.chat_message("assistant"):
+                            raw_html = render_markdown(content or "_(sin respuesta)_")
 
-                    badge_html = (
-                        f'<span class="badge" style="font-size:10px; padding:2px 6px; margin-left:8px; opacity:0.7;">{used_mode}</span>'
-                        if used_mode
-                        else ""
-                    )
+                            st.markdown(
+                                f"""
+                                <div class="bubble-agent">
+                                  <div style="font-size: 0.8em; opacity: 0.85; margin-bottom: 4px; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
+                                    <span>Respuesta {badge_html}</span>
+                                    <span style="font-size:1rem;">&#129302;</span>
+                                  </div>
+                                  <div class="bubble-content">{raw_html}</div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
-                    with st.chat_message("assistant"):
-                        raw_html = render_markdown(content or "_(sin respuesta)_")
+                            meta_col, inspect_col = st.columns([1.8, 1.0])
+                            with meta_col:
+                                st.caption(f"id={msg.get('id')} - tools:{len(tool_runs)}")
+                            with inspect_col:
+                                if st.button(
+                                    "Inspect",
+                                    key=f"inspect_{msg.get('id')}",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state.selected_msg_id = msg.get("id")
+                                    st.toast(f"Inspector -> id={msg.get('id')}")
+                                    st.rerun()
 
-                        st.markdown(
-                            f"""
-                            <div class="bubble-agent">
-                              <div style="font-size: 0.8em; opacity: 0.85; margin-bottom: 4px; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
-                                <span>Respuesta {badge_html}</span>
-                                <span style="font-size:1rem;">&#129302;</span>
-                              </div>
-                              <div class="bubble-content">{raw_html}</div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                        meta_col, inspect_col = st.columns([1.8, 1.0])
-                        with meta_col:
-                            st.caption(f"id={msg.get('id')} - tools:{len(tool_runs)}")
-                        with inspect_col:
-                            if st.button(
-                                "Inspect",
-                                key=f"inspect_{msg.get('id')}",
-                                use_container_width=True,
-                            ):
-                                st.session_state.selected_msg_id = msg.get("id")
-                                st.toast(f"Inspector -> id={msg.get('id')}")
-                                st.rerun()
-
-    with insp_col:
-        render_inspector()
-
-    # Row 2: [Skill selector + input]
-    st.markdown("---")
+        with insp_col:
+            if show_inspector:
+                render_inspector()
 
     skills: List[str] = []
     agent = agent_factory()
     if agent and agent.skill_registry:
         skills = [s.name for s in agent.skill_registry.list_skills()]
 
-    selected_skill = st.selectbox(
-        "Skill de Prueba (Forzar contexto)",
-        ["Auto (Analyzer)"] + skills,
-        index=0,
-        key="debug_skill_selector",
-        help="Selecciona una skill especifica para ver sus herramientas asociadas.",
-    )
+    st.markdown('<div class="studio-composer-spacer"></div>', unsafe_allow_html=True)
 
-    if selected_skill != "Auto (Analyzer)" and agent and agent.skill_registry:
-        skill_obj = agent.skill_registry.get_skill(selected_skill)
-        if skill_obj:
-            tools_str = " | ".join([f"`{tool_name}`" for tool_name in skill_obj.tools])
-            st.caption(f"Tools Activas: {tools_str}")
-            if skill_obj.knowledge:
-                know_str = ", ".join(skill_obj.knowledge)
-                st.caption(f"Knowledge: {know_str}")
+    with st.container(border=True):
+        st.markdown('<div class="studio-composer-marker"></div>', unsafe_allow_html=True)
 
-    prompt = st.chat_input("Escribe tu mensaje...")
+        selected_skill = st.selectbox(
+            "Skill de Prueba (Forzar contexto)",
+            ["Auto (Analyzer)"] + skills,
+            index=0,
+            key="debug_skill_selector",
+            help="Selecciona una skill especifica para ver sus herramientas asociadas.",
+        )
+
+        if selected_skill != "Auto (Analyzer)" and agent and agent.skill_registry:
+            skill_obj = agent.skill_registry.get_skill(selected_skill)
+            if skill_obj:
+                tools_str = " | ".join([f"`{tool_name}`" for tool_name in skill_obj.tools])
+                st.caption(f"Tools Activas: {tools_str}")
+                if skill_obj.knowledge:
+                    know_str = ", ".join(skill_obj.knowledge)
+                    st.caption(f"Knowledge: {know_str}")
+
+        prompt = st.chat_input("Escribe tu mensaje...")
 
     if prompt:
         uid = next_id()

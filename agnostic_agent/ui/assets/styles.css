@@ -11,6 +11,7 @@
   --r: 18px;
   --r2: 14px;
   --shadow: 0 12px 35px rgba(0, 0, 0, .35);
+  --composer-height: 250px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-ui: "Segoe UI", "Source Sans Pro", "Helvetica Neue", sans-serif;
 }
@@ -52,7 +53,7 @@
 
 .block-container {
   padding-top: .75rem;
-  padding-bottom: 1.6rem;
+  padding-bottom: calc(var(--composer-height) + 2rem);
   max-width: 100%;
 }
 
@@ -292,6 +293,29 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 
 div[data-testid="stVerticalBlockBorderWrapper"] > div {
   padding: 12px !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-feed-marker) {
+  min-height: 12rem;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) {
+  position: fixed !important;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 30;
+  border-color: rgba(73, 165, 230, .28) !important;
+  background: linear-gradient(180deg, rgba(4, 23, 49, .96), rgba(7, 33, 70, .98)) !important;
+  backdrop-filter: blur(18px);
+}
+
+.studio-composer-spacer {
+  height: var(--composer-height);
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) [data-testid="stChatInput"] {
+  margin-top: .85rem;
 }
 
 .stCheckbox label,
