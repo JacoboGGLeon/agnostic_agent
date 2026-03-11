@@ -113,6 +113,8 @@ load_css()
 # -----------------------------
 if "agent" not in st.session_state:
     st.session_state.agent = None
+if "agent_init_error" not in st.session_state:
+    st.session_state.agent_init_error = ""
 if "agent_mode" not in st.session_state:
     st.session_state.agent_mode = "tools_strict"
 if "messages" not in st.session_state:
@@ -143,29 +145,26 @@ if "plugin_manager" not in st.session_state:
 # -----------------------------
 def get_or_init_agent() -> Agent:
     if st.session_state.agent is None:
-        with st.spinner(f"Inicializando agente..."):
+        if st.session_state.agent_init_error:
+            return None
+        with st.spinner("Inicializando agente..."):
             try:
-                # Use environment variables or defaults
-                # Note: We don't read from st.session_state inputs here to keep it simple for now,
-                # relying on env vars or default config.
-                
                 cfg = PlannerConfig(
                     model_name=os.getenv("LLM_SERVED_NAME"),
                     temperature=0.0,
                     max_steps=16,
                 )
-                
-                # Initializes Agent with default config or override
                 st.session_state.agent = Agent.init(config_or_setup=cfg)
+                st.session_state.agent_init_error = ""
 
-                # Sync Skills Config if previously set
                 if "skills_config" in st.session_state and st.session_state.agent and st.session_state.agent.skill_registry:
                     for sname, senabled in st.session_state.skills_config.items():
                         st.session_state.agent.skill_registry.set_enabled(sname, senabled)
 
             except Exception as e:
-                st.error(f"Error iniciando agente: {e}")
-                st.stop()
+                st.session_state.agent = None
+                st.session_state.agent_init_error = str(e)
+                return None
     return st.session_state.agent
 
 # -----------------------------
