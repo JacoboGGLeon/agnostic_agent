@@ -253,72 +253,50 @@ def extract_thinking(raw_state: Optional[Dict[str, Any]]) -> str:
     return ""
 
 def extract_summary_deep(raw_state: Optional[Dict[str, Any]], deep_out_text: str) -> str:
-    if isinstance(raw_state, dict):
-        pipeline_v2 = raw_state.get("pipeline_v2")
-        if isinstance(pipeline_v2, dict):
-            deep_v2 = pipeline_v2.get("deep_out") or {}
-            summary_v2 = deep_v2.get("summary")
-            if not isinstance(summary_v2, dict):
-                artifacts = deep_v2.get("artifacts") or {}
-                if isinstance(artifacts, dict):
-                    summary_v2 = artifacts.get("summary_v2")
-
-            if isinstance(summary_v2, dict) and summary_v2:
-                lines: List[str] = ["## RESUMEN DEEP DEL PIPELINE (v2)", ""]
-                section_order = [
-                    ("Analyzer", "analyzer"),
-                    ("Planner", "planner"),
-                    ("Executor", "executor"),
-                    ("Catcher", "catcher"),
-                    ("Summarizer", "summarizer"),
-                    ("Validator", "validator"),
-                    ("Metrics", "metrics"),
-                    ("Tool Outputs", "tool_outputs"),
-                ]
-                for title, key in section_order:
-                    section = summary_v2.get(key) or {}
-                    if not isinstance(section, dict) or not section:
-                        continue
-                    lines.append(f"### {title}")
-                    for field, value in section.items():
-                        rendered = (
-                            json.dumps(value, ensure_ascii=False)
-                            if isinstance(value, (dict, list))
-                            else str(value)
-                        )
-                        lines.append(
-                            f"- {sanitize_display_text(field)}: {sanitize_display_text(rendered)}"
-                        )
-                    lines.append("")
-                return sanitize_display_text("\n".join(lines))
-
-    planner_from_state = ""
-    expected_subqueries = 0
-    summary: Dict[str, Any] = {}
-    if isinstance(raw_state, dict):
-        planner_from_state = _build_planner_from_raw_state(raw_state)
-        planner_trajs = raw_state.get("planner_trajs") or []
-        expected_subqueries = len(planner_trajs) if isinstance(planner_trajs, list) else 0
-        summary = raw_state.get("summary") or raw_state.get("pipeline_summary") or {}
-
-    if deep_out_text:
-        cleaned = sanitize_display_text(deep_out_text)
-        if expected_subqueries > 0 and _count_subqueries(cleaned) < expected_subqueries and planner_from_state:
-            deep_out_text = ""
-        else:
-            return cleaned
-
-    if not summary or not isinstance(summary, dict):
+    if not isinstance(raw_state, dict):
         return ""
 
-    parts = []
-    for k in ["analyzer", "planner", "executor", "catcher", "summarizer", "final_answer"]:
-        v = summary.get(k, "")
-        if k == "planner" and planner_from_state:
-            v = planner_from_state
-        if isinstance(v, str) and v.strip():
-            parts.append(f"**{k.upper()}**\n\n{v.strip()}")
-    return sanitize_display_text("\n\n---\n\n".join(parts) if parts else "")
+    pipeline_v2 = raw_state.get("pipeline_v2")
+    if not isinstance(pipeline_v2, dict):
+        return ""
+
+    deep_v2 = pipeline_v2.get("deep_out") or {}
+    summary_v2 = deep_v2.get("summary")
+    if not isinstance(summary_v2, dict):
+        artifacts = deep_v2.get("artifacts") or {}
+        if isinstance(artifacts, dict):
+            summary_v2 = artifacts.get("summary_v2")
+
+    if not isinstance(summary_v2, dict) or not summary_v2:
+        return ""
+
+    lines: List[str] = ["## RESUMEN DEEP DEL PIPELINE (v2)", ""]
+    section_order = [
+        ("Analyzer", "analyzer"),
+        ("Planner", "planner"),
+        ("Executor", "executor"),
+        ("Catcher", "catcher"),
+        ("Summarizer", "summarizer"),
+        ("Validator", "validator"),
+        ("Metrics", "metrics"),
+        ("Tool Outputs", "tool_outputs"),
+    ]
+    for title, key in section_order:
+        section = summary_v2.get(key) or {}
+        if not isinstance(section, dict) or not section:
+            continue
+        lines.append(f"### {title}")
+        for field, value in section.items():
+            rendered = (
+                json.dumps(value, ensure_ascii=False)
+                if isinstance(value, (dict, list))
+                else str(value)
+            )
+            lines.append(
+                f"- {sanitize_display_text(field)}: {sanitize_display_text(rendered)}"
+            )
+        lines.append("")
+    return sanitize_display_text("\n".join(lines))
 
 def extract_tool_runs(out: Dict[str, Any], raw_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if isinstance(raw_state, dict):

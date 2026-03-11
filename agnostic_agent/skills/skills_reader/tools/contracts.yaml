@@ -1,7 +1,0 @@
-tools:
-  - name: list_skills
-    contract: runtime_tool
-    local_wrapper: tools/local_tools.py
-  - name: read_skill
-    contract: runtime_tool
-    local_wrapper: tools/local_tools.py

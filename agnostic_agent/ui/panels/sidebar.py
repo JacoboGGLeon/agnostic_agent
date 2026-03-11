@@ -9,6 +9,11 @@ DEFAULT_BRAND_LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/0
 
 
 def _resolve_llm_name() -> str:
+    for env_key in ("OPENAI_MODEL", "AGNOSTIC_LLM_MODEL", "LLM_MODEL_ID", "LLM_SERVED_NAME"):
+        val = os.getenv(env_key, "")
+        if val.strip():
+            return val.strip()
+
     agent = st.session_state.get("agent")
     if agent is not None:
         cfg = getattr(agent, "planner_config", None)
@@ -16,16 +21,11 @@ def _resolve_llm_name() -> str:
         if isinstance(model_name, str) and model_name.strip():
             return model_name.strip()
 
-    for env_key in ("LLM_SERVED_NAME", "OPENAI_MODEL", "AGNOSTIC_LLM_MODEL"):
-        val = os.getenv(env_key, "")
-        if val.strip():
-            return val.strip()
-
     return "custom-llm-model"
 
 
 def _resolve_emb_name() -> str:
-    for env_key in ("EMB_SERVED_NAME", "OPENAI_EMBED_MODEL", "AGNOSTIC_EMB_MODEL"):
+    for env_key in ("OPENAI_EMBED_MODEL", "AGNOSTIC_EMB_MODEL", "EMB_MODEL_ID", "EMB_SERVED_NAME"):
         val = os.getenv(env_key, "")
         if val.strip():
             return val.strip()
@@ -82,12 +82,6 @@ def render_sidebar() -> None:
             value=True,
             key="conversation_history_enabled",
             help="Si se desactiva, cada turno se ejecuta sin arrastrar mensajes previos del chat.",
-        )
-        st.toggle(
-            "Pipeline v2",
-            value=bool(st.session_state.get("pipeline_v2_enabled", True)),
-            key="pipeline_v2_enabled",
-            help="Activa salidas tipadas (user/deep/dev) para un render mas estable en Inspector.",
         )
 
         st.divider()

@@ -107,27 +107,6 @@ class TurnService:
             msgs.append(m)
         return msgs
 
-    def _build_deep_text(self, summary_obj: Optional[AgentSummary]) -> str:
-        if summary_obj is None:
-            return ""
-
-        parts: List[str] = ["## Resumen deep del pipeline"]
-
-        if summary_obj.analyzer:
-            parts.append("### ANALYZER\n" + summary_obj.analyzer)
-        if summary_obj.planner:
-            parts.append("### PLANNER\n" + summary_obj.planner)
-        if summary_obj.executor:
-            parts.append("### EXECUTOR\n" + summary_obj.executor)
-        if summary_obj.catcher:
-            parts.append("### CATCHER\n" + summary_obj.catcher)
-        if summary_obj.summarizer:
-            parts.append("### SUMMARIZER (basado en herramientas)\n" + summary_obj.summarizer)
-        if summary_obj.final_answer:
-            parts.append("### RESPUESTA FINAL\n" + summary_obj.final_answer)
-
-        return "\n\n".join(parts)
-
     def _resolve_prompt_text(self, agent_in: AgentInput) -> str:
         return (
             getattr(agent_in, "user_prompt", None)
@@ -160,33 +139,13 @@ class TurnService:
         elif isinstance(raw_allow, list):
             skills_allowlist = [str(s).strip() for s in raw_allow if str(s).strip()]
 
-        raw_pipeline_v2 = metadata.get("pipeline_v2")
-        if isinstance(raw_pipeline_v2, str):
-            pipeline_v2_enabled = raw_pipeline_v2.strip().lower() in {"1", "true", "yes", "y", "on"}
-        elif raw_pipeline_v2 is None:
-            pipeline_v2_enabled = None
-        else:
-            pipeline_v2_enabled = bool(raw_pipeline_v2)
-
         return {
             "session_id": session_id,
             "user_id": user_id,
             "forced_skill": forced_skill,
             "skills_allowlist": skills_allowlist,
             "conversation_history_enabled": conversation_history_enabled,
-            "pipeline_v2_enabled": pipeline_v2_enabled,
         }
-
-    def _use_pipeline_v2(self, meta: Dict[str, Any]) -> bool:
-        raw_override = meta.get("pipeline_v2_enabled")
-        if isinstance(raw_override, bool):
-            return raw_override
-        import os
-
-        env_val = os.getenv("AGNOSTIC_PIPELINE_V2", "")
-        if env_val.strip():
-            return env_val.strip().lower() in {"1", "true", "yes", "y", "on"}
-        return True
 
     def _strict_protocols_enabled(self) -> bool:
         import os
@@ -273,53 +232,6 @@ class TurnService:
                 )
             )
         return tool_runs
-
-    def _build_views(
-        self,
-        *,
-        out_state: State,
-        summary_obj: Optional[AgentSummary],
-        tool_runs: List[ToolRun],
-        last_ai_text: str,
-    ) -> Dict[str, AgentView]:
-        dev_text_state = _safe_text(out_state.get("dev_out"))
-        deep_text_state = _safe_text(out_state.get("deep_out"))
-        user_text_state = _safe_text(out_state.get("user_out"))
-        summary_user_answer = _safe_text(summary_obj.final_answer or "") if summary_obj else ""
-
-        final_user = (
-            (user_text_state or "").strip()
-            or summary_user_answer.strip()
-            or last_ai_text.strip()
-        )
-        final_deep = (
-            (deep_text_state or "").strip()
-            or self._build_deep_text(summary_obj).strip()
-            or summary_user_answer.strip()
-            or last_ai_text.strip()
-        )
-        final_dev = (dev_text_state or "").strip() or last_ai_text.strip() or final_deep
-
-        return {
-            "dev": AgentView(
-                final_answer=final_dev,
-                summary=summary_obj,
-                tool_runs=tool_runs,
-                raw_state=out_state,
-            ),
-            "deep": AgentView(
-                final_answer=final_deep,
-                summary=summary_obj,
-                tool_runs=tool_runs,
-                raw_state={},
-            ),
-            "user": AgentView(
-                final_answer=final_user,
-                summary=summary_obj,
-                tool_runs=tool_runs,
-                raw_state={},
-            ),
-        }
 
     def _build_views_v2(
         self,
@@ -422,7 +334,6 @@ class TurnService:
             out_state: State = self.graph_app.invoke(state_in)
             self._state = out_state
 
-            last_ai_text = self._extract_last_ai_text(out_state)
             summary_obj = self._build_summary_obj(out_state)
             tool_runs = self._build_tool_runs(out_state)
             for idx, tr in enumerate(tool_runs):
@@ -432,20 +343,19 @@ class TurnService:
                     producer="turn_service",
                     payload={"index": idx, "name": tr.name, "id": tr.id},
                 )
-            views = self._build_views(
+            fallback_final_user = _safe_text(out_state.get("user_out"))
+            if not fallback_final_user.strip() and summary_obj is not None:
+                fallback_final_user = _safe_text(summary_obj.final_answer or "")
+            if not fallback_final_user.strip():
+                fallback_final_user = self._extract_last_ai_text(out_state)
+
+            views = self._build_views_v2(
+                prompt_text=prompt_text,
                 out_state=out_state,
                 summary_obj=summary_obj,
                 tool_runs=tool_runs,
-                last_ai_text=last_ai_text,
+                fallback_final_user=fallback_final_user,
             )
-            if self._use_pipeline_v2(meta):
-                views = self._build_views_v2(
-                    prompt_text=prompt_text,
-                    out_state=out_state,
-                    summary_obj=summary_obj,
-                    tool_runs=tool_runs,
-                    fallback_final_user=views["user"].final_answer,
-                )
             artifact_events = [e.model_dump() for e in emitter.list_events()]
             emitter.emit(
                 run_id=run_id,
@@ -455,7 +365,7 @@ class TurnService:
             )
             artifact_events = [e.model_dump() for e in emitter.list_events()]
             protocol_checks = {
-                "pipeline_v2_enabled": {"ok": bool(self._use_pipeline_v2(meta)), "errors": []},
+                "pipeline_v2_enabled": {"ok": True, "errors": []},
                 "typed_output_present": {
                     "ok": all(k in {"dev", "deep", "user"} for k in views.keys()),
                     "errors": [],

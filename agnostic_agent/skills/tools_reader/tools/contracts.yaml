@@ -1,7 +1,0 @@
-tools:
-  - name: list_tools
-    contract: runtime_tool
-    local_wrapper: tools/local_tools.py
-  - name: read_tool
-    contract: runtime_tool
-    local_wrapper: tools/local_tools.py
