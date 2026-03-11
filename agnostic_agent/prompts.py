@@ -72,7 +72,8 @@ REGLAS CRITICAS:
 
 HEURISTICAS UTILES:
 - Preguntas de documentos/KB -> semantic_researcher.
-- Conciliacion, credito, saldo, saneamiento -> contabilidad_instantanea.
+- Conciliacion, credito, saldo, saneamiento -> contabilidad_automatica.
+- Consultas sobre bases SQLite o SQL -> chat_db.
 - Calculo numerico -> math_helper.
 - Transformacion simple de texto -> text_basic.
 

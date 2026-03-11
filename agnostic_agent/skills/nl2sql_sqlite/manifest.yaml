@@ -68,6 +68,7 @@ validator:
 ui:
   world_label: Chat DB Legacy
   world_description: Compatibilidad hacia atras para el skill legacy NL2SQL.
+  hidden: true
 metadata:
   domain: generic_sqlite
   deprecated: true

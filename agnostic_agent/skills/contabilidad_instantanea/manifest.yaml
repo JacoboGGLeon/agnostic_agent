@@ -86,8 +86,10 @@ validator:
 ui:
   world_label: Contabilidad Automatica
   world_description: Mundo financiero para conciliacion, auditoria y exploracion contable.
+  hidden: true
 metadata:
   parity_target: notebook_finance_es.ipynb
   canonical_skill_in_notebook: reconcile_accounts
   persona: Contador IA
   language: es
+  deprecated: true

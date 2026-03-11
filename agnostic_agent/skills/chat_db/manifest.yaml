@@ -3,6 +3,8 @@ kind: skill
 name: chat_db
 version: 1.0.0
 world: chat_db
+aliases:
+  - nl2sql_sqlite
 description: Mundo especializado para explorar, consultar y explicar bases SQLite mediante NL2SQL y ejecucion read-only.
 intents:
   - query_data
@@ -104,3 +106,4 @@ ui:
   world_description: Mundo especializado en chat con bases SQLite.
 metadata:
   domain: generic_sqlite
+  replaces: nl2sql_sqlite

@@ -3,6 +3,8 @@ kind: skill
 name: contabilidad_automatica
 version: 1.0.0
 world: contabilidad_automatica
+aliases:
+  - contabilidad_instantanea
 description: Mundo financiero para conciliacion, auditoria y exploracion contable sobre transacciones, contabilidad, reglas y diccionario.
 intents:
   - reconcile_credit

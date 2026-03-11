@@ -40,6 +40,8 @@ class Skill:
     summarizer_policy: Dict[str, Any] = field(default_factory=dict)
     validator_policy: Dict[str, Any] = field(default_factory=dict)
     ui: Dict[str, Any] = field(default_factory=dict)
+    aliases: List[str] = field(default_factory=list)
+    hidden: bool = False
 
     # Metadata for UI / debugging / compatibility
     file_path: Optional[str] = None
@@ -56,6 +58,7 @@ class SkillRegistry:
     def __init__(self, skills_dir: str):
         self.skills_dir = skills_dir
         self.skills: Dict[str, Skill] = {}
+        self.aliases: Dict[str, str] = {}
         self.load_skills()
 
     def _merge_skill(self, candidate: Skill) -> None:
@@ -68,6 +71,11 @@ class SkillRegistry:
         new_ver = _parse_semver(candidate.version)
         if new_ver > old_ver:
             self.skills[candidate.name] = candidate
+            return
+
+        merged_aliases = sorted({*existing.aliases, *candidate.aliases})
+        existing.aliases = merged_aliases
+        existing.hidden = existing.hidden and candidate.hidden
 
     def _load_markdown_skill(self, file_path: str) -> Optional[Skill]:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -86,6 +94,17 @@ class SkillRegistry:
         if not name:
             return None
 
+        aliases = meta.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        metadata_node = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
+        replaces = metadata_node.get("replaces")
+        if isinstance(replaces, str) and replaces.strip():
+            aliases = list(aliases) + [replaces.strip()]
+        elif isinstance(replaces, list):
+            aliases = list(aliases) + [str(v).strip() for v in replaces if str(v).strip()]
+        ui_node = meta.get("ui") if isinstance(meta.get("ui"), dict) else {}
+        hidden = bool(ui_node.get("hidden")) or bool(metadata_node.get("deprecated"))
         kv = meta.get("knowledge") or meta.get("kbs") or []
         return Skill(
             name=name,
@@ -100,6 +119,8 @@ class SkillRegistry:
             summarizer_policy=(meta.get("summarizer") if isinstance(meta.get("summarizer"), dict) else {}),
             validator_policy=(meta.get("validator") if isinstance(meta.get("validator"), dict) else {}),
             ui=(meta.get("ui") if isinstance(meta.get("ui"), dict) else {}),
+            aliases=[str(a).strip() for a in aliases if str(a).strip()],
+            hidden=hidden,
             file_path=file_path,
             version=meta.get("version"),
             source_type="markdown",
@@ -146,6 +167,17 @@ class SkillRegistry:
         entities = data.get("entities") or []
         if not isinstance(entities, list):
             entities = []
+        aliases = data.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        metadata_node = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        replaces = metadata_node.get("replaces")
+        if isinstance(replaces, str) and replaces.strip():
+            aliases = list(aliases) + [replaces.strip()]
+        elif isinstance(replaces, list):
+            aliases = list(aliases) + [str(v).strip() for v in replaces if str(v).strip()]
+        ui_node = data.get("ui") if isinstance(data.get("ui"), dict) else {}
+        hidden = bool(ui_node.get("hidden")) or bool(metadata_node.get("deprecated"))
 
         return Skill(
             name=name.strip(),
@@ -160,6 +192,8 @@ class SkillRegistry:
             summarizer_policy=(data.get("summarizer") if isinstance(data.get("summarizer"), dict) else {}),
             validator_policy=(data.get("validator") if isinstance(data.get("validator"), dict) else {}),
             ui=(data.get("ui") if isinstance(data.get("ui"), dict) else {}),
+            aliases=[str(a).strip() for a in aliases if str(a).strip()],
+            hidden=hidden,
             file_path=str(manifest_path),
             version=str(data.get("version", "")).strip() or None,
             source_type="manifest",
@@ -206,6 +240,7 @@ class SkillRegistry:
     def load_skills(self) -> None:
         """Scans for markdown and manifest skills and loads them."""
         self.skills = {}
+        self.aliases = {}
         if not os.path.isdir(self.skills_dir):
             return
 
@@ -231,14 +266,24 @@ class SkillRegistry:
 
         for skill in self.skills.values():
             self._certify_loaded_skill(skill)
+            for alias in skill.aliases:
+                if alias and alias != skill.name:
+                    self.aliases[alias] = skill.name
 
     def get_skill(self, name: str) -> Optional[Skill]:
-        return self.skills.get(name)
+        skill = self.skills.get(name)
+        if skill is not None and not skill.hidden:
+            return skill
+        canonical = self.aliases.get(name)
+        if canonical:
+            return self.skills.get(canonical)
+        return skill
 
     def list_skills(self, enabled_only: bool = True) -> List[Skill]:
+        visible_skills = [s for s in self.skills.values() if not s.hidden]
         if enabled_only:
-            return [s for s in self.skills.values() if s.enabled]
-        return list(self.skills.values())
+            return [s for s in visible_skills if s.enabled]
+        return visible_skills
 
     def set_enabled(self, name: str, enabled: bool) -> None:
         if name in self.skills:
@@ -249,6 +294,8 @@ class SkillRegistry:
         if skill is not None:
             return skill
         for candidate in self.skills.values():
+            if candidate.hidden:
+                continue
             if (candidate.world or candidate.name) == name:
                 return candidate
         return None

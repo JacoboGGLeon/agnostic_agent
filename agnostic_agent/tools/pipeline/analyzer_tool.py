@@ -26,13 +26,13 @@ def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]
         if any(tok in text for tok in ["resumen", "resume", "sintetiza", "conclusion"]):
             return ["semantic_synthesis"]
         return ["semantic_lookup"]
-    if skill in {"contabilidad_automatica", "contabilidad_instantanea"}:
+    if skill == "contabilidad_automatica":
         if any(tok in text for tok in ["drift", "descuadre", "concili", "cuadr"]):
             return ["reconcile_credit"]
         if any(tok in text for tok in ["regla", "tasa", "saneamiento"]):
             return ["explain_rule"]
         return ["query_financial_data"]
-    if skill in {"chat_db", "nl2sql_sqlite"}:
+    if skill == "chat_db":
         if any(tok in text for tok in ["schema", "tabla", "columna", "estructura"]):
             return ["explain_schema"]
         if len(re.findall(r"\{[^{}]+\}", subquery or "")) > 1:
@@ -268,11 +268,11 @@ def execute_analyzer_tool(
         preferred = None
         user_text_low = (user_prompt or "").lower()
         if any(tok in user_text_low for tok in ["credito", "crédito", "saneamiento", "saldo", "contabilidad", "loc-"]):
-            preferred = "contabilidad_automatica" if skill_registry.get_world("contabilidad_automatica") else "contabilidad_instantanea"
+            preferred = "contabilidad_automatica"
         elif any(tok in user_text_low for tok in ["documento", "fuente", "pdf", "investiga", "semantic", "chunk"]):
             preferred = "semantic_researcher"
         elif any(tok in user_text_low for tok in ["db", "tabla", "sql", "sqlite", "columna", "registro"]):
-            preferred = "chat_db" if skill_registry.get_world("chat_db") else "nl2sql_sqlite"
+            preferred = "chat_db"
         if preferred and skill_registry.get_world(preferred):
             selected_skill_world = preferred
             selected_skills = [skill_registry.get_world(preferred).name]
