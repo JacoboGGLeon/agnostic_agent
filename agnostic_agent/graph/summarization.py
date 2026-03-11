@@ -566,13 +566,20 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
 
         chosen_table = output.get("chosen_table")
         db_label = os.path.basename(str(output.get("db_path") or ""))
-        if loc_id and not where_clauses:
+        execution = output.get("execution") if isinstance(output.get("execution"), dict) else {}
+        generated_sql = str(output.get("generated_sql") or "")
+        sql_supposed = str(output.get("sql_supposed") or "")
+        filter_signals = " ".join([generated_sql, sql_supposed] + [str(x) for x in where_clauses])
+        has_entity_filter = bool(loc_id and loc_id.lower() in filter_signals.lower())
+        suspicious_table = bool(
+            chosen_table and str(chosen_table).lower() not in {"estados_cuenta", "movimientos"}
+        )
+        suspicious_db = "embeddings.db" in db_label.lower()
+        if loc_id and not has_entity_filter and (suspicious_table or suspicious_db):
             return (
                 f"No pude filtrar por {loc_id} en la base `{db_label}`. "
                 "Necesito consultar `session/contabilidad.db` o `session/transacciones.db` para ese credito."
             )
-
-        execution = output.get("execution") if isinstance(output.get("execution"), dict) else {}
         if execution and execution.get("ok"):
             rows = execution.get("rows") if isinstance(execution.get("rows"), list) else []
             row_count = execution.get("row_count")
@@ -585,6 +592,11 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
                     return f"Encontré {row_count} registro(s){table_txt}. Ejemplo: {preview}."
                 table_txt = f" en {chosen_table}" if chosen_table else ""
                 return f"La consulta devolvió {row_count} registro(s){table_txt}."
+        if loc_id and not has_entity_filter:
+            return (
+                f"No pude filtrar por {loc_id} en la base `{db_label}`. "
+                "Necesito consultar `session/contabilidad.db` o `session/transacciones.db` para ese credito."
+            )
         if chosen_table:
             return f"Preparé la consulta sobre {chosen_table}, pero no hay resultados ejecutados para responder con datos."
         return "Pude generar la consulta SQL, pero no hay resultados ejecutados para responder con datos."
