@@ -27,6 +27,22 @@ def _build_user_answer_from_runs(_user_prompt, runs):
     return f"## Resultado\nSe procesaron {len(runs)} ejecuciones."
 
 
+def _build_response_bundle(_user_prompt, runs, _analyzer_subqueries=None):
+    return {
+        "kind": "tool_evidence",
+        "items": [{"label": "Solicitud", "message": f"Se procesaron {len(runs)} ejecuciones."}],
+        "errors": 0,
+        "findings": [],
+    }
+
+
+def _render_response_bundle(bundle, level="user"):
+    msg = bundle["items"][0]["message"]
+    if level == "user":
+        return msg
+    return f"{level}: {msg}"
+
+
 def _is_technical_answer(_text: str) -> bool:
     return False
 
@@ -74,6 +90,8 @@ def test_execute_summarizer_node_preserves_llm_clean_output_when_no_tools():
         json_default=_default_json,
         summarize_tool_runs=_summarize_tool_runs,
         summarize_tool_runs_compact=_summarize_tool_runs_compact,
+        build_response_bundle=_build_response_bundle,
+        render_response_bundle=_render_response_bundle,
         build_user_answer_from_runs=_build_user_answer_from_runs,
         is_technical_answer=_is_technical_answer,
         find_last_assistant_real=_find_last_assistant_real,
@@ -113,6 +131,8 @@ def test_execute_summarizer_node_never_returns_empty_user_out_with_tools():
         json_default=_default_json,
         summarize_tool_runs=_summarize_tool_runs,
         summarize_tool_runs_compact=_summarize_tool_runs_compact,
+        build_response_bundle=_build_response_bundle,
+        render_response_bundle=_render_response_bundle,
         build_user_answer_from_runs=_build_user_answer_from_runs,
         is_technical_answer=_is_technical_answer,
         find_last_assistant_real=_find_last_assistant_real,
@@ -123,3 +143,5 @@ def test_execute_summarizer_node_never_returns_empty_user_out_with_tools():
 
     assert out["user_out"].strip()
     assert out["summary"]["final_answer"].strip()
+    assert "deep" not in out["user_out"].lower()
+    assert "RESPUESTA FINAL" in out["deep_out"]

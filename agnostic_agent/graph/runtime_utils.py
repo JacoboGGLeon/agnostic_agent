@@ -9,8 +9,10 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import AIMessage, AnyMessage
 
 from agnostic_agent.graph.summarization import (
+    build_response_bundle as build_response_bundle_shared,
     build_agnostic_user_answer,
     looks_like_technical_answer,
+    render_response_bundle as render_response_bundle_shared,
     summarize_tool_runs as summarize_tool_runs_shared,
     summarize_tool_runs_compact as summarize_tool_runs_compact_shared,
 )
@@ -222,6 +224,18 @@ def build_user_answer_from_runs(
     analyzer_subqueries: Optional[List[str]] = None,
 ) -> str:
     return build_agnostic_user_answer(user_prompt, runs, analyzer_subqueries)
+
+
+def build_response_bundle(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return build_response_bundle_shared(user_prompt, runs, analyzer_subqueries)
+
+
+def render_response_bundle(bundle: Dict[str, Any], level: str = "user") -> str:
+    return render_response_bundle_shared(bundle, level)
 
 
 def is_technical_answer(text: str) -> bool:

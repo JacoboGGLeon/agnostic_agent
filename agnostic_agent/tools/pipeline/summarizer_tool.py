@@ -19,6 +19,8 @@ def execute_summarizer_tool(
     json_default: Callable[[Any], Any],
     summarize_tool_runs: Callable[[str, List[Dict[str, Any]]], str],
     summarize_tool_runs_compact: Callable[[List[Dict[str, Any]]], str],
+    build_response_bundle: Callable[[str, List[Dict[str, Any]], List[str] | None], Dict[str, Any]],
+    render_response_bundle: Callable[[Dict[str, Any], str], str],
     build_user_answer_from_runs: Callable[[str, List[Dict[str, Any]], List[str] | None], str],
     is_technical_answer: Callable[[str], bool],
     find_last_assistant_real: Callable[[List[Any]], Any],
@@ -243,7 +245,7 @@ def execute_summarizer_tool(
         out = re.sub(r",\s*\]", "]", out)
         return out.strip()
 
-    def _build_pipeline_markdown(title: str, final_heading: str) -> str:
+    def _build_pipeline_markdown(title: str, final_heading: str, final_body: str) -> str:
         def _fenced_block(text: str, lang: str = "text") -> str:
             body = text if isinstance(text, str) else _pretty_json(text)
             return f"````{lang}\n{body}\n````"
@@ -262,11 +264,11 @@ def execute_summarizer_tool(
                 "**SUMMARIZER (basado en herramientas)**",
                 _fenced_block(summarizer_text, "text"),
                 final_heading,
-                user_answer,
+                final_body,
             ]
         )
 
-    def _build_deep_markdown() -> str:
+    def _build_deep_markdown(final_body: str) -> str:
         def _section(title: str, body: str) -> str:
             try:
                 body_text = (
@@ -288,7 +290,7 @@ def execute_summarizer_tool(
                 _section("EXECUTOR", executor_text),
                 _section("CATCHER", catcher_text),
                 _section("SUMMARIZER", summarizer_text),
-                _section("RESPUESTA FINAL", user_answer),
+                _section("RESPUESTA FINAL", final_body),
             ]
         )
 
@@ -375,6 +377,7 @@ def execute_summarizer_tool(
         answer_markdown = _build_pipeline_markdown(
             "Resumen del pipeline",
             "### RESPUESTA FINAL (modo usuario)",
+            user_answer,
         )
         final_ai = AIMessage(
             content=user_answer,
@@ -385,7 +388,7 @@ def execute_summarizer_tool(
             "summary": summary_dict,
             "pipeline_summary": summary_dict,
             "dev_out": answer_markdown,
-            "deep_out": _build_deep_markdown(),
+            "deep_out": _build_deep_markdown(user_answer),
             "user_out": user_answer,
         }
 
@@ -456,70 +459,27 @@ def execute_summarizer_tool(
             "final_answer": user_answer,
         }
     else:
-        tools_summary_text = summarize_tool_runs(user_prompt, runs)
         analyzer_subqueries = analyzer.get("subqueries") if isinstance(analyzer, dict) else None
-        try:
-            deterministic_user_answer = build_user_answer_from_runs(
-                user_prompt,
-                runs,
-                analyzer_subqueries if isinstance(analyzer_subqueries, list) else None,
-            )
-        except TypeError:
-            deterministic_user_answer = build_user_answer_from_runs(user_prompt, runs)  # type: ignore[misc]
-        user_answer = deterministic_user_answer
-
-        hybrid_sys = (
-            "You are an assistant that must answer only from verified tool evidence.\n"
-            "Write a concise, user-facing answer in the same language as the user.\n"
-            "Do not include internal traces, tool call IDs, steps, args, or debug logs.\n"
-            "If evidence is insufficient, state that clearly without inventing facts."
+        response_bundle = build_response_bundle(
+            user_prompt,
+            runs,
+            analyzer_subqueries if isinstance(analyzer_subqueries, list) else None,
         )
-        if cfg and not cfg.enable_thinking:
-            hybrid_sys += (
-                "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the final natural language answer."
-            )
-        hybrid_user_msg = (
-            f"User request:\n{user_prompt}\n\n"
-            f"Verified tool evidence:\n{tools_summary_text}\n\n"
-            f"Deterministic baseline answer:\n{deterministic_user_answer}\n\n"
-            "Improve readability and clarity for the final user response."
-        )
-
-        try:
-            hrm = planner_llm.invoke(
-                [
-                    SystemMessage(content=hybrid_sys),
-                    HumanMessage(content=hybrid_user_msg),
-                ]
-            )
-            llm_answer = strip_think(coerce_content_str(getattr(hrm, "content", ""))).strip()
-
-            if llm_answer and not is_technical_answer(llm_answer):
-                user_answer = llm_answer
-
-            reasoning_from_final = ""
-            if hasattr(hrm, "additional_kwargs") and isinstance(hrm.additional_kwargs, dict):
-                reasoning_from_final = (
-                    hrm.additional_kwargs.get("reasoning_content")
-                    or hrm.additional_kwargs.get("reasoning")
-                    or hrm.additional_kwargs.get("thoughts")
-                    or ""
-                )
-            if isinstance(reasoning_from_final, str) and reasoning_from_final.strip():
-                thinking_msg = AIMessage(
-                    content="",
-                    additional_kwargs={
-                        "reasoning_content": reasoning_from_final.strip(),
-                        "final_answer_thinking": True,
-                    },
-                )
-                state.setdefault("messages", []).append(thinking_msg)
-        except Exception:
-            user_answer = deterministic_user_answer
-
+        user_answer = render_response_bundle(response_bundle, "user")
+        dev_response = render_response_bundle(response_bundle, "dev")
+        deep_response = render_response_bundle(response_bundle, "deep")
         user_answer = strip_think(coerce_content_str(user_answer)).strip()
+        if not user_answer:
+            try:
+                user_answer = build_user_answer_from_runs(
+                    user_prompt,
+                    runs,
+                    analyzer_subqueries if isinstance(analyzer_subqueries, list) else None,
+                )
+            except TypeError:
+                user_answer = build_user_answer_from_runs(user_prompt, runs)  # type: ignore[misc]
         if not user_answer or is_technical_answer(user_answer):
-            user_answer = deterministic_user_answer
+            user_answer = render_response_bundle(response_bundle, "user")
 
         analyzer_text = _build_analyzer_text(analyzer)
         planner_text = _build_planner_text()
@@ -551,6 +511,7 @@ def execute_summarizer_tool(
     answer_markdown = _build_pipeline_markdown(
         "Resumen del pipeline",
         "**RESPUESTA FINAL (modo usuario)**",
+        dev_response if runs else user_answer,
     )
     user_out = strip_think(user_answer)
     final_ai = AIMessage(
@@ -562,7 +523,7 @@ def execute_summarizer_tool(
         "summary": summary_dict,
         "pipeline_summary": summary_dict,
         "dev_out": answer_markdown,
-        "deep_out": _build_deep_markdown(),
+        "deep_out": _build_deep_markdown(deep_response if runs else user_answer),
         "user_out": user_out,
     }
 

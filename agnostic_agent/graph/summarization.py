@@ -719,19 +719,30 @@ def _summarize_single_run_natural(run: Dict[str, Any]) -> str:
     return f"Resultado: {status}."
 
 
-def build_agnostic_user_answer(
+def _build_response_items(
     user_prompt: str,
     runs: List[Dict[str, Any]],
     analyzer_subqueries: Optional[List[str]] = None,
-) -> str:
-    if not runs:
-        return "No se obtuvo evidencia de herramientas para resolver la solicitud."
-
+) -> Dict[str, Any]:
     finance_answer = _finance_reconciliation_answer(user_prompt, runs, analyzer_subqueries)
     if finance_answer:
-        return finance_answer
+        return {
+            "kind": "finance_reconciliation",
+            "user_prompt": user_prompt,
+            "items": [
+                {
+                    "label": "Conciliacion",
+                    "message": block.strip(),
+                    "entity": "",
+                    "source": "finance",
+                }
+                for block in finance_answer.split("\n\n")
+                if block.strip()
+            ],
+            "errors": 0,
+            "findings": [],
+        }
 
-    total = len(runs)
     errors = 0
     findings: List[str] = []
     by_entity: Dict[str, List[Dict[str, Any]]] = {}
@@ -752,18 +763,9 @@ def build_agnostic_user_answer(
         else:
             no_entity_runs.append(run)
 
-    lines: List[str] = []
-    lines.append("Ya lo revise.")
     subqueries = _extract_subqueries_from_prompt(user_prompt)
-
-    if len(subqueries) > 1:
-        lines.append("Te respondo punto por punto:")
-    else:
-        lines.append("Respuesta:")
-
     known_entities = list(by_entity.keys())
-    # Try to answer subquery by subquery using entity-linked runs first.
-    emitted = 0
+    items: List[Dict[str, Any]] = []
     for idx, sq in enumerate(subqueries, start=1):
         sq_text = sq.get("text", "")
         sq_label = sq.get("label", f"Subconsulta {idx}")
@@ -804,19 +806,132 @@ def build_agnostic_user_answer(
             )
 
         label_out = entity if entity else sq_label
-        lines.append(f"{idx}. {label_out}: {message}")
-        emitted += 1
+        items.append(
+            {
+                "label": label_out,
+                "message": message,
+                "entity": entity,
+                "source": "subquery",
+            }
+        )
 
-    # If we still have unmatched no-entity runs, append as additional evidence.
-    if emitted == 0 and no_entity_runs:
+    if not items and no_entity_runs:
         for idx, run in enumerate(no_entity_runs, start=1):
-            lines.append(f"{idx}. {_summarize_single_run_natural(run)}")
+            items.append(
+                {
+                    "label": f"Resultado {idx}",
+                    "message": _summarize_single_run_natural(run),
+                    "entity": "",
+                    "source": "fallback",
+                }
+            )
 
+    return {
+        "kind": "tool_evidence",
+        "user_prompt": user_prompt,
+        "items": items,
+        "errors": errors,
+        "findings": findings,
+        "subqueries": subqueries,
+    }
+
+
+def build_response_bundle(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    if not runs:
+        return {
+            "kind": "empty",
+            "user_prompt": user_prompt,
+            "items": [
+                {
+                    "label": "Solicitud",
+                    "message": "No se obtuvo evidencia de herramientas para resolver la solicitud.",
+                    "entity": "",
+                    "source": "empty",
+                }
+            ],
+            "errors": 0,
+            "findings": [],
+        }
+    return _build_response_items(user_prompt, runs, analyzer_subqueries)
+
+
+def render_response_bundle(bundle: Dict[str, Any], level: str = "user") -> str:
+    items = bundle.get("items") if isinstance(bundle.get("items"), list) else []
+    errors = int(bundle.get("errors") or 0)
+    findings = bundle.get("findings") if isinstance(bundle.get("findings"), list) else []
+    kind = str(bundle.get("kind") or "tool_evidence")
+
+    if level == "user":
+        lines: List[str] = []
+        for idx, item in enumerate(items, start=1):
+            message = str(item.get("message") or "").strip()
+            label = str(item.get("label") or "").strip()
+            if not message:
+                continue
+            if kind == "finance_reconciliation":
+                lines.append(message)
+                continue
+            if len(items) == 1 and label.lower() in {"solicitud", "resultado 1"}:
+                lines.append(message)
+            else:
+                lines.append(f"{idx}. {label}: {message}")
+        if errors > 0:
+            lines.append(f"Detecte {errors} ejecuciones con error en la evidencia disponible.")
+        return "\n\n".join(line for line in lines if line).strip()
+
+    if level == "dev":
+        lines = ["Respuesta derivada de evidencia verificada."]
+        if items:
+            lines.append("")
+            lines.append("Resultado sintetizado:")
+            for idx, item in enumerate(items, start=1):
+                label = str(item.get("label") or f"Resultado {idx}").strip()
+                message = str(item.get("message") or "").strip()
+                if not message:
+                    continue
+                lines.append(f"{idx}. {label}: {message}")
+        if findings:
+            lines.append("")
+            lines.append("Hallazgos operativos:")
+            for idx, finding in enumerate(findings, start=1):
+                lines.append(f"{idx}. {finding}")
+        if errors == 0:
+            lines.append("")
+            lines.append("Estado de ejecucion: sin errores detectados.")
+        else:
+            lines.append("")
+            lines.append(f"Estado de ejecucion: {errors} error(es) detectado(s).")
+        return "\n".join(lines).strip()
+
+    lines = ["Representacion profunda basada en evidencia verificada."]
     lines.append("")
-    if errors == 0:
-        lines.append("No detecte errores de ejecucion en la evidencia disponible.")
-    else:
-        lines.append(f"Detecte {errors} ejecuciones con error; conviene revisar el detalle tecnico en Deep/Dev.")
-    lines.append("Si quieres el detalle tecnico completo, lo tienes en Deep/Dev.")
-
+    lines.append(f"Tipo de respuesta: {kind}")
+    lines.append(f"Items sintetizados: {len(items)}")
+    lines.append(f"Errores detectados: {errors}")
+    if items:
+        lines.append("")
+        lines.append("Detalle sintetizado:")
+        for idx, item in enumerate(items, start=1):
+            lines.append(
+                f"{idx}. label={item.get('label')} | entity={item.get('entity') or '-'} | "
+                f"source={item.get('source') or '-'} | message={item.get('message')}"
+            )
+    if findings:
+        lines.append("")
+        lines.append("Hallazgos base:")
+        for idx, finding in enumerate(findings, start=1):
+            lines.append(f"{idx}. {finding}")
     return "\n".join(lines).strip()
+
+
+def build_agnostic_user_answer(
+    user_prompt: str,
+    runs: List[Dict[str, Any]],
+    analyzer_subqueries: Optional[List[str]] = None,
+) -> str:
+    bundle = build_response_bundle(user_prompt, runs, analyzer_subqueries)
+    return render_response_bundle(bundle, level="user")
