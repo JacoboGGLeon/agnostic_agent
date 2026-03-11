@@ -245,6 +245,62 @@ def execute_summarizer_tool(
         out = re.sub(r",\s*\]", "]", out)
         return out.strip()
 
+    def _looks_like_internal_leak(text: str) -> bool:
+        low = str(text or "").strip().lower()
+        if not low:
+            return False
+        leak_markers = [
+            "deep/dev",
+            "tool_call_id",
+            "pipeline",
+            "planner",
+            "dag",
+            "entity_id=",
+            "resultado=dict",
+            "se ejecutaron",
+            "coverage",
+        ]
+        return any(marker in low for marker in leak_markers)
+
+    def _render_grounded_user_answer(
+        prompt_text: str,
+        bundle: Dict[str, Any],
+        deterministic_answer: str,
+    ) -> str:
+        llm = getattr(planner_llm, "bound", planner_llm)
+        system_text = (
+            "Eres el renderer final de respuestas para usuario final.\n"
+            "Debes responder solo con los hechos presentes en el response_bundle.\n"
+            "Tu trabajo es convertir evidencia verificada en una respuesta natural, clara y util.\n"
+            "Reglas:\n"
+            "- No inventes informacion.\n"
+            "- No menciones planner, DAG, tools, pipeline, Deep, Dev, coverage ni ids internos.\n"
+            "- No uses labels internos como entity_id= salvo que sea estrictamente necesario; prefiere lenguaje natural.\n"
+            "- Si hay una lista corta de resultados, presentala claramente.\n"
+            "- Si la evidencia es parcial o insuficiente, dilo de forma directa y natural.\n"
+            "- Responde en el mismo idioma del usuario.\n"
+            "- Devuelve solo la respuesta final para el usuario."
+        )
+        human_text = (
+            f"Solicitud del usuario:\n{prompt_text}\n\n"
+            f"Response bundle factual:\n{_pretty_json(bundle)}\n\n"
+            f"Baseline determinista:\n{deterministic_answer}\n\n"
+            "Redacta una mejor respuesta final para usuario."
+        )
+        try:
+            reply = llm.invoke(
+                [
+                    SystemMessage(content=system_text),
+                    HumanMessage(content=human_text),
+                ]
+            )
+            content = strip_think(coerce_content_str(getattr(reply, "content", ""))).strip()
+        except Exception:
+            return deterministic_answer
+        if not content or is_technical_answer(content) or _looks_like_internal_leak(content):
+            return deterministic_answer
+        return content
+
     def _build_pipeline_markdown(title: str, final_heading: str, final_body: str) -> str:
         def _fenced_block(text: str, lang: str = "text") -> str:
             body = text if isinstance(text, str) else _pretty_json(text)
@@ -465,9 +521,14 @@ def execute_summarizer_tool(
             runs,
             analyzer_subqueries if isinstance(analyzer_subqueries, list) else None,
         )
-        user_answer = render_response_bundle(response_bundle, "user")
+        deterministic_user_answer = render_response_bundle(response_bundle, "user")
         dev_response = render_response_bundle(response_bundle, "dev")
         deep_response = render_response_bundle(response_bundle, "deep")
+        user_answer = _render_grounded_user_answer(
+            user_prompt,
+            response_bundle,
+            deterministic_user_answer,
+        )
         user_answer = strip_think(coerce_content_str(user_answer)).strip()
         if not user_answer:
             try:
@@ -479,7 +540,7 @@ def execute_summarizer_tool(
             except TypeError:
                 user_answer = build_user_answer_from_runs(user_prompt, runs)  # type: ignore[misc]
         if not user_answer or is_technical_answer(user_answer):
-            user_answer = render_response_bundle(response_bundle, "user")
+            user_answer = deterministic_user_answer
 
         analyzer_text = _build_analyzer_text(analyzer)
         planner_text = _build_planner_text()
