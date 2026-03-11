@@ -1,0 +1,73 @@
+{
+  "version": "2.0",
+  "engine": "sqlite_multi_world",
+  "source_db": "finance_world",
+  "allowed_schemas": ["contabilidad", "transacciones"],
+  "defaults": {
+    "row_limit": 50,
+    "currency": "moneda local",
+    "round_digits": 2
+  },
+  "business_glossary": {
+    "credito_id": "Llave de negocio compartida entre contabilidad y transacciones para conciliar y explorar un credito.",
+    "estatus": "Estado del credito usado para riesgo, reserva y segmentacion.",
+    "saldo_total": "Saldo total contable al corte.",
+    "saneamiento_calculado": "Reserva o provision del credito.",
+    "tipo": "Tipo de movimiento financiero como DESEMBOLSO, PAGO, PENALIZACION o DESCUENTO.",
+    "monto": "Importe monetario del movimiento.",
+    "fecha": "Fecha operativa del evento transaccional."
+  },
+  "schemas": {
+    "contabilidad": {
+      "tables": {
+        "estados_cuenta": {
+          "description": "Snapshot contable por credito con estatus, saldo y saneamiento.",
+          "primary_key": ["credito_id"],
+          "columns": [
+            {"name": "credito_id", "type": "TEXT", "description": "Llave compartida del credito."},
+            {"name": "cliente_id", "type": "TEXT", "description": "Cliente asociado."},
+            {"name": "estatus", "type": "TEXT", "description": "Estado crediticio."},
+            {"name": "saldo_total", "type": "REAL", "description": "Saldo contable total."},
+            {"name": "capital_vigente", "type": "REAL", "description": "Capital vigente."},
+            {"name": "interes_vigente", "type": "REAL", "description": "Interes vigente."},
+            {"name": "saneamiento_calculado", "type": "REAL", "description": "Reserva calculada."}
+          ]
+        }
+      },
+      "views": {}
+    },
+    "transacciones": {
+      "tables": {
+        "movimientos": {
+          "description": "Flujos transaccionales por credito con monto, tipo y fecha.",
+          "primary_key": ["id"],
+          "columns": [
+            {"name": "id", "type": "TEXT", "description": "Identificador unico del movimiento."},
+            {"name": "credito_id", "type": "TEXT", "description": "Llave compartida del credito."},
+            {"name": "tipo", "type": "TEXT", "description": "Tipo de flujo."},
+            {"name": "monto", "type": "REAL", "description": "Monto del movimiento."},
+            {"name": "fecha", "type": "TEXT", "description": "Fecha del movimiento."},
+            {"name": "descripcion", "type": "TEXT", "description": "Narrativa del movimiento."}
+          ]
+        }
+      },
+      "views": {}
+    }
+  },
+  "relationships": [
+    {
+      "left_schema": "contabilidad",
+      "left_table": "estados_cuenta",
+      "left_column": "credito_id",
+      "right_schema": "transacciones",
+      "right_table": "movimientos",
+      "right_column": "credito_id",
+      "cardinality": "1:N",
+      "description": "Relacion de negocio entre saldo contable y movimientos operativos por credito."
+    }
+  ],
+  "table_summaries": {
+    "contabilidad.estados_cuenta": "Estado contable por credito.",
+    "transacciones.movimientos": "Historial de eventos financieros por credito."
+  }
+}

@@ -303,6 +303,52 @@ def test_execute_planner_node_contabilidad_is_deterministic_1_to_1():
     assert out["planner_calls_by_subquery"][0]["planned_calls"] == 2
 
 
+def test_execute_planner_node_contabilidad_query_financial_data_uses_nl2sql():
+    llm = _PlannerLLM([])
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {
+            "subqueries": ["dame los movimientos del credito LOC-0004"],
+            "subquery_intents": [["query_financial_data"]],
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("nl2sql")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry(
+            [
+                _Skill(
+                    "contabilidad_automatica",
+                    tools=["nl2sql"],
+                    world="contabilidad_automatica",
+                    intents=["query_financial_data"],
+                    planner_policy={"allowed_dag_patterns": ["deterministic_reconcile"]},
+                )
+            ]
+        ),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["contabilidad_automatica"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 1
+    assert ai_msg.tool_calls[0]["name"] == "nl2sql"
+    assert ai_msg.tool_calls[0]["args"]["db_path"] == "transacciones.db"
+    assert ai_msg.tool_calls[0]["args"]["entity_id"] == "LOC-0004"
+
+
 def test_execute_planner_node_chat_db_is_deterministic_by_intent():
     llm = _PlannerLLM([])  # Should not be used in deterministic branch.
     state = {

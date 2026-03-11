@@ -82,6 +82,28 @@ def _extract_credito_id(subquery_text: str) -> str:
     return match.group(0).upper() if match else ""
 
 
+def _extract_estatus_text(subquery_text: str) -> str:
+    text = _sanitize_text(subquery_text)
+    match = re.search(r"estatus[:\s]+(.+)$", text, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _guess_finance_db_hint(subquery_text: str) -> str:
+    text = _sanitize_text(subquery_text).lower()
+    if any(tok in text for tok in ["transaccion", "transacción", "movimiento", "pago", "desembolso", "penalizacion", "descuento", "fecha"]):
+        return "transacciones.db"
+    return "contabilidad.db"
+
+
+def _infer_finance_intents(subquery_text: str) -> List[str]:
+    text = _sanitize_text(subquery_text).lower()
+    if any(tok in text for tok in ["drift", "descuadre", "concili", "cuadr"]):
+        return ["reconcile_credit"]
+    if any(tok in text for tok in ["regla", "tasa", "saneamiento"]):
+        return ["explain_rule"]
+    return ["query_financial_data"]
+
+
 def _align_call_ids_to_subquery(
     *,
     subquery_text: str,
@@ -342,12 +364,15 @@ def _deterministic_finance_calls(
     subquery_idx: int,
     subquery_text: str,
     world_contract: Dict[str, Any],
+    subquery_intents: List[str],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
     credito_id = _extract_credito_id(subquery_text)
+    estatus = _extract_estatus_text(subquery_text)
+    intent = subquery_intents[0] if subquery_intents else "query_financial_data"
     calls: List[Dict[str, Any]] = []
     desc_lines: List[str] = []
     dag_nodes: List[Dict[str, Any]] = []
-    if credito_id:
+    if intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} and credito_id:
         planner_policy = world_contract.get("planner") if isinstance(world_contract.get("planner"), dict) else {}
         intent_tools = planner_policy.get("intent_to_tools") if isinstance(planner_policy.get("intent_to_tools"), dict) else {}
         reconcile_tools = intent_tools.get("reconcile_credit") if isinstance(intent_tools.get("reconcile_credit"), list) else []
@@ -386,12 +411,42 @@ def _deterministic_finance_calls(
             )
             desc_lines.append(f"step 1: tool=query_transactions_db, credito_id={credito_id}")
             desc_lines.append(f"step 2: tool=query_accounting_db, credito_id={credito_id}")
+    elif intent == "explain_rule" and estatus:
+        calls.append(
+            {
+                "name": "get_saneamiento_rate",
+                "args": {"estatus": estatus},
+                "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                "type": "tool_call",
+            }
+        )
+        desc_lines.append(f"step 1: tool=get_saneamiento_rate, estatus={estatus}")
+    elif intent == "query_financial_data":
+        db_hint = _guess_finance_db_hint(subquery_text)
+        args: Dict[str, Any] = {
+            "user_request": _sanitize_text(subquery_text),
+            "db_path": db_hint,
+            "execute": True,
+        }
+        if credito_id:
+            args["entity_id"] = credito_id
+        calls.append(
+            {
+                "name": "nl2sql",
+                "args": args,
+                "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                "type": "tool_call",
+            }
+        )
+        desc_lines.append(f"step 1: tool=nl2sql, db_path={db_hint}")
+        if credito_id:
+            desc_lines.append(f"entity_id={credito_id}")
     else:
-        desc_lines.append("No credito_id found in subquery; planner skipped deterministic finance calls.")
+        desc_lines.append("Planner skipped deterministic finance calls for this subquery.")
     dag_nodes = _build_dag_nodes_for_calls(
         subquery_idx=subquery_idx,
         subquery_text=subquery_text,
-        subquery_intents=["reconcile_credit"],
+        subquery_intents=subquery_intents or [intent],
         subquery_calls=calls,
     )
     return calls, dag_nodes, desc_lines
@@ -571,10 +626,16 @@ def execute_planner_tool(
         planner_calls_by_subquery: List[Dict[str, Any]] = []
 
         for idx, subq in enumerate(subqs, start=1):
+            current_intents = (
+                subquery_intents[idx - 1]
+                if isinstance(subquery_intents, list) and idx - 1 < len(subquery_intents) and isinstance(subquery_intents[idx - 1], list)
+                else _infer_finance_intents(str(subq))
+            )
             calls, dag_nodes, desc_lines = _deterministic_finance_calls(
                 subquery_idx=idx,
                 subquery_text=str(subq),
                 world_contract=world_contract,
+                subquery_intents=current_intents,
             )
             deterministic_calls.extend(calls)
             subq_call_count = len(calls)
@@ -585,7 +646,7 @@ def execute_planner_tool(
                     "subquery": _sanitize_text(subq),
                     "description": _sanitize_text("\n".join(desc_lines)),
                     "subquery_id": f"q{idx}",
-                    "intent": "reconcile_credit",
+                    "intent": current_intents[0] if current_intents else "query_financial_data",
                     "dag": dag_nodes,
                 }
             )

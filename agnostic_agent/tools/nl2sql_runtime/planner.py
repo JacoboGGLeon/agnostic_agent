@@ -42,9 +42,25 @@ class RouterPlanner:
         low = query.lower()
         k_eff = max(self.k_min, min(int(k or self.k_min), self.k_max))
         intents: List[str] = ["lookup_tables", "lookup_columns"]
-        if any(tok in low for tok in ["join", "combina", "relaciona", "relacion", "explica decantado"]):
+        join_triggers = [
+            "join",
+            "combina",
+            "combinar",
+            "relaciona",
+            "relacion",
+            "cruza",
+            "contra",
+            "versus",
+            " vs ",
+            "junto con",
+        ]
+        if any(tok in low for tok in join_triggers):
             intents.append("join")
-        intents.append("operation")
+        operation_triggers = ["count", "cuantos", "cuántos", "sum", "suma", "avg", "promedio", "group by", "agrupa", "por "]
+        if any(tok in low for tok in operation_triggers):
+            intents.append("operation")
+        elif "operation" not in intents:
+            intents.append("operation")
         nodes: List[StepNode] = []
         prev = ""
         for idx, intent in enumerate(intents, start=1):

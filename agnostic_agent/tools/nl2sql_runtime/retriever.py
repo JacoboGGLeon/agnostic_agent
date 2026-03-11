@@ -14,12 +14,17 @@ def _tokenize(text: str) -> List[str]:
 
 def _score(query: str, item: Dict[str, Any]) -> float:
     q = set(_tokenize(query))
+    rich = item.get("rich_context") if isinstance(item.get("rich_context"), dict) else {}
     ctx = " ".join(
         [
             str(item.get("table", "")),
             str(item.get("column", "")),
             str(item.get("description", "")),
             str(item.get("planner_context", "")),
+            str(rich.get("left_table", "")),
+            str(rich.get("left_column", "")),
+            str(rich.get("right_table", "")),
+            str(rich.get("right_column", "")),
             " ".join(f"{k} {v}" for k, v in (item.get("business_glossary") or {}).items()),
         ]
     )
@@ -27,7 +32,15 @@ def _score(query: str, item: Dict[str, Any]) -> float:
     overlap = len(q.intersection(tokens))
     if not q:
         return 0.0
-    return overlap / math.sqrt(max(1, len(q)) * max(1, len(tokens)))
+    score = overlap / math.sqrt(max(1, len(q)) * max(1, len(tokens)))
+    if item.get("type") == "join" and rich:
+        left_tokens = set(_tokenize(f"{rich.get('left_table', '')} {rich.get('left_column', '')}"))
+        right_tokens = set(_tokenize(f"{rich.get('right_table', '')} {rich.get('right_column', '')}"))
+        if q.intersection(left_tokens) and q.intersection(right_tokens):
+            score += 0.25
+        if any(tok in q for tok in {"join", "combina", "combinar", "relaciona", "cruza", "vs", "contra"}):
+            score += 0.15
+    return score
 
 
 @dataclass
@@ -61,6 +74,8 @@ class SemanticRetriever:
             return {"columns": columns, "context": columns}
         if intent == "join":
             joins = self._best("join", retrieval_query, k)
-            return {"joins": joins, "context": joins}
+            tables = self._best("table", retrieval_query, k)
+            return {"joins": joins, "tables": tables, "context": joins}
         columns = self._best("column", retrieval_query, k)
-        return {"columns": columns, "context": columns}
+        tables = self._best("table", retrieval_query, 1)
+        return {"columns": columns, "tables": tables, "context": columns}

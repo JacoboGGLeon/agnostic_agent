@@ -34,6 +34,7 @@ knowledge:
     - ../contabilidad_instantanea/knowledge/dictionary.md
     - ../chat_db/knowledge/catalog_contabilidad.json
     - ../chat_db/knowledge/catalog_transacciones.json
+    - ../chat_db/knowledge/catalog_finance_world.json
 composition:
   callable_as_skill: true
   can_call_skills: false
@@ -70,6 +71,7 @@ planner:
       - ../contabilidad_instantanea/knowledge/transacciones.db
       - ../chat_db/knowledge/catalog_contabilidad.json
       - ../chat_db/knowledge/catalog_transacciones.json
+      - ../chat_db/knowledge/catalog_finance_world.json
     explain_rule:
       - ../contabilidad_instantanea/knowledge/rules.md
       - ../contabilidad_instantanea/knowledge/dictionary.md

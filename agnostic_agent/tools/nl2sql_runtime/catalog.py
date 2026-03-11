@@ -54,13 +54,13 @@ def catalog_items(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
         items.append(
             {
                 "type": "join",
-                "schema": "main",
+                "schema": str(rel.get("left_schema") or "main"),
                 "table": str(rel.get("left_table", "")),
                 "column": str(rel.get("left_column", "")),
                 "description": str(rel.get("description", "")),
                 "planner_context": (
-                    f"{rel.get('left_table', '')}.{rel.get('left_column', '')} "
-                    f"{rel.get('right_table', '')}.{rel.get('right_column', '')} "
+                    f"{rel.get('left_schema', 'main')}.{rel.get('left_table', '')}.{rel.get('left_column', '')} "
+                    f"{rel.get('right_schema', 'main')}.{rel.get('right_table', '')}.{rel.get('right_column', '')} "
                     f"{rel.get('description', '')}"
                 ),
                 "rich_context": rel,
