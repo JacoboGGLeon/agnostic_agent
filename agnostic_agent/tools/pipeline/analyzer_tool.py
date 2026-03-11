@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,11 @@ def _guess_response_mode(user_prompt: str, subqueries: List[str]) -> str:
     if any(tok in text for tok in ["json", "tecnico", "técnico", "schema", "dag", "sql"]):
         return "technical"
     return "user"
+
+
+def _contains_any(text: str, tokens: List[str]) -> bool:
+    haystack = (text or "").lower()
+    return any(token in haystack for token in tokens)
 
 
 def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]:
@@ -45,6 +50,121 @@ def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]
     return ["general_query"]
 
 
+def _infer_finance_required_sources(subquery: str, intents: List[str]) -> List[str]:
+    text = (subquery or "").lower()
+    if any(intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} for intent in intents):
+        return ["contabilidad.db", "transacciones.db"]
+    explicit_db_matches = re.findall(r"\b([A-Za-z0-9_.-]+\.db)\b", subquery or "", flags=re.IGNORECASE)
+    if explicit_db_matches:
+        return [db.lower() for db in explicit_db_matches]
+    if _contains_any(
+        text,
+        [
+            "bases de datos",
+            "base de datos",
+            "tus bases",
+            "todas las fuentes",
+            "todas las bases",
+            "de tus datos",
+            "informacion completa",
+            "información completa",
+            "perfil completo",
+            "overview completo",
+        ],
+    ):
+        return ["contabilidad.db", "transacciones.db"]
+    if _contains_any(text, ["movimiento", "movimientos", "transaccion", "transacciones", "desembolso", "pago"]):
+        return ["transacciones.db"]
+    return ["contabilidad.db"]
+
+
+def _derive_source_scope(required_sources_by_subquery: List[List[str]]) -> str:
+    flattened = {
+        source.lower()
+        for group in required_sources_by_subquery
+        for source in group
+        if isinstance(source, str) and source.strip()
+    }
+    return "multi_source" if len(flattened) > 1 else "single_source"
+
+
+def _derive_composition_mode(
+    *,
+    selected_skill_world: str,
+    subquery_intents: List[List[str]],
+    required_sources_by_subquery: List[List[str]],
+) -> str:
+    flat_intents = {intent for intents in subquery_intents for intent in intents}
+    flat_sources = {
+        source.lower()
+        for group in required_sources_by_subquery
+        for source in group
+        if isinstance(source, str)
+    }
+    if any(intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} for intent in flat_intents):
+        return "reconcile"
+    if selected_skill_world == "contabilidad_automatica" and len(flat_sources) > 1:
+        return "merge"
+    if any(intent in {"compare_entities"} for intent in flat_intents):
+        return "compare"
+    return "lookup"
+
+
+def _derive_coverage_expectation(
+    *,
+    response_mode: str,
+    source_scope: str,
+    composition_mode: str,
+    subquery_count: int,
+) -> str:
+    if response_mode == "audit":
+        return "exhaustive"
+    if composition_mode in {"reconcile", "merge"} or source_scope == "multi_source" or subquery_count > 1:
+        return "composite"
+    return "summary"
+
+
+def _expand_finance_propositions(
+    *,
+    user_prompt: str,
+    selected_skill_world: str,
+    subqueries: List[str],
+    subquery_intents: List[List[str]],
+    entities_by_subquery: List[Dict[str, Any]],
+    required_sources_by_subquery: List[List[str]],
+) -> Tuple[List[str], List[List[str]], List[Dict[str, Any]], List[List[str]], str]:
+    if selected_skill_world != "contabilidad_automatica":
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+    if len(subqueries) != 1:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+
+    intents = subquery_intents[0] if subquery_intents else []
+    entities = entities_by_subquery[0] if entities_by_subquery else {}
+    required_sources = required_sources_by_subquery[0] if required_sources_by_subquery else []
+    credito_id = str(entities.get("credito_id") or "").strip()
+
+    if not credito_id or intents != ["query_financial_data"]:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+    if sorted({source.lower() for source in required_sources}) != ["contabilidad.db", "transacciones.db"]:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+
+    expanded_subqueries = [
+        f"snapshot contable del crédito {credito_id} en contabilidad.db",
+        f"movimientos del crédito {credito_id} en transacciones.db",
+    ]
+    expanded_intents = [["query_financial_data"], ["query_financial_data"]]
+    expanded_entities = [
+        {"credito_id": credito_id, "db_files": ["contabilidad.db"]},
+        {"credito_id": credito_id, "db_files": ["transacciones.db"]},
+    ]
+    expanded_required_sources = [["contabilidad.db"], ["transacciones.db"]]
+
+    if _contains_any(user_prompt, ["pago total", "pagado", "cuanto se ha pagado", "cuánto se ha pagado"]):
+        expanded_subqueries[1] = f"pagos del crédito {credito_id} en transacciones.db"
+
+    return expanded_subqueries, expanded_intents, expanded_entities, expanded_required_sources, "finance_cross_source_split"
+
+
 def _extract_entities(subquery: str) -> Dict[str, Any]:
     text = subquery or ""
     entities: Dict[str, Any] = {}
@@ -67,13 +187,21 @@ def _extract_entities(subquery: str) -> Dict[str, Any]:
     return entities
 
 
-def _derive_constraints(subquery: str, entities: Dict[str, Any], intents: List[str]) -> Dict[str, Any]:
+def _derive_constraints(
+    subquery: str,
+    entities: Dict[str, Any],
+    intents: List[str],
+    required_sources: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     text = (subquery or "").lower()
     constraints: Dict[str, Any] = {}
     if "batch_query" in intents:
         constraints["batch"] = True
     if "credito_id" in entities:
         constraints["entity_scope"] = "single_credit"
+    if required_sources:
+        constraints["required_sources"] = list(required_sources)
+        constraints["source_scope"] = "multi_source" if len(set(required_sources)) > 1 else "single_source"
     if any(tok in text for tok in ["solo ", "únicamente", "unicamente", "only "]):
         constraints["strict_filtering"] = True
     if any(tok in text for tok in ["ultim", "reciente", "latest", "top", "primer"]):
@@ -301,11 +429,52 @@ def execute_analyzer_tool(
     active_skill = selected_skills[0] if selected_skills else selected_skill_world
     subquery_intents = [_infer_intents_for_subquery(sq, active_skill) for sq in subqueries]
     entities_by_subquery = [_extract_entities(sq) for sq in subqueries]
+    required_sources_by_subquery: List[List[str]] = []
+    for sq, intents, entities in zip(subqueries, subquery_intents, entities_by_subquery):
+        if active_skill == "contabilidad_automatica":
+            required_sources_by_subquery.append(_infer_finance_required_sources(sq, intents))
+        else:
+            db_files = entities.get("db_files", [])
+            required_sources_by_subquery.append(list(db_files) if isinstance(db_files, list) else [])
+
+    (
+        subqueries,
+        subquery_intents,
+        entities_by_subquery,
+        required_sources_by_subquery,
+        decomposition_strategy,
+    ) = _expand_finance_propositions(
+        user_prompt=user_prompt,
+        selected_skill_world=selected_skill_world,
+        subqueries=subqueries,
+        subquery_intents=subquery_intents,
+        entities_by_subquery=entities_by_subquery,
+        required_sources_by_subquery=required_sources_by_subquery,
+    )
+    subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
+    logic_form = " AND ".join(subqueries_logic)
     constraints_by_subquery = [
-        _derive_constraints(sq, entities, intents)
-        for sq, entities, intents in zip(subqueries, entities_by_subquery, subquery_intents)
+        _derive_constraints(sq, entities, intents, required_sources)
+        for sq, entities, intents, required_sources in zip(
+            subqueries,
+            entities_by_subquery,
+            subquery_intents,
+            required_sources_by_subquery,
+        )
     ]
     response_mode = _guess_response_mode(user_prompt, subqueries)
+    source_scope = _derive_source_scope(required_sources_by_subquery)
+    composition_mode = _derive_composition_mode(
+        selected_skill_world=selected_skill_world,
+        subquery_intents=subquery_intents,
+        required_sources_by_subquery=required_sources_by_subquery,
+    )
+    coverage_expectation = _derive_coverage_expectation(
+        response_mode=response_mode,
+        source_scope=source_scope,
+        composition_mode=composition_mode,
+        subquery_count=len(subqueries),
+    )
     selection_mode = "forced" if normalized_allowlist else "auto"
     world_contract: Dict[str, Any] = {}
     if skill_registry and active_skill:
@@ -333,7 +502,12 @@ def execute_analyzer_tool(
         "subqueries_logic": subqueries_logic,
         "subquery_intents": subquery_intents,
         "entities_by_subquery": entities_by_subquery,
+        "required_sources_by_subquery": required_sources_by_subquery,
         "constraints_by_subquery": constraints_by_subquery,
+        "source_scope": source_scope,
+        "composition_mode": composition_mode,
+        "coverage_expectation": coverage_expectation,
+        "decomposition_strategy": decomposition_strategy,
         "response_mode": response_mode,
     }
 
@@ -350,6 +524,7 @@ def execute_analyzer_tool(
         "selected_skill_world": selected_skill_world,
         "subquery_intents": subquery_intents,
         "entities_by_subquery": entities_by_subquery,
+        "required_sources_by_subquery": required_sources_by_subquery,
         "constraints_by_subquery": constraints_by_subquery,
         "world_contract": world_contract,
         "messages": [analyzer_msg],

@@ -5,6 +5,36 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agnostic_agent.graph.analyzer_node import execute_analyzer_node
 
 
+class _Skill:
+    def __init__(self, name, *, world=None):
+        self.name = name
+        self.world = world or name
+        self.description = name
+        self.tools = ["nl2sql"]
+        self.knowledge = []
+        self.intents = ["query_financial_data"]
+        self.entities = ["credito_id"]
+        self.planner_policy = {}
+        self.summarizer_policy = {}
+        self.validator_policy = {}
+        self.ui = {}
+        self.instructions = ""
+
+
+class _Registry:
+    def __init__(self, skills):
+        self._skills = {s.name: s for s in skills}
+
+    def get_skill(self, name):
+        return self._skills.get(name)
+
+    def get_world(self, name):
+        return self._skills.get(name)
+
+    def list_skills(self):
+        return list(self._skills.values())
+
+
 class _StubLLM:
     def __init__(self, content: str):
         self._content = content
@@ -61,3 +91,52 @@ def test_execute_analyzer_node_splits_multi_json_prompt():
     assert len(out["analyzer"]["subquery_intents"]) == 2
     assert len(out["analyzer"]["entities_by_subquery"]) == 2
     assert out["selected_skill_world"] == "contabilidad_instantanea"
+
+
+def test_execute_analyzer_node_expands_finance_query_into_multi_source_propositions():
+    llm_payload = json.dumps(
+        {
+            "subqueries": [
+                "dame información sobre el crédito LOC-0004 de tus bases de datos"
+            ],
+            "logic_form": "q1",
+            "selected_skills": ["contabilidad_automatica"],
+            "selected_skill_world": "contabilidad_automatica",
+        },
+        ensure_ascii=False,
+    )
+    state = {
+        "messages": [HumanMessage(content="dame información sobre el crédito LOC-0004 de tus bases de datos")],
+        "forced_skill": "contabilidad_automatica",
+        "skills_allowlist": ["contabilidad_automatica"],
+    }
+
+    out = execute_analyzer_node(
+        state,
+        tools=[],
+        cfg=None,
+        planner_llm=_StubLLM(llm_payload),
+        skill_registry=_Registry([_Skill("contabilidad_automatica")]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        sanitize_subquery_text=lambda s: str(s).strip(),
+        extract_top_level_json_objects=lambda _t: [],
+        is_placeholder_subquery=lambda _s: False,
+    )
+
+    analyzer = out["analyzer"]
+    assert analyzer["selected_skill_world"] == "contabilidad_automatica"
+    assert analyzer["propositional_logic"] == "q1 AND q2"
+    assert analyzer["source_scope"] == "multi_source"
+    assert analyzer["composition_mode"] == "merge"
+    assert analyzer["coverage_expectation"] == "composite"
+    assert analyzer["decomposition_strategy"] == "finance_cross_source_split"
+    assert analyzer["subqueries"] == [
+        "snapshot contable del crédito LOC-0004 en contabilidad.db",
+        "movimientos del crédito LOC-0004 en transacciones.db",
+    ]
+    assert analyzer["required_sources_by_subquery"] == [["contabilidad.db"], ["transacciones.db"]]
+    assert analyzer["entities_by_subquery"][0]["credito_id"] == "LOC-0004"
+    assert analyzer["entities_by_subquery"][1]["credito_id"] == "LOC-0004"

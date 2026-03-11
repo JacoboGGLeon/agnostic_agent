@@ -16,7 +16,12 @@ class AnalyzerResult(TypedDict, total=False):
     subqueries_logic: List[str]
     subquery_intents: List[List[str]]
     entities_by_subquery: List[Dict[str, Any]]
+    required_sources_by_subquery: List[List[str]]
     constraints_by_subquery: List[Dict[str, Any]]
+    source_scope: str
+    composition_mode: str
+    coverage_expectation: str
+    decomposition_strategy: str
     response_mode: str
 
 
@@ -69,6 +74,7 @@ class State(TypedDict, total=False):
     world_contract: Optional[Dict[str, Any]]
     subquery_intents: List[List[str]]
     entities_by_subquery: List[Dict[str, Any]]
+    required_sources_by_subquery: List[List[str]]
     constraints_by_subquery: List[Dict[str, Any]]
     forced_skill: Optional[str]
     skills_allowlist: Optional[List[str]]

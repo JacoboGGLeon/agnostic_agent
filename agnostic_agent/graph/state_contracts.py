@@ -21,6 +21,7 @@ _NODE_OUTPUT_ALLOWED: Dict[str, Set[str]] = {
         "selected_skill_world",
         "subquery_intents",
         "entities_by_subquery",
+        "required_sources_by_subquery",
         "constraints_by_subquery",
         "world_contract",
     },

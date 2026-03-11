@@ -88,7 +88,11 @@ def _extract_estatus_text(subquery_text: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def _guess_finance_db_hint(subquery_text: str) -> str:
+def _guess_finance_db_hint(subquery_text: str, required_sources: Optional[List[str]] = None) -> str:
+    if required_sources:
+        normalized = [str(source).lower() for source in required_sources if str(source).strip()]
+        if len(normalized) == 1:
+            return normalized[0]
     text = _sanitize_text(subquery_text).lower()
     if any(tok in text for tok in ["transaccion", "transacción", "movimiento", "pago", "desembolso", "penalizacion", "descuento", "fecha"]):
         return "transacciones.db"
@@ -365,6 +369,7 @@ def _deterministic_finance_calls(
     subquery_text: str,
     world_contract: Dict[str, Any],
     subquery_intents: List[str],
+    required_sources: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
     credito_id = _extract_credito_id(subquery_text)
     estatus = _extract_estatus_text(subquery_text)
@@ -422,23 +427,26 @@ def _deterministic_finance_calls(
         )
         desc_lines.append(f"step 1: tool=get_saneamiento_rate, estatus={estatus}")
     elif intent == "query_financial_data":
-        db_hint = _guess_finance_db_hint(subquery_text)
-        args: Dict[str, Any] = {
-            "user_request": _sanitize_text(subquery_text),
-            "db_path": db_hint,
-            "execute": True,
-        }
-        if credito_id:
-            args["entity_id"] = credito_id
-        calls.append(
-            {
-                "name": "nl2sql",
-                "args": args,
-                "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
-                "type": "tool_call",
+        source_list = [str(source).lower() for source in (required_sources or []) if str(source).strip()]
+        if not source_list:
+            source_list = [_guess_finance_db_hint(subquery_text)]
+        for source_idx, db_hint in enumerate(source_list, start=1):
+            args: Dict[str, Any] = {
+                "user_request": _sanitize_text(subquery_text),
+                "db_path": db_hint,
+                "execute": True,
             }
-        )
-        desc_lines.append(f"step 1: tool=nl2sql, db_path={db_hint}")
+            if credito_id:
+                args["entity_id"] = credito_id
+            calls.append(
+                {
+                    "name": "nl2sql",
+                    "args": args,
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            desc_lines.append(f"step {source_idx}: tool=nl2sql, db_path={db_hint}")
         if credito_id:
             desc_lines.append(f"entity_id={credito_id}")
     else:
@@ -527,6 +535,7 @@ def execute_planner_tool(
     analyzer = state.get("analyzer") or {}
     subqs = analyzer.get("subqueries") or []
     subquery_intents = analyzer.get("subquery_intents") or state.get("subquery_intents") or []
+    required_sources_by_subquery = analyzer.get("required_sources_by_subquery") or state.get("required_sources_by_subquery") or []
 
     active_skills = resolve_effective_skills(state, skill_registry)
     skill_mode = len(active_skills) > 0
@@ -631,11 +640,19 @@ def execute_planner_tool(
                 if isinstance(subquery_intents, list) and idx - 1 < len(subquery_intents) and isinstance(subquery_intents[idx - 1], list)
                 else _infer_finance_intents(str(subq))
             )
+            current_required_sources = (
+                required_sources_by_subquery[idx - 1]
+                if isinstance(required_sources_by_subquery, list)
+                and idx - 1 < len(required_sources_by_subquery)
+                and isinstance(required_sources_by_subquery[idx - 1], list)
+                else []
+            )
             calls, dag_nodes, desc_lines = _deterministic_finance_calls(
                 subquery_idx=idx,
                 subquery_text=str(subq),
                 world_contract=world_contract,
                 subquery_intents=current_intents,
+                required_sources=current_required_sources,
             )
             deterministic_calls.extend(calls)
             subq_call_count = len(calls)
