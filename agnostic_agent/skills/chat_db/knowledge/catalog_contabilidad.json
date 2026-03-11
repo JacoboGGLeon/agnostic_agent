@@ -1,82 +1,82 @@
 {
   "version": "2.0",
   "engine": "sqlite",
-  "source_db": "agnostic_agent\\skills\\nl2sql_sqlite\\knowledge\\contabilidad.db",
-  "allowed_schemas": [
-    "main"
-  ],
+  "source_db": "agnostic_agent/skills/nl2sql_sqlite/knowledge/contabilidad.db",
+  "allowed_schemas": ["main"],
   "defaults": {
-    "row_limit": 50
+    "row_limit": 50,
+    "currency": "moneda local",
+    "round_digits": 2
   },
   "business_glossary": {
-    "saldo_total": "Saldo reportado del credito",
-    "saneamiento_calculado": "Reserva calculada segun estatus"
+    "credito_id": "Identificador unico del credito con formato tipo LOC-0001.",
+    "estatus": "Estado del credito usado para interpretar riesgo y saneamiento.",
+    "saldo_total": "Saldo reportado vigente del credito al corte.",
+    "capital_vigente": "Componente principal del saldo total asociado al capital.",
+    "interes_vigente": "Interes devengado o vigente del credito.",
+    "saneamiento_calculado": "Reserva o provision reportada para el credito segun estatus."
   },
   "schemas": {
     "main": {
       "tables": {
         "estados_cuenta": {
-          "description": "Estado contable actual del credito, saldo y saneamiento reportado.",
-          "primary_key": [
-            "credito_id"
-          ],
+          "description": "Estado contable actual de cada credito. Contiene estatus, saldo total, componentes del saldo y saneamiento calculado.",
+          "primary_key": ["credito_id"],
           "columns": [
             {
               "name": "credito_id",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
-              "constraints": [
-                "PRIMARY KEY"
-              ]
+              "description": "Clave primaria del credito. Usar para filtros exactos y conciliacion 1-a-1.",
+              "examples": ["LOC-0001", "LOC-0004"],
+              "constraints": ["PRIMARY KEY"]
             },
             {
               "name": "cliente_id",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Identificador del cliente asociado al credito.",
+              "examples": ["CLI-0001", "CLI-0102"],
               "constraints": []
             },
             {
               "name": "estatus",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Estado crediticio usado para reglas de saneamiento y auditoria.",
+              "examples": ["Vigente / Al corriente", "Mora temprana (1-30 dias)"],
               "constraints": []
             },
             {
               "name": "saldo_total",
               "type": "REAL",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Saldo total reportado del credito al corte.",
+              "examples": [19789.9, 39336.16],
               "constraints": []
             },
             {
               "name": "capital_vigente",
               "type": "REAL",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Parte del saldo total que corresponde al capital vigente.",
+              "examples": [18000.0, 35000.0],
               "constraints": []
             },
             {
               "name": "interes_vigente",
               "type": "REAL",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Parte del saldo total que corresponde a intereses vigentes.",
+              "examples": [1789.9, 4336.16],
               "constraints": []
             },
             {
               "name": "saneamiento_calculado",
               "type": "REAL",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Provision o reserva reportada para el credito segun su estatus.",
+              "examples": [197.9, 1966.81],
               "constraints": []
             }
           ],
@@ -84,9 +84,7 @@
           "indexes": [
             {
               "name": "sqlite_autoindex_estados_cuenta_1",
-              "columns": [
-                "credito_id"
-              ],
+              "columns": ["credito_id"],
               "unique": true
             }
           ],
@@ -98,6 +96,6 @@
   },
   "relationships": [],
   "table_summaries": {
-    "estados_cuenta": "Estado contable actual del credito, saldo y saneamiento reportado."
+    "estados_cuenta": "Snapshot contable por credito con saldos, estatus y saneamiento."
   }
 }

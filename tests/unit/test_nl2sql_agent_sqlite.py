@@ -59,4 +59,6 @@ def test_nl2sql_sqlite_uses_entity_filters_and_finance_default_db():
     assert "credito_id = 'LOC-0004'" in (out.get("generated_sql") or "")
     where = out.get("where_clauses") or []
     assert any("LOC-0004" in str(item) for item in where)
+    assert str(out.get("catalog_path", "")).lower().endswith("catalog_contabilidad.json")
+    assert isinstance(out.get("catalog"), dict) and out["catalog"].get("engine") == "sqlite"
 

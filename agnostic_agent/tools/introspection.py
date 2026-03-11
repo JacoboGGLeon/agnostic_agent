@@ -347,6 +347,71 @@ def _discover_nl2sql_skill_db_paths() -> List[str]:
     return out
 
 
+def _discover_nl2sql_catalog_paths() -> List[str]:
+    out: List[str] = []
+    for knowledge_dir in _nl2sql_skill_knowledge_dirs():
+        for name in sorted(os.listdir(knowledge_dir)):
+            if name.lower().startswith("catalog_") and name.lower().endswith(".json"):
+                out.append(os.path.join(knowledge_dir, name))
+    return out
+
+
+def _load_json_if_exists(path: str) -> Dict[str, Any]:
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _catalog_for_db(db_path: str) -> Dict[str, Any]:
+    db_name = os.path.basename(db_path or "").lower()
+    for candidate in _discover_nl2sql_catalog_paths():
+        data = _load_json_if_exists(candidate)
+        source_db = str(data.get("source_db", "")).replace("/", os.sep).replace("\\", os.sep).lower()
+        if source_db.endswith(db_name):
+            data["catalog_path"] = candidate
+            return data
+        if db_name and db_name.replace(".db", "") in os.path.basename(candidate).lower():
+            data["catalog_path"] = candidate
+            return data
+    return {}
+
+
+def _catalog_schema(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
+    schemas = catalog.get("schemas") if isinstance(catalog.get("schemas"), dict) else {}
+    out: List[Dict[str, Any]] = []
+    for schema_name, schema_obj in schemas.items():
+        tables = schema_obj.get("tables") if isinstance(schema_obj, dict) else {}
+        if not isinstance(tables, dict):
+            continue
+        for table_name, meta in tables.items():
+            if not isinstance(meta, dict):
+                continue
+            out.append(
+                {
+                    "table": str(table_name),
+                    "schema": str(schema_name),
+                    "description": str(meta.get("description", "")),
+                    "columns": [
+                        {
+                            "name": str(c.get("name", "")),
+                            "type": str(c.get("type", "")),
+                            "description": str(c.get("description", "")),
+                            "examples": c.get("examples", []),
+                            "constraints": c.get("constraints", []),
+                        }
+                        for c in (meta.get("columns") or [])
+                        if isinstance(c, dict)
+                    ],
+                }
+            )
+    return out
+
+
 def _resolve_sqlite_db_candidates(db_path: str, user_request: str = "") -> List[str]:
     raw = (db_path or "").strip()
     candidates: List[str] = []
@@ -459,11 +524,20 @@ def _schema_match_score(user_request: str, schema: List[Dict[str, Any]]) -> int:
     best_score = 0
     for entry in schema:
         table_name = str(entry.get("table", ""))
+        table_desc = str(entry.get("description", ""))
+        glossary = entry.get("business_glossary") if isinstance(entry.get("business_glossary"), dict) else {}
         col_names = [str(c.get("name", "")) for c in entry.get("columns", [])]
         table_tokens = set(_tokenize(table_name))
+        table_tokens.update(_tokenize(table_desc))
         col_tokens = set()
         for name in col_names:
             col_tokens.update(_tokenize(name))
+        for c in entry.get("columns", []):
+            if isinstance(c, dict):
+                col_tokens.update(_tokenize(str(c.get("description", ""))))
+        for key, value in glossary.items():
+            col_tokens.update(_tokenize(str(key)))
+            col_tokens.update(_tokenize(str(value)))
         score = len(req_tokens.intersection(table_tokens)) * 3 + len(req_tokens.intersection(col_tokens))
         if score > best_score:
             best_score = score
@@ -479,10 +553,15 @@ def _guess_table(user_request: str, schema: List[Dict[str, Any]]) -> Optional[Di
     for entry in schema:
         table_name = entry.get("table", "")
         col_names = [str(c.get("name", "")) for c in entry.get("columns", [])]
+        table_desc = str(entry.get("description", ""))
         table_tokens = set(_tokenize(table_name))
+        table_tokens.update(_tokenize(table_desc))
         col_tokens = set()
         for name in col_names:
             col_tokens.update(_tokenize(name))
+        for c in entry.get("columns", []):
+            if isinstance(c, dict):
+                col_tokens.update(_tokenize(str(c.get("description", ""))))
         score = len(req_tokens.intersection(table_tokens)) * 3 + len(req_tokens.intersection(col_tokens))
         if "credito" in req_tokens and any("credito" in n.lower() for n in col_names):
             score += 2
@@ -628,17 +707,24 @@ def _select_best_db_for_request(
 ) -> Dict[str, Any]:
     candidates = _resolve_sqlite_db_candidates(db_path, user_request=user_request)
     if not candidates:
-        return {"db_path": _resolve_sqlite_db_path(db_path, user_request=user_request), "schema": [], "chosen_table": None}
+        return {"db_path": _resolve_sqlite_db_path(db_path, user_request=user_request), "schema": [], "chosen_table": None, "catalog": {}}
 
-    best: Dict[str, Any] = {"score": -1, "db_path": "", "schema": [], "chosen_table": None}
+    best: Dict[str, Any] = {"score": -1, "db_path": "", "schema": [], "chosen_table": None, "catalog": {}}
     for candidate in candidates:
+        catalog = _catalog_for_db(candidate)
         try:
-            schema = _sqlite_schema(candidate)
+            schema = _catalog_schema(catalog) if catalog else _sqlite_schema(candidate)
         except Exception:
             continue
         if not schema:
             continue
-        chosen_table = _guess_table(user_request, schema)
+        glossary = catalog.get("business_glossary") if isinstance(catalog.get("business_glossary"), dict) else {}
+        schema_scored: List[Dict[str, Any]] = []
+        for entry in schema:
+            new_entry = dict(entry)
+            new_entry["business_glossary"] = glossary
+            schema_scored.append(new_entry)
+        chosen_table = _guess_table(user_request, schema_scored)
         if not chosen_table:
             continue
         score = _schema_match_score(user_request, [chosen_table])
@@ -646,14 +732,15 @@ def _select_best_db_for_request(
             best = {
                 "score": score,
                 "db_path": candidate,
-                "schema": schema,
+                "schema": schema_scored,
                 "chosen_table": chosen_table,
+                "catalog": catalog,
             }
 
     if best.get("db_path"):
         return best
     fallback = _resolve_sqlite_db_path(db_path, user_request=user_request)
-    return {"db_path": fallback, "schema": [], "chosen_table": None}
+    return {"db_path": fallback, "schema": [], "chosen_table": None, "catalog": _catalog_for_db(fallback)}
 
 
 def _run_readonly_sql(db_path: str, sql: str) -> Dict[str, Any]:
@@ -690,7 +777,8 @@ def inspect_sqlite_schema(db_path: str = "", user_request: str = "") -> Dict[str
         schema = _sqlite_schema(target_db)
     except Exception as exc:
         return {"ok": False, "error": f"Failed to inspect schema: {exc}", "db_path": target_db}
-    return {"ok": True, "db_path": target_db, "schema": schema}
+    catalog = _catalog_for_db(target_db)
+    return {"ok": True, "db_path": target_db, "schema": schema, "catalog": catalog, "catalog_path": catalog.get("catalog_path", "")}
 
 
 @tool(mode="public")
@@ -728,6 +816,7 @@ def nl2sql_sqlite(
         }
 
     schema = selected.get("schema") if isinstance(selected.get("schema"), list) else []
+    catalog = selected.get("catalog") if isinstance(selected.get("catalog"), dict) else {}
     if not schema:
         try:
             schema = _sqlite_schema(target_db)
@@ -757,6 +846,8 @@ def nl2sql_sqlite(
         "chosen_table": plan["table"],
         "where_clauses": plan["where_clauses"],
         "schema": schema,
+        "catalog": catalog,
+        "catalog_path": catalog.get("catalog_path", "") if isinstance(catalog, dict) else "",
     }
 
     if execute:

@@ -1,74 +1,74 @@
 {
   "version": "2.0",
   "engine": "sqlite",
-  "source_db": "agnostic_agent\\skills\\nl2sql_sqlite\\knowledge\\transacciones.db",
-  "allowed_schemas": [
-    "main"
-  ],
+  "source_db": "agnostic_agent/skills/nl2sql_sqlite/knowledge/transacciones.db",
+  "allowed_schemas": ["main"],
   "defaults": {
-    "row_limit": 50
+    "row_limit": 50,
+    "currency": "moneda local",
+    "round_digits": 2
   },
   "business_glossary": {
-    "monto": "Importe del movimiento",
-    "tipo": "Tipo de flujo financiero"
+    "id": "Identificador unico del movimiento.",
+    "credito_id": "Credito al que pertenece el movimiento.",
+    "tipo": "Tipo de flujo financiero: DESEMBOLSO, PAGO, PENALIZACION o DESCUENTO.",
+    "monto": "Importe monetario del movimiento.",
+    "fecha": "Fecha operativa del movimiento en formato YYYY-MM-DD.",
+    "descripcion": "Texto narrativo del movimiento."
   },
   "schemas": {
     "main": {
       "tables": {
         "movimientos": {
-          "description": "Flujos operativos del credito con desembolsos, pagos, descuentos y penalizaciones.",
-          "primary_key": [
-            "id"
-          ],
+          "description": "Flujos operativos del credito. Registra desembolsos, pagos, penalizaciones y descuentos usados para conciliacion.",
+          "primary_key": ["id"],
           "columns": [
             {
               "name": "id",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
-              "constraints": [
-                "PRIMARY KEY"
-              ]
+              "description": "Clave primaria tecnica del movimiento.",
+              "examples": ["TXN-0001", "TXN-0100"],
+              "constraints": ["PRIMARY KEY"]
             },
             {
               "name": "credito_id",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Identificador del credito asociado al flujo.",
+              "examples": ["LOC-0001", "LOC-0004"],
               "constraints": []
             },
             {
               "name": "tipo",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Clasificacion del movimiento para conciliacion financiera.",
+              "examples": ["DESEMBOLSO", "PAGO", "PENALIZACION", "DESCUENTO"],
               "constraints": []
             },
             {
               "name": "monto",
               "type": "REAL",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Monto monetario del movimiento.",
+              "examples": [15000.0, 1200.5],
               "constraints": []
             },
             {
               "name": "fecha",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Fecha del movimiento, util para orden y filtros temporales.",
+              "examples": ["2025-01-31", "2025-02-15"],
               "constraints": []
             },
             {
               "name": "descripcion",
               "type": "TEXT",
               "nullable": true,
-              "description": "",
-              "examples": [],
+              "description": "Detalle narrativo del movimiento financiero.",
+              "examples": ["Pago parcial recibido", "Desembolso inicial del credito"],
               "constraints": []
             }
           ],
@@ -76,9 +76,7 @@
           "indexes": [
             {
               "name": "sqlite_autoindex_movimientos_1",
-              "columns": [
-                "id"
-              ],
+              "columns": ["id"],
               "unique": true
             }
           ],
@@ -90,6 +88,6 @@
   },
   "relationships": [],
   "table_summaries": {
-    "movimientos": "Flujos operativos del credito con desembolsos, pagos, descuentos y penalizaciones."
+    "movimientos": "Eventos transaccionales por credito para conciliacion y analitica financiera."
   }
 }
