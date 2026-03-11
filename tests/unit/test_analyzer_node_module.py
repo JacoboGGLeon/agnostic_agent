@@ -187,3 +187,56 @@ def test_execute_analyzer_node_expands_plain_text_batch_entities_into_atomic_sub
         {"credito_id": "LOC-0007"},
         {"credito_id": "LOC-0008"},
     ]
+
+
+def test_execute_analyzer_node_resolves_referential_batch_from_memory_context():
+    llm_payload = json.dumps(
+        {
+            "subqueries": ["concílialos"],
+            "logic_form": "q1",
+            "selected_skills": ["contabilidad_automatica"],
+            "selected_skill_world": "contabilidad_automatica",
+        },
+        ensure_ascii=False,
+    )
+    state = {
+        "messages": [HumanMessage(content="concílialos")],
+        "forced_skill": "contabilidad_automatica",
+        "skills_allowlist": ["contabilidad_automatica"],
+        "memory_context": {
+            "working_memory": {
+                "last_listed_entities_by_type": {
+                    "credito_id": ["LOC-0004", "LOC-0005", "LOC-0006"]
+                },
+                "active_entities_by_type": {
+                    "credito_id": ["LOC-0004", "LOC-0005", "LOC-0006"]
+                },
+                "last_operation": "data_lookup",
+            }
+        },
+    }
+
+    out = execute_analyzer_node(
+        state,
+        tools=[],
+        cfg=None,
+        planner_llm=_StubLLM(llm_payload),
+        skill_registry=_Registry([_Skill("contabilidad_automatica")]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        sanitize_subquery_text=lambda s: str(s).strip(),
+        extract_top_level_json_objects=lambda _t: [],
+        is_placeholder_subquery=lambda _s: False,
+    )
+
+    analyzer = out["analyzer"]
+    assert analyzer["propositional_logic"] == "q1 AND q2 AND q3"
+    assert analyzer["decomposition_strategy"] == "memory_reference_batch_split"
+    assert len(analyzer["subqueries"]) == 3
+    assert analyzer["entities_by_subquery"] == [
+        {"credito_id": "LOC-0004"},
+        {"credito_id": "LOC-0005"},
+        {"credito_id": "LOC-0006"},
+    ]

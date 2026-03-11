@@ -287,6 +287,7 @@ class TurnService:
         prompt_text: str,
         final_user: str,
         user_id: Optional[str],
+        out_state: State,
     ) -> None:
         try:
             write_memory(
@@ -295,6 +296,7 @@ class TurnService:
                 user_out=final_user,
                 user_id=user_id,
                 memory_cfg=self.memory_cfg,
+                out_state=out_state,
             )
         except Exception as e:
             # Log usage but don't fail turn
@@ -406,6 +408,7 @@ class TurnService:
                 prompt_text=prompt_text,
                 final_user=views["user"].final_answer,
                 user_id=meta["user_id"],
+                out_state=out_state,
             )
 
             output = AgentOutput(

@@ -23,6 +23,23 @@ _PLURAL_BATCH_HINTS = (
     "multiples",
     "múltiples",
 )
+_REFERENTIAL_HINTS = (
+    "estos",
+    "estas",
+    "esos",
+    "esas",
+    "aquellos",
+    "aquellas",
+    "listados",
+    "listadas",
+    "anteriores",
+    "mencionados",
+    "mencionadas",
+    "mismos",
+    "mismas",
+    "detalle",
+)
+_REFERENTIAL_PRONOUN_RE = re.compile(r"\b\w+(?:los|las)\b", flags=re.IGNORECASE)
 
 
 def _guess_response_mode(user_prompt: str, subqueries: List[str]) -> str:
@@ -64,6 +81,36 @@ def _build_world_contract(skill_registry: Any, skill_name: str) -> Dict[str, Any
     }
 
 
+def _normalize_entity_groups(value: Any) -> Dict[str, List[str]]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: Dict[str, List[str]] = {}
+    for key, items in value.items():
+        key_text = str(key).strip()
+        if not key_text:
+            continue
+        if isinstance(items, list):
+            normalized[key_text] = [str(item).strip() for item in items if str(item).strip()]
+        elif items not in (None, ""):
+            normalized[key_text] = [str(items).strip()]
+    return {key: values for key, values in normalized.items() if values}
+
+
+def _normalize_memory_context(memory_context: Any) -> Dict[str, Any]:
+    if not isinstance(memory_context, dict):
+        return {}
+    working = memory_context.get("working_memory")
+    if not isinstance(working, dict):
+        return {}
+    return {
+        "active_entities_by_type": _normalize_entity_groups(working.get("active_entities_by_type")),
+        "last_listed_entities_by_type": _normalize_entity_groups(working.get("last_listed_entities_by_type")),
+        "recent_entities_by_type": _normalize_entity_groups(working.get("recent_entities_by_type")),
+        "last_operation": str(working.get("last_operation") or "").strip(),
+        "focus_stack": list(working.get("focus_stack") or []),
+    }
+
+
 def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]:
     text = (subquery or "").lower()
     skill = (selected_skill or "").lower()
@@ -98,6 +145,11 @@ def _normalize_declared_entities(world_contract: Dict[str, Any]) -> List[str]:
 def _looks_like_batch_request(text: str) -> bool:
     lowered = (text or "").lower()
     return any(token in lowered for token in _PLURAL_BATCH_HINTS)
+
+
+def _looks_like_referential_request(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in _REFERENTIAL_HINTS) or bool(_REFERENTIAL_PRONOUN_RE.search(text or ""))
 
 
 def _extract_json_entity_batches(text: str, declared_entities: List[str]) -> Dict[str, List[str]]:
@@ -269,6 +321,119 @@ def _expand_batch_propositions(
     )
 
 
+def _resolve_entities_from_memory(
+    *,
+    subquery_text: str,
+    world_contract: Dict[str, Any],
+    entities: Dict[str, Any],
+    memory_context: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    declared_entities = _normalize_declared_entities(world_contract)
+    if not declared_entities:
+        return {}
+    if any(entity_name in entities and entities.get(entity_name) not in (None, "") for entity_name in declared_entities):
+        return {}
+    if not _looks_like_referential_request(subquery_text):
+        return {}
+
+    normalized_memory = _normalize_memory_context(memory_context)
+    sources = [
+        normalized_memory.get("last_listed_entities_by_type", {}),
+        normalized_memory.get("active_entities_by_type", {}),
+        normalized_memory.get("recent_entities_by_type", {}),
+    ]
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for entity_name in declared_entities:
+            values = source.get(entity_name)
+            if isinstance(values, list) and values:
+                return {entity_name: [str(value).strip() for value in values if str(value).strip()]}
+
+    focus_stack = normalized_memory.get("focus_stack", [])
+    if isinstance(focus_stack, list):
+        for focus in reversed(focus_stack):
+            if not isinstance(focus, dict):
+                continue
+            focus_entities = _normalize_entity_groups(focus.get("entities"))
+            for entity_name in declared_entities:
+                values = focus_entities.get(entity_name)
+                if values:
+                    return {entity_name: values}
+    return {}
+
+
+def _expand_memory_references(
+    *,
+    subqueries: List[str],
+    subquery_intents: List[List[str]],
+    entities_by_subquery: List[Dict[str, Any]],
+    required_sources_by_subquery: List[List[str]],
+    world_contract: Dict[str, Any],
+    memory_context: Dict[str, Any],
+) -> Tuple[List[str], List[List[str]], List[Dict[str, Any]], List[List[str]], str]:
+    expanded_subqueries: List[str] = []
+    expanded_intents: List[List[str]] = []
+    expanded_entities: List[Dict[str, Any]] = []
+    expanded_sources: List[List[str]] = []
+    changed = False
+
+    for subquery, intents, entities, required_sources in zip(
+        subqueries,
+        subquery_intents,
+        entities_by_subquery,
+        required_sources_by_subquery,
+    ):
+        memory_entities = _resolve_entities_from_memory(
+            subquery_text=subquery,
+            world_contract=world_contract,
+            entities=entities,
+            memory_context=memory_context,
+        )
+        if not memory_entities:
+            expanded_subqueries.append(subquery)
+            expanded_intents.append(intents)
+            expanded_entities.append(entities)
+            expanded_sources.append(required_sources)
+            continue
+
+        entity_name, entity_values = next(iter(memory_entities.items()))
+        if len(entity_values) == 1:
+            merged_entities = dict(entities)
+            merged_entities[entity_name] = entity_values[0]
+            expanded_subqueries.append(f'{subquery} {json.dumps({entity_name: entity_values[0]}, ensure_ascii=False)}'.strip())
+            expanded_intents.append(intents)
+            expanded_entities.append(merged_entities)
+            expanded_sources.append(required_sources)
+            changed = True
+            continue
+
+        batch_intent = _infer_batch_intent(intents, world_contract)
+        if not batch_intent:
+            expanded_subqueries.append(subquery)
+            expanded_intents.append(intents)
+            expanded_entities.append(entities)
+            expanded_sources.append(required_sources)
+            continue
+
+        changed = True
+        for entity_value in entity_values:
+            merged_entities = dict(entities)
+            merged_entities[entity_name] = entity_value
+            expanded_subqueries.append(f'{subquery} {json.dumps({entity_name: entity_value}, ensure_ascii=False)}'.strip())
+            expanded_intents.append([intents[0]] if intents else [batch_intent])
+            expanded_entities.append(merged_entities)
+            expanded_sources.append(list(required_sources))
+
+    return (
+        expanded_subqueries,
+        expanded_intents,
+        expanded_entities,
+        expanded_sources,
+        "memory_reference_resolution" if changed else "as_is",
+    )
+
+
 def _infer_finance_required_sources(subquery: str, intents: List[str]) -> List[str]:
     text = (subquery or "").lower()
     if any(intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} for intent in intents):
@@ -341,6 +506,22 @@ def _derive_coverage_expectation(
     if composition_mode in {"reconcile", "merge"} or source_scope == "multi_source" or subquery_count > 1:
         return "composite"
     return "summary"
+
+
+def _derive_decomposition_strategy(
+    *,
+    finance_strategy: str,
+    memory_strategy: str,
+    batch_strategy: str,
+    subquery_count: int,
+) -> str:
+    if batch_strategy != "as_is":
+        return batch_strategy
+    if memory_strategy != "as_is":
+        if subquery_count > 1:
+            return "memory_reference_batch_split"
+        return memory_strategy
+    return finance_strategy
 
 
 def _expand_finance_propositions(
@@ -455,6 +636,7 @@ def execute_analyzer_tool(
     is_placeholder_subquery: Any,
 ) -> Dict[str, Any]:
     messages = state.get("messages", [])
+    memory_context = state.get("memory_context") or {}
     user_messages = [m for m in messages if isinstance(m, human_message_type)]
     last_user = user_messages[-1] if user_messages else None
     user_text = last_user.content if isinstance(last_user, human_message_type) else ""
@@ -516,6 +698,11 @@ def execute_analyzer_tool(
     )
     if skills_catalog:
         sys_content += f"\n\nSKILLS DISPONIBLES (CATALOGO ESTRUCTURADO):\n{available_skills_txt}"
+    if isinstance(memory_context, dict) and memory_context:
+        sys_content += (
+            "\n\nMEMORY_CONTEXT (ESTRUCTURADO):\n"
+            f"{json.dumps(memory_context, ensure_ascii=False, indent=2)}"
+        )
     if cfg and not cfg.enable_thinking:
         sys_content += "\n\nCRITICAL: DO NOT use <think> tags. Respond ONLY with the JSON block."
 
@@ -688,6 +875,20 @@ def execute_analyzer_tool(
         subquery_intents,
         entities_by_subquery,
         required_sources_by_subquery,
+        memory_decomposition_strategy,
+    ) = _expand_memory_references(
+        subqueries=subqueries,
+        subquery_intents=subquery_intents,
+        entities_by_subquery=entities_by_subquery,
+        required_sources_by_subquery=required_sources_by_subquery,
+        world_contract=world_contract,
+        memory_context=memory_context,
+    )
+    (
+        subqueries,
+        subquery_intents,
+        entities_by_subquery,
+        required_sources_by_subquery,
         batch_decomposition_strategy,
     ) = _expand_batch_propositions(
         world_contract=world_contract,
@@ -735,7 +936,12 @@ def execute_analyzer_tool(
         "source_scope": source_scope,
         "composition_mode": composition_mode,
         "coverage_expectation": coverage_expectation,
-        "decomposition_strategy": batch_decomposition_strategy if batch_decomposition_strategy != "as_is" else decomposition_strategy,
+        "decomposition_strategy": _derive_decomposition_strategy(
+            finance_strategy=decomposition_strategy,
+            memory_strategy=memory_decomposition_strategy,
+            batch_strategy=batch_decomposition_strategy,
+            subquery_count=len(subqueries),
+        ),
         "response_mode": response_mode,
     }
 
