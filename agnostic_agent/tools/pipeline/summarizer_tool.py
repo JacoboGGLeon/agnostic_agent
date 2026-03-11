@@ -259,8 +259,30 @@ def execute_summarizer_tool(
             "resultado=dict",
             "se ejecutaron",
             "coverage",
+            "deterministic_contabilidad_plan",
+            "deterministic_chat_db_plan",
+            "planner_block_reason",
+            "missing_required_entity",
+            "no_op",
         ]
         return any(marker in low for marker in leak_markers)
+
+    def _render_planner_block_message() -> str:
+        planner_rows = state.get("planner_calls_by_subquery") or []
+        if not isinstance(planner_rows, list) or not planner_rows:
+            return ""
+        blocked = [row for row in planner_rows if int(row.get("planned_calls", 0) or 0) == 0]
+        if not blocked:
+            return ""
+        first = blocked[0] if isinstance(blocked[0], dict) else {}
+        block_reason = str(first.get("planner_block_reason") or first.get("skipped_reason") or "").strip()
+        missing_entities = first.get("missing_entities") or []
+        if block_reason == "missing_required_entity" and missing_entities:
+            missing_str = ", ".join(str(v) for v in missing_entities if str(v).strip())
+            return f"No pude ejecutar la solicitud porque falta informacion requerida: {missing_str}."
+        if block_reason:
+            return "No pude ejecutar la solicitud con la informacion disponible."
+        return ""
 
     def _render_grounded_user_answer(
         prompt_text: str,
@@ -415,6 +437,9 @@ def execute_summarizer_tool(
         executor_text = "No se ejecuto ninguna herramienta."
         catcher_text = "No hubo tool runs."
         summarizer_text = "Respuesta generada sin LLM, basada en registros locales (skills/tools/knowledge)."
+        if _looks_like_internal_leak(user_answer):
+            planner_block_answer = _render_planner_block_message()
+            user_answer = planner_block_answer or "No pude ejecutar la solicitud con la informacion disponible."
         user_answer = _normalize_text(user_answer)
         analyzer_text = _normalize_text(analyzer_text)
         planner_text = _normalize_text(planner_text)
@@ -491,11 +516,14 @@ def execute_summarizer_tool(
                 "Revisa EXECUTOR/CATCHER o el registro de tools."
             )
         else:
+            planner_block_answer = _render_planner_block_message()
             if not llm_clean and llm_raw and llm_raw.strip():
                 user_answer = (
                     "_(El modelo genero un razonamiento interno pero no una respuesta final. "
                     "Ver pestana 'Thinking' en el Inspector)_"
                 )
+            elif planner_block_answer:
+                user_answer = planner_block_answer
             else:
                 user_answer = llm_clean or "Que te gustaria hacer?"
 

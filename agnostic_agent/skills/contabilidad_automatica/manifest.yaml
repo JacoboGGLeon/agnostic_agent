@@ -26,8 +26,38 @@ tools:
     - query_transactions_db
     - query_accounting_db
     - get_saneamiento_rate
+    - lookup_finance_rule
+    - lookup_finance_dictionary
     - finance_sources_status
     - nl2sql
+intent_entity_requirements:
+  reconcile_credit:
+    required:
+      - credito_id
+  audit_drift:
+    required:
+      - credito_id
+  explain_rule:
+    required:
+      - estatus
+  batch_reconcile:
+    required:
+      - credito_id[]
+knowledge_access:
+  semantic_lookups:
+    - lookup_finance_rule
+    - lookup_finance_dictionary
+instruction_expectations:
+  critical_tools:
+    - reconcile_credit_accounting
+    - nl2sql
+    - get_saneamiento_rate
+    - lookup_finance_rule
+    - lookup_finance_dictionary
+  required_topics:
+    - batch_reconcile
+    - explain_rule
+    - query_financial_data
 knowledge:
   bindings:
     - ../contabilidad_instantanea/knowledge/contabilidad.db
@@ -58,6 +88,8 @@ planner:
       - nl2sql
     explain_rule:
       - get_saneamiento_rate
+      - lookup_finance_rule
+      - lookup_finance_dictionary
     batch_reconcile:
       - reconcile_credit_accounting
   intent_to_knowledge:

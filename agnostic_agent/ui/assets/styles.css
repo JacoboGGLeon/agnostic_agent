@@ -11,7 +11,7 @@
   --r: 18px;
   --r2: 14px;
   --shadow: 0 12px 35px rgba(0, 0, 0, .35);
-  --composer-height: 250px;
+  --composer-height: 300px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --font-ui: "Segoe UI", "Source Sans Pro", "Helvetica Neue", sans-serif;
 }
@@ -316,6 +316,97 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) {
 
 div[data-testid="stVerticalBlockBorderWrapper"]:has(.studio-composer-marker) [data-testid="stChatInput"] {
   margin-top: .85rem;
+}
+
+.composer-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+
+.composer-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.composer-context-card {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(73, 165, 230, .22);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03));
+}
+
+.composer-context-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.composer-context-title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.composer-context-copy {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+.composer-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.composer-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composer-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(73, 165, 230, .28);
+  background: rgba(255, 255, 255, .06);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.composer-pill-subtle {
+  border-color: rgba(255,255,255,.14);
+  background: rgba(255,255,255,.04);
+  color: var(--muted);
+}
+
+.composer-caption {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .stCheckbox label,

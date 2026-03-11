@@ -186,3 +186,45 @@ def test_execute_summarizer_node_uses_grounded_llm_for_user_view_when_safe():
 
     assert out["user_out"] == "Los dos creditos con saldo mas alto ya quedaron identificados."
     assert "dev:" in out["dev_out"]
+
+
+def test_execute_summarizer_node_hides_internal_planner_tokens_when_no_tools():
+    state = {
+        "messages": [HumanMessage(content="explicame la regla")],
+        "tool_runs": [],
+        "llm_clean_out": "deterministic_contabilidad_plan",
+        "planner_calls_by_subquery": [
+            {
+                "subquery_idx": 1,
+                "planned_calls": 0,
+                "planner_block_reason": "missing_required_entity",
+                "missing_entities": ["estatus"],
+            }
+        ],
+        "analyzer": {"subqueries": ["q1"]},
+        "planner_trajs": [{"subquery": "q1", "description": "planner block"}],
+        "executor_steps": [],
+    }
+
+    out = execute_summarizer_node(
+        state,
+        skill_registry=None,
+        tools=[],
+        cfg=None,
+        planner_llm=_StubPlannerLLM("unused"),
+        resolve_effective_skills=_resolve_effective_skills,
+        json_default=_default_json,
+        summarize_tool_runs=_summarize_tool_runs,
+        summarize_tool_runs_compact=_summarize_tool_runs_compact,
+        build_response_bundle=_build_response_bundle,
+        render_response_bundle=_render_response_bundle,
+        build_user_answer_from_runs=_build_user_answer_from_runs,
+        is_technical_answer=_is_technical_answer,
+        find_last_assistant_real=_find_last_assistant_real,
+        extract_tool_calls=_extract_tool_calls,
+        coerce_content_str=_coerce_content_str,
+        strip_think=_strip_think,
+    )
+
+    assert "deterministic_contabilidad_plan" not in out["user_out"]
+    assert "estatus" in out["user_out"].lower()

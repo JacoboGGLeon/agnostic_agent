@@ -9,6 +9,8 @@ from agnostic_agent.tools.introspection import inspect_sqlite_schema, nl2sql
 
 def _infer_intent(user_request: str) -> str:
     text = (user_request or "").lower()
+    if any(tok in text for tok in ["lote", "batch", "varios", "lista de"]):
+        return "batch_query"
     if any(tok in text for tok in ["schema", "tabla", "columna", "estructura"]):
         return "explain_schema"
     if any(tok in text for tok in ["compar", " vs ", " contra "]):

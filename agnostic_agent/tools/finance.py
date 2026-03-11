@@ -168,6 +168,7 @@ _SANEAMIENTO_RATES_DEFAULT: Dict[str, float] = {
 }
 
 _RULES_CACHE: Dict[str, Any] = {"path": None, "mtime": None, "rates": None}
+_DICTIONARY_CACHE: Dict[str, Any] = {"path": None, "mtime": None, "entries": None}
 
 
 def _strict_rules_mode() -> bool:
@@ -179,6 +180,12 @@ def _parse_percent_to_rate(raw: str) -> float | None:
     if not match:
         return None
     return float(match.group(1)) / 100.0
+
+
+def get_known_finance_statuses() -> List[str]:
+    rates = _get_runtime_rates()
+    known = sorted(rates.keys())
+    return [status for status in known]
 
 
 def _load_rates_from_rules_md(path: Path) -> Dict[str, float]:
@@ -202,6 +209,79 @@ def _load_rates_from_rules_md(path: Path) -> Dict[str, float]:
             continue
         rates[_normalize_text(parts[0])] = rate
     return rates
+
+
+def _load_rule_rows_from_rules_md(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    rows: List[Dict[str, Any]] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or "Estatus" in stripped:
+            continue
+        if re.fullmatch(r"\|[-\s|:]+\|?", stripped):
+            continue
+        parts = [part.strip() for part in stripped.strip("|").split("|")]
+        if len(parts) < 3:
+            continue
+        rows.append(
+            {
+                "estatus": parts[0],
+                "dias_mora": parts[1],
+                "tasa_raw": parts[2],
+                "tasa": _parse_percent_to_rate(parts[2]),
+                "source_line": stripped,
+            }
+        )
+    return rows
+
+
+def _load_dictionary_entries(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    entries: List[Dict[str, Any]] = []
+    current_source = ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            current_source = stripped.lstrip("#").strip()
+            continue
+        if not stripped.startswith("|") or "Columna" in stripped:
+            continue
+        if re.fullmatch(r"\|[-\s|:]+\|?", stripped):
+            continue
+        parts = [part.strip() for part in stripped.strip("|").split("|")]
+        if len(parts) < 3:
+            continue
+        term = parts[0].strip("`")
+        entries.append(
+            {
+                "term": term,
+                "type": parts[1],
+                "definition": parts[2],
+                "section": current_source,
+                "source_line": stripped,
+            }
+        )
+    return entries
+
+
+def _get_dictionary_entries() -> List[Dict[str, Any]]:
+    dict_path = _dictionary_md_path()
+    mtime = dict_path.stat().st_mtime if dict_path.exists() else None
+    if (
+        _DICTIONARY_CACHE.get("path") == str(dict_path)
+        and _DICTIONARY_CACHE.get("mtime") == mtime
+        and isinstance(_DICTIONARY_CACHE.get("entries"), list)
+    ):
+        return _DICTIONARY_CACHE["entries"]
+    entries = _load_dictionary_entries(dict_path)
+    _DICTIONARY_CACHE["path"] = str(dict_path)
+    _DICTIONARY_CACHE["mtime"] = mtime
+    _DICTIONARY_CACHE["entries"] = entries
+    return entries
 
 
 def _get_runtime_rates() -> Dict[str, float]:
@@ -269,6 +349,78 @@ def get_saneamiento_rate(estatus: str) -> Dict[str, Any]:
         "rules_path": str(_rules_md_path()),
         "dictionary_path": str(_dictionary_md_path()),
         "strict_rules_mode": _strict_rules_mode(),
+    }
+
+
+@tool(mode="public")
+def lookup_finance_rule(query: str, estatus: str = "") -> Dict[str, Any]:
+    """
+    Busca evidencia semántica en rules.md para reglas financieras o de saneamiento.
+    """
+    rules_path = _rules_md_path()
+    rows = _load_rule_rows_from_rules_md(rules_path)
+    query_norm = _normalize_text(query)
+    estatus_norm = _normalize_text(estatus)
+    best: Dict[str, Any] = {}
+    best_score = -1
+    for row in rows:
+        status_norm = _normalize_text(row.get("estatus", ""))
+        score = 0
+        if estatus_norm and status_norm == estatus_norm:
+            score += 4
+        if status_norm and status_norm in query_norm:
+            score += 3
+        if any(token and token in query_norm for token in [_normalize_text(row.get("dias_mora", "")), _normalize_text(row.get("tasa_raw", ""))]):
+            score += 1
+        if score > best_score:
+            best = row
+            best_score = score
+    found = bool(best) and best_score > 0
+    snippets = [best.get("source_line", "")] if found else []
+    return {
+        "found": found,
+        "query": query,
+        "estatus": estatus or best.get("estatus", ""),
+        "matched_rule": best if found else {},
+        "source_path": str(rules_path),
+        "evidence_snippets": snippets,
+        "confidence": round(best_score / 5.0, 2) if found else 0.0,
+    }
+
+
+@tool(mode="public")
+def lookup_finance_dictionary(term: str) -> Dict[str, Any]:
+    """
+    Busca definiciones semánticas en dictionary.md para términos del mundo financiero.
+    """
+    dict_path = _dictionary_md_path()
+    entries = _get_dictionary_entries()
+    term_norm = _normalize_text(term)
+    best: Dict[str, Any] = {}
+    best_score = -1
+    for entry in entries:
+        entry_term = _normalize_text(entry.get("term", ""))
+        entry_definition = _normalize_text(entry.get("definition", ""))
+        score = 0
+        if term_norm == entry_term:
+            score += 4
+        if term_norm and term_norm in entry_term:
+            score += 3
+        if term_norm and term_norm in entry_definition:
+            score += 2
+        if score > best_score:
+            best = entry
+            best_score = score
+    found = bool(best) and best_score > 0
+    return {
+        "found": found,
+        "term": term,
+        "matched_term": best.get("term", "") if found else "",
+        "definition": best.get("definition", "") if found else "",
+        "section": best.get("section", "") if found else "",
+        "source_path": str(dict_path),
+        "confidence": round(best_score / 4.0, 2) if found else 0.0,
+        "evidence_snippets": [best.get("source_line", "")] if found else [],
     }
 
 

@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 import yaml
 from agnostic_agent.protocols.smp import validate_skill_manifest
 from agnostic_agent.runtime import append_tep_report, assess_skill_maturity
+from agnostic_agent.skill_contracts import build_skill_capability_contract
+from agnostic_agent.skill_validator import build_skill_consistency_report
 
 
 def _parse_semver(value: Optional[str]) -> tuple[int, int, int]:
@@ -39,6 +41,9 @@ class Skill:
     planner_policy: Dict[str, Any] = field(default_factory=dict)
     summarizer_policy: Dict[str, Any] = field(default_factory=dict)
     validator_policy: Dict[str, Any] = field(default_factory=dict)
+    intent_entity_requirements: Dict[str, Any] = field(default_factory=dict)
+    knowledge_access: Dict[str, Any] = field(default_factory=dict)
+    instruction_expectations: Dict[str, Any] = field(default_factory=dict)
     ui: Dict[str, Any] = field(default_factory=dict)
     aliases: List[str] = field(default_factory=list)
     hidden: bool = False
@@ -52,6 +57,8 @@ class Skill:
     input_schema: Optional[str] = None
     output_schema: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    capability_contract: Dict[str, Any] = field(default_factory=dict)
+    consistency_report: Dict[str, Any] = field(default_factory=dict)
 
 
 class SkillRegistry:
@@ -118,6 +125,9 @@ class SkillRegistry:
             planner_policy=(meta.get("planner") if isinstance(meta.get("planner"), dict) else {}),
             summarizer_policy=(meta.get("summarizer") if isinstance(meta.get("summarizer"), dict) else {}),
             validator_policy=(meta.get("validator") if isinstance(meta.get("validator"), dict) else {}),
+            intent_entity_requirements=(meta.get("intent_entity_requirements") if isinstance(meta.get("intent_entity_requirements"), dict) else {}),
+            knowledge_access=(meta.get("knowledge_access") if isinstance(meta.get("knowledge_access"), dict) else {}),
+            instruction_expectations=(meta.get("instruction_expectations") if isinstance(meta.get("instruction_expectations"), dict) else {}),
             ui=(meta.get("ui") if isinstance(meta.get("ui"), dict) else {}),
             aliases=[str(a).strip() for a in aliases if str(a).strip()],
             hidden=hidden,
@@ -191,6 +201,9 @@ class SkillRegistry:
             planner_policy=(data.get("planner") if isinstance(data.get("planner"), dict) else {}),
             summarizer_policy=(data.get("summarizer") if isinstance(data.get("summarizer"), dict) else {}),
             validator_policy=(data.get("validator") if isinstance(data.get("validator"), dict) else {}),
+            intent_entity_requirements=(data.get("intent_entity_requirements") if isinstance(data.get("intent_entity_requirements"), dict) else {}),
+            knowledge_access=(data.get("knowledge_access") if isinstance(data.get("knowledge_access"), dict) else {}),
+            instruction_expectations=(data.get("instruction_expectations") if isinstance(data.get("instruction_expectations"), dict) else {}),
             ui=(data.get("ui") if isinstance(data.get("ui"), dict) else {}),
             aliases=[str(a).strip() for a in aliases if str(a).strip()],
             hidden=hidden,
@@ -237,6 +250,29 @@ class SkillRegistry:
             report_path = os.getenv("AGNOSTIC_TEP_REPORT_PATH", "documents/tep_reports.json")
             append_tep_report(report_path, report)
 
+    def _runtime_intents_from_skill(self, skill: Skill) -> List[str]:
+        file_path = str(skill.file_path or "").strip()
+        if not file_path:
+            return []
+        manifest_path = Path(file_path)
+        skill_path = manifest_path.parent / "skill.py"
+        if not skill_path.exists():
+            return []
+        text = skill_path.read_text(encoding="utf-8", errors="ignore")
+        intents: List[str] = []
+        for intent in skill.intents:
+            if f'"{intent}"' in text or f"'{intent}'" in text:
+                intents.append(intent)
+        return sorted(set(intents))
+
+    def _build_capability_views(self, skill: Skill) -> None:
+        runtime_intents = self._runtime_intents_from_skill(skill)
+        skill.metadata["runtime_intents"] = runtime_intents
+        consistency_report = build_skill_consistency_report(skill, tool_registry={})
+        # tool registry is filled later in load_skills via second pass
+        skill.consistency_report = consistency_report.to_dict()
+        skill.capability_contract = build_skill_capability_contract(skill, consistency_report).to_dict()
+
     def load_skills(self) -> None:
         """Scans for markdown and manifest skills and loads them."""
         self.skills = {}
@@ -264,7 +300,13 @@ class SkillRegistry:
             except Exception as e:
                 print(f"Error loading manifest skill from {manifest_path}: {e}")
 
+        from agnostic_agent.tools import TOOL_REGISTRY
+
         for skill in self.skills.values():
+            skill.metadata["runtime_intents"] = self._runtime_intents_from_skill(skill)
+            consistency_report = build_skill_consistency_report(skill, tool_registry=TOOL_REGISTRY)
+            skill.consistency_report = consistency_report.to_dict()
+            skill.capability_contract = build_skill_capability_contract(skill, consistency_report).to_dict()
             self._certify_loaded_skill(skill)
             for alias in skill.aliases:
                 if alias and alias != skill.name:

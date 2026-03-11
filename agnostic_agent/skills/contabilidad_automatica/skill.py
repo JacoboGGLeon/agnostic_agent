@@ -4,7 +4,14 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from agnostic_agent.tools.finance import finance_sources_status, get_saneamiento_rate, reconcile_credit_accounting
+from agnostic_agent.entity_resolution import resolve_required_entities
+from agnostic_agent.tools.finance import (
+    finance_sources_status,
+    get_saneamiento_rate,
+    lookup_finance_dictionary,
+    lookup_finance_rule,
+    reconcile_credit_accounting,
+)
 from agnostic_agent.tools.introspection import nl2sql
 
 
@@ -29,10 +36,17 @@ def _extract_credito_id(user_request: str, request: Dict[str, Any]) -> str:
 
 def _extract_estatus(user_request: str, request: Dict[str, Any]) -> str:
     explicit = str(request.get("estatus") or "").strip()
-    if explicit:
-        return explicit
-    match = re.search(r"estatus[:\s]+(.+)$", user_request or "", flags=re.IGNORECASE)
-    return match.group(1).strip() if match else ""
+    contract = {
+        "intent_entity_requirements": {"explain_rule": {"required": ["estatus"]}},
+        "entities": ["estatus"],
+    }
+    resolved = resolve_required_entities(
+        subquery_text=user_request,
+        intents=["explain_rule"],
+        world_contract=contract,
+        existing_entities={"estatus": explicit},
+    )
+    return str((resolved.get("resolved_entities") or {}).get("estatus") or "").strip()
 
 
 def _guess_finance_db(user_request: str, request: Dict[str, Any]) -> str:
@@ -102,19 +116,34 @@ class ContabilidadAutomaticaSkill:
 
         if intent == "explain_rule":
             if not estatus:
+                dictionary_lookup = lookup_finance_dictionary.invoke({"term": user_request})
+                dictionary_payload = dictionary_lookup if isinstance(dictionary_lookup, dict) else {"raw": dictionary_lookup}
+                artifacts.append(_artifact("semantic_evidence", dictionary_payload))
                 return {
-                    "status": "error",
-                    "outputs": {"skill": self.name, "version": self.version, "world": "contabilidad_automatica", "intent": intent},
-                    "artifacts": [],
-                    "errors": [{"code": "MISSING_ESTATUS", "message": "estatus is required to explain rules"}],
+                    "status": "success",
+                    "outputs": {
+                        "skill": self.name,
+                        "version": self.version,
+                        "world": "contabilidad_automatica",
+                        "intent": intent,
+                        "dictionary_evidence": dictionary_payload,
+                    },
+                    "artifacts": artifacts,
+                    "errors": [],
                     "metrics": {},
                     "children": [],
                 }
             rule = get_saneamiento_rate.invoke({"estatus": estatus})
+            rule_lookup = lookup_finance_rule.invoke({"query": user_request or estatus, "estatus": estatus})
+            dictionary_lookup = lookup_finance_dictionary.invoke({"term": "estatus"})
             sources = finance_sources_status.invoke({})
             rule_payload = rule if isinstance(rule, dict) else {"raw": rule}
+            lookup_payload = rule_lookup if isinstance(rule_lookup, dict) else {"raw": rule_lookup}
+            dictionary_payload = dictionary_lookup if isinstance(dictionary_lookup, dict) else {"raw": dictionary_lookup}
             sources_payload = sources if isinstance(sources, dict) else {"raw": sources}
             artifacts.append(_artifact("query_result", rule_payload))
+            artifacts.append(_artifact("semantic_evidence", lookup_payload))
+            artifacts.append(_artifact("semantic_evidence", dictionary_payload))
             artifacts.append(_artifact("source_status", sources_payload))
             return {
                 "status": "success",
@@ -125,6 +154,8 @@ class ContabilidadAutomaticaSkill:
                     "intent": intent,
                     "estatus": estatus,
                     "result": rule_payload,
+                    "rule_evidence": lookup_payload,
+                    "dictionary_evidence": dictionary_payload,
                     "sources": sources_payload,
                 },
                 "artifacts": artifacts,

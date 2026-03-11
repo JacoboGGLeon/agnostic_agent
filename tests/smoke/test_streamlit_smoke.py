@@ -1,5 +1,4 @@
 import os
-import sys
 from streamlit.testing.v1 import AppTest
 
 def test_streamlit_smoke():
@@ -18,16 +17,12 @@ def test_streamlit_smoke():
     at = AppTest.from_file(app_path)
     at.run(timeout=15)
     
-    # Assertions
     assert not at.exception, f"App crashed with exception: {at.exception}"
-    
-    # Initial Sidebar check
-    # Check if title contains "Agentic Lab" or known text
-    # Streamlit testing API is limited for complex HTML/Markdown parsing,
-    # but we can check if elements are rendered.
-    
-    # Check if sidebar image loaded (indicates sidebar rendered)
-    # len(at.sidebar.image) > 0
-    
-    # Check if tabs are rendered in main area
-    # len(at.tabs) >= 2
+    assert len(at.tabs) >= 2
+    assert [tab.label for tab in at.tabs[:2]] == ["Online Chat", "Offline Manager"]
+
+    offline_tab = at.tabs[1]
+    offline_markdown = [getattr(item, "value", "") for item in offline_tab.markdown]
+    assert any("Gestor de Conocimiento" in value for value in offline_markdown)
+    assert any("Tools Playground" in value for value in offline_markdown)
+    assert any("Gestor de Skills" in value for value in offline_markdown)

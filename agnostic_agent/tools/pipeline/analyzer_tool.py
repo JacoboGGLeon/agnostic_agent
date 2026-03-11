@@ -74,10 +74,13 @@ def _build_world_contract(skill_registry: Any, skill_name: str) -> Dict[str, Any
         "knowledge": list(skill_obj.knowledge or []),
         "intents": list(skill_obj.intents or []),
         "entities": list(skill_obj.entities or []),
+        "intent_entity_requirements": dict(getattr(skill_obj, "intent_entity_requirements", {}) or {}),
         "planner": dict(skill_obj.planner_policy or {}),
         "summarizer": dict(skill_obj.summarizer_policy or {}),
         "validator": dict(skill_obj.validator_policy or {}),
         "ui": dict(skill_obj.ui or {}),
+        "capability_contract": dict(getattr(skill_obj, "capability_contract", {}) or {}),
+        "consistency_report": dict(getattr(skill_obj, "consistency_report", {}) or {}),
     }
 
 

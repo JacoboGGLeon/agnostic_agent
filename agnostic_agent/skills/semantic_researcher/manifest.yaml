@@ -20,6 +20,27 @@ tools:
   - list_knowledge_sources
   - search_knowledge_base
   - rerank_docs
+intent_entity_requirements:
+  semantic_lookup:
+    required:
+      - query
+  semantic_synthesis:
+    required:
+      - query
+knowledge_access:
+  rag_index:
+    - knowledge/embeddings.db
+  semantic_docs:
+    - knowledge/rules.md
+    - knowledge/dictionary.md
+instruction_expectations:
+  critical_tools:
+    - list_knowledge_sources
+    - search_knowledge_base
+    - rerank_docs
+  required_topics:
+    - semantic_lookup
+    - semantic_synthesis
 knowledge:
   bindings:
   - knowledge/embeddings.db
@@ -39,8 +60,15 @@ planner:
     semantic_lookup:
     - search_knowledge_base
     - rerank_docs
+    semantic_synthesis:
+    - search_knowledge_base
+    - rerank_docs
   intent_to_knowledge:
     semantic_lookup:
+    - knowledge/embeddings.db
+    - knowledge/rules.md
+    - knowledge/dictionary.md
+    semantic_synthesis:
     - knowledge/embeddings.db
     - knowledge/rules.md
     - knowledge/dictionary.md

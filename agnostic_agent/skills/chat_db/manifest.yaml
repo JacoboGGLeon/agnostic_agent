@@ -26,6 +26,27 @@ tools:
     - nl2sql
     - inspect_sqlite_schema
     - execute_sql_readonly
+intent_entity_requirements:
+  explain_schema:
+    required:
+      - db_path
+  batch_query:
+    required: []
+knowledge_access:
+  sqlite_catalogs:
+    - knowledge/catalog_contabilidad.json
+    - knowledge/catalog_transacciones.json
+instruction_expectations:
+  critical_tools:
+    - nl2sql
+    - inspect_sqlite_schema
+    - execute_sql_readonly
+  required_topics:
+    - query_data
+    - aggregate_data
+    - compare_entities
+    - explain_schema
+    - batch_query
 knowledge:
   bindings:
     - ../nl2sql_sqlite/knowledge/contabilidad.db

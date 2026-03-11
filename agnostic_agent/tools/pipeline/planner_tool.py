@@ -7,6 +7,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from agnostic_agent.entity_resolution import planner_block_reason, resolve_required_entities
 from agnostic_agent.core.pipeline_v2.planner import (
     build_subqueries_from_prompt,
     flatten_tool_calls_by_subquery,
@@ -301,10 +302,13 @@ def _world_contract_for_active_skill(
         "knowledge": list(skill.knowledge or []),
         "intents": list(getattr(skill, "intents", []) or []),
         "entities": list(getattr(skill, "entities", []) or []),
+        "intent_entity_requirements": dict(getattr(skill, "intent_entity_requirements", {}) or {}),
         "planner": dict(getattr(skill, "planner_policy", {}) or {}),
         "summarizer": dict(getattr(skill, "summarizer_policy", {}) or {}),
         "validator": dict(getattr(skill, "validator_policy", {}) or {}),
         "ui": dict(getattr(skill, "ui", {}) or {}),
+        "capability_contract": dict(getattr(skill, "capability_contract", {}) or {}),
+        "consistency_report": dict(getattr(skill, "consistency_report", {}) or {}),
     }
 
 
@@ -363,6 +367,30 @@ def _build_dag_nodes_for_calls(
     return dag_nodes
 
 
+def _build_blocked_dag_node(
+    *,
+    subquery_idx: int,
+    subquery_text: str,
+    subquery_intents: List[str],
+    block_reason: str,
+    missing_entities: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    return [
+        {
+            "node_id": f"sq{subquery_idx}_n0",
+            "subquery_id": f"q{subquery_idx}",
+            "kind": "planner_block",
+            "name": block_reason or "planner_block",
+            "args": {"missing_entities": list(missing_entities or [])},
+            "depends_on": [],
+            "expected_artifact": "planner_block",
+            "success_condition": "planner_reported_block_reason",
+            "intent": subquery_intents[0] if subquery_intents else "general_query",
+            "subquery": _sanitize_text(subquery_text),
+        }
+    ]
+
+
 def _deterministic_finance_calls(
     *,
     subquery_idx: int,
@@ -370,13 +398,22 @@ def _deterministic_finance_calls(
     world_contract: Dict[str, Any],
     subquery_intents: List[str],
     required_sources: Optional[List[str]] = None,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
-    credito_id = _extract_credito_id(subquery_text)
-    estatus = _extract_estatus_text(subquery_text)
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str], str, List[str]]:
     intent = subquery_intents[0] if subquery_intents else "query_financial_data"
+    resolution = resolve_required_entities(
+        subquery_text=subquery_text,
+        intents=subquery_intents or [intent],
+        world_contract=world_contract,
+        existing_entities={"credito_id": _extract_credito_id(subquery_text), "estatus": _extract_estatus_text(subquery_text)},
+    )
+    resolved_entities = resolution.get("resolved_entities") if isinstance(resolution, dict) else {}
+    missing_entities = resolution.get("missing_entities") if isinstance(resolution, dict) else []
+    credito_id = str(resolved_entities.get("credito_id") or "").strip()
+    estatus = str(resolved_entities.get("estatus") or "").strip()
     calls: List[Dict[str, Any]] = []
     desc_lines: List[str] = []
     dag_nodes: List[Dict[str, Any]] = []
+    block_reason = ""
     if intent in {"reconcile_credit", "audit_drift", "batch_reconcile"} and credito_id:
         planner_policy = world_contract.get("planner") if isinstance(world_contract.get("planner"), dict) else {}
         intent_tools = planner_policy.get("intent_to_tools") if isinstance(planner_policy.get("intent_to_tools"), dict) else {}
@@ -416,16 +453,36 @@ def _deterministic_finance_calls(
             )
             desc_lines.append(f"step 1: tool=query_transactions_db, credito_id={credito_id}")
             desc_lines.append(f"step 2: tool=query_accounting_db, credito_id={credito_id}")
-    elif intent == "explain_rule" and estatus:
-        calls.append(
-            {
-                "name": "get_saneamiento_rate",
-                "args": {"estatus": estatus},
-                "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
-                "type": "tool_call",
-            }
-        )
-        desc_lines.append(f"step 1: tool=get_saneamiento_rate, estatus={estatus}")
+    elif intent == "explain_rule":
+        if estatus:
+            calls.append(
+                {
+                    "name": "get_saneamiento_rate",
+                    "args": {"estatus": estatus},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            calls.append(
+                {
+                    "name": "lookup_finance_rule",
+                    "args": {"query": _sanitize_text(subquery_text), "estatus": estatus},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            desc_lines.append(f"step 1: tool=get_saneamiento_rate, estatus={estatus}")
+            desc_lines.append(f"step 2: tool=lookup_finance_rule, estatus={estatus}")
+        else:
+            calls.append(
+                {
+                    "name": "lookup_finance_dictionary",
+                    "args": {"term": _sanitize_text(subquery_text)},
+                    "id": f"call_s{subquery_idx}_{uuid.uuid4().hex[:10]}",
+                    "type": "tool_call",
+                }
+            )
+            desc_lines.append("step 1: tool=lookup_finance_dictionary")
     elif intent == "query_financial_data":
         source_list = [str(source).lower() for source in (required_sources or []) if str(source).strip()]
         if not source_list:
@@ -450,14 +507,30 @@ def _deterministic_finance_calls(
         if credito_id:
             desc_lines.append(f"entity_id={credito_id}")
     else:
+        block_reason = planner_block_reason(missing_entities=missing_entities)
         desc_lines.append("Planner skipped deterministic finance calls for this subquery.")
-    dag_nodes = _build_dag_nodes_for_calls(
-        subquery_idx=subquery_idx,
-        subquery_text=subquery_text,
-        subquery_intents=subquery_intents or [intent],
-        subquery_calls=calls,
-    )
-    return calls, dag_nodes, desc_lines
+        if block_reason:
+            desc_lines.append(f"planner_block_reason={block_reason}")
+        if missing_entities:
+            desc_lines.append(f"missing_entities={missing_entities}")
+    if not calls and not block_reason:
+        block_reason = planner_block_reason(missing_entities=missing_entities)
+    if calls:
+        dag_nodes = _build_dag_nodes_for_calls(
+            subquery_idx=subquery_idx,
+            subquery_text=subquery_text,
+            subquery_intents=subquery_intents or [intent],
+            subquery_calls=calls,
+        )
+    else:
+        dag_nodes = _build_blocked_dag_node(
+            subquery_idx=subquery_idx,
+            subquery_text=subquery_text,
+            subquery_intents=subquery_intents or [intent],
+            block_reason=block_reason,
+            missing_entities=missing_entities,
+        )
+    return calls, dag_nodes, desc_lines, block_reason, list(missing_entities)
 
 
 def _deterministic_chat_db_calls(
@@ -647,7 +720,7 @@ def execute_planner_tool(
                 and isinstance(required_sources_by_subquery[idx - 1], list)
                 else []
             )
-            calls, dag_nodes, desc_lines = _deterministic_finance_calls(
+            calls, dag_nodes, desc_lines, block_reason, missing_entities = _deterministic_finance_calls(
                 subquery_idx=idx,
                 subquery_text=str(subq),
                 world_contract=world_contract,
@@ -664,6 +737,8 @@ def execute_planner_tool(
                     "description": _sanitize_text("\n".join(desc_lines)),
                     "subquery_id": f"q{idx}",
                     "intent": current_intents[0] if current_intents else "query_financial_data",
+                    "planner_block_reason": block_reason,
+                    "missing_entities": missing_entities,
                     "dag": dag_nodes,
                 }
             )
@@ -672,12 +747,14 @@ def execute_planner_tool(
                     "subquery_idx": idx,
                     "subquery": _sanitize_text(subq),
                     "planned_calls": subq_call_count,
-                    "skipped_reason": "" if subq_call_count else "missing_credito_id",
+                    "skipped_reason": "" if subq_call_count else block_reason,
+                    "planner_block_reason": block_reason,
+                    "missing_entities": missing_entities,
                 }
             )
 
         ai_msg = ai_message_type(
-            content="Deterministic accounting plan generated from contabilidad_instantanea contract.",
+            content="Deterministic accounting plan generated from contabilidad_automatica contract.",
             tool_calls=deterministic_calls,
             additional_kwargs={"dag_raw": "deterministic_contabilidad_plan"},
         )
@@ -686,8 +763,8 @@ def execute_planner_tool(
             "planner_trajs": deterministic_trajs,
             "planner_calls_by_subquery": planner_calls_by_subquery,
             "dags_by_subquery": dags_by_subquery,
-            "llm_raw_out": "deterministic_contabilidad_plan",
-            "llm_clean_out": "deterministic_contabilidad_plan",
+            "llm_raw_out": "",
+            "llm_clean_out": "",
             "_planner_scope_internal": planner_scope,
             "selected_skill_world": planner_scope["selected_skill_world"],
             "world_contract": world_contract,

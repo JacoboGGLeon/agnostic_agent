@@ -1,5 +1,6 @@
 import datetime
 import html
+from pathlib import Path
 from typing import List
 
 import markdown
@@ -17,8 +18,64 @@ from agnostic_agent.ui.panels.helpers import (
 from agnostic_agent.ui.panels.inspector import render_inspector
 
 
+def _format_skill_option(skill_name: str) -> str:
+    if skill_name == "Auto (Analyzer)":
+        return "Auto"
+    return str(skill_name).replace("_", " ").title()
+
+
+def _display_name_from_path(raw_value: str) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+    name = Path(value).name or value
+    stem = Path(name).stem or name
+    return stem.replace("_", " ")
+
+
+def _render_active_world_summary(skill_obj) -> None:
+    if skill_obj is None:
+        return
+    ui_meta = getattr(skill_obj, "ui", {}) if isinstance(getattr(skill_obj, "ui", {}), dict) else {}
+    world_label = str(ui_meta.get("world_label") or skill_obj.name).strip()
+    world_description = str(ui_meta.get("world_description") or skill_obj.description or "").strip()
+    tools = [str(tool_name).strip() for tool_name in (getattr(skill_obj, "tools", []) or []) if str(tool_name).strip()]
+    knowledge = [
+        _display_name_from_path(source)
+        for source in (getattr(skill_obj, "knowledge", []) or [])
+        if _display_name_from_path(source)
+    ]
+    tools_markup = "".join(f'<span class="composer-pill">{html.escape(tool)}</span>' for tool in tools)
+    knowledge_markup = "".join(f'<span class="composer-pill composer-pill-subtle">{html.escape(item)}</span>' for item in knowledge[:4])
+    knowledge_suffix = ""
+    if len(knowledge) > 4:
+        knowledge_suffix = f'<span class="composer-caption">+{len(knowledge) - 4} fuentes</span>'
+
+    st.markdown(
+        f"""
+        <div class="composer-context-card">
+          <div class="composer-context-head">
+            <div>
+              <div class="composer-context-title">{html.escape(world_label)}</div>
+              <div class="composer-context-copy">{html.escape(world_description)}</div>
+            </div>
+          </div>
+          <div class="composer-section-label">Tools disponibles</div>
+          <div class="composer-pill-row">{tools_markup or '<span class="composer-caption">Sin tools declaradas</span>'}</div>
+          <div class="composer-section-label">Knowledge activa</div>
+          <div class="composer-pill-row">{knowledge_markup or '<span class="composer-caption">Sin fuentes declaradas</span>'}{knowledge_suffix}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_online_tab(agent_factory, *, show_history: bool = True, show_inspector: bool = True):
     has_interaction = bool(st.session_state.get("messages"))
+    agent_error = str(st.session_state.get("agent_init_error") or "").strip()
+
+    if agent_error:
+        st.error(f"Error iniciando agente: {agent_error}")
 
     if show_history and has_interaction:
         feed_col, insp_col = st.columns([2.2, 1.0], gap="large")
@@ -96,23 +153,35 @@ def render_online_tab(agent_factory, *, show_history: bool = True, show_inspecto
 
     with st.container(border=True):
         st.markdown('<div class="studio-composer-marker"></div>', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="composer-shell">
+              <div class="composer-header">
+                <div>
+                  <div class="composer-title">Modo de trabajo</div>
+                  <div class="composer-subtitle">Selecciona un universo fijo o deja que el analyzer enrute automaticamente.</div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         selected_skill = st.selectbox(
-            "Skill de Prueba (Forzar contexto)",
+            "Modo de trabajo",
             ["Auto (Analyzer)"] + skills,
             index=0,
             key="debug_skill_selector",
-            help="Selecciona una skill especifica para ver sus herramientas asociadas.",
+            format_func=_format_skill_option,
+            label_visibility="collapsed",
+            help="Selecciona un mundo especifico para fijar el contexto de trabajo.",
         )
 
-        if selected_skill != "Auto (Analyzer)" and agent and agent.skill_registry:
+        if selected_skill == "Auto (Analyzer)":
+            st.caption("Auto: el Agentic OS selecciona el mundo mas adecuado para la solicitud.")
+        elif agent and agent.skill_registry:
             skill_obj = agent.skill_registry.get_skill(selected_skill)
-            if skill_obj:
-                tools_str = " | ".join([f"`{tool_name}`" for tool_name in skill_obj.tools])
-                st.caption(f"Tools Activas: {tools_str}")
-                if skill_obj.knowledge:
-                    know_str = ", ".join(skill_obj.knowledge)
-                    st.caption(f"Knowledge: {know_str}")
+            _render_active_world_summary(skill_obj)
 
         prompt = st.chat_input("Escribe tu mensaje...")
 

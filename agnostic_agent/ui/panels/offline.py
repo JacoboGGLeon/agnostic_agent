@@ -733,10 +733,31 @@ def render_offline_tab(agent_factory):
                     with col1 if i % 2 == 0 else col2:
                         with st.container(border=True):
                             st.markdown(f"**{skill.name}**")
+                            consistency = skill.consistency_report if isinstance(getattr(skill, "consistency_report", {}), dict) else {}
+                            capability_contract = skill.capability_contract if isinstance(getattr(skill, "capability_contract", {}), dict) else {}
+                            status = str(consistency.get("status") or "unknown").lower()
+                            status_label = {
+                                "healthy": "Healthy",
+                                "degraded": "Degraded",
+                                "broken": "Broken",
+                            }.get(status, "Unknown")
+                            status_color = {
+                                "healthy": "green",
+                                "degraded": "orange",
+                                "broken": "red",
+                            }.get(status, "gray")
                             
                             # Render YAML Metadata nicely
                             if skill.description:
                                 st.caption(skill.description)
+                            st.markdown(
+                                f"**Contract Status:** :{status_color}[{status_label}]",
+                                help="Salud funcional entre manifest, runtime, instructions y recursos declarados.",
+                            )
+                            st.caption(
+                                f"Tools {int(consistency.get('tools_resolved', 0) or 0)}/{len(skill.tools or [])} resueltas | "
+                                f"Knowledge {int(consistency.get('knowledge_resolved', 0) or 0)}/{len(skill.knowledge or [])} reachable"
+                            )
                             
                             if skill.tools:
                                 st.markdown(f"🛠 **Tools**: {', '.join([f'`{t}`' for t in skill.tools])}")
@@ -747,6 +768,19 @@ def render_offline_tab(agent_factory):
                             if getattr(skill, "instructions", None):
                                 with st.expander("Ver instrucciones completas", expanded=False):
                                     st.markdown(render_markdown(skill.instructions), unsafe_allow_html=True)
+                            issues = consistency.get("issues") or []
+                            warnings = consistency.get("warnings") or []
+                            if issues:
+                                with st.expander("Issues de contrato", expanded=False):
+                                    for issue in issues:
+                                        st.caption(f"- {issue}")
+                            elif warnings:
+                                with st.expander("Warnings de contrato", expanded=False):
+                                    for warning in warnings:
+                                        st.caption(f"- {warning}")
+                            if capability_contract:
+                                with st.expander("Ver contrato funcional", expanded=False):
+                                    st.json(capability_contract)
 
                             st.write("")  # Blank line spacer
                             is_on = st.toggle("Habilitado", value=skill.enabled, key=f"s_{skill.name}")

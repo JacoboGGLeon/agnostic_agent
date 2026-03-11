@@ -4,7 +4,16 @@ from agnostic_agent.graph.planner_node import execute_planner_node
 
 
 class _Skill:
-    def __init__(self, name, tools=None, knowledge=None, world=None, intents=None, planner_policy=None):
+    def __init__(
+        self,
+        name,
+        tools=None,
+        knowledge=None,
+        world=None,
+        intents=None,
+        planner_policy=None,
+        intent_entity_requirements=None,
+    ):
         self.name = name
         self.tools = tools or []
         self.knowledge = knowledge or []
@@ -13,9 +22,12 @@ class _Skill:
         self.intents = intents or []
         self.entities = []
         self.planner_policy = planner_policy or {}
+        self.intent_entity_requirements = intent_entity_requirements or {}
         self.summarizer_policy = {}
         self.validator_policy = {}
         self.ui = {}
+        self.capability_contract = {}
+        self.consistency_report = {}
 
 
 class _Registry:
@@ -395,6 +407,58 @@ def test_execute_planner_node_contabilidad_multi_source_query_plans_one_call_per
     assert all(call["args"]["entity_id"] == "LOC-0004" for call in ai_msg.tool_calls)
     assert out["planner_calls_by_subquery"][0]["planned_calls"] == 2
     assert len(out["dags_by_subquery"][0]["dag"]) == 2
+
+
+def test_execute_planner_node_contabilidad_explain_rule_uses_declared_rule_tools():
+    llm = _PlannerLLM([])
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {
+            "subqueries": ["Explicame la regla de saneamiento para Vigente / Al corriente"],
+            "subquery_intents": [["explain_rule"]],
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("get_saneamiento_rate"), _Tool("lookup_finance_rule"), _Tool("lookup_finance_dictionary")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry(
+            [
+                _Skill(
+                    "contabilidad_automatica",
+                    tools=["get_saneamiento_rate", "lookup_finance_rule", "lookup_finance_dictionary"],
+                    world="contabilidad_automatica",
+                    intents=["explain_rule"],
+                    planner_policy={
+                        "allowed_dag_patterns": ["deterministic_reconcile"],
+                        "intent_to_tools": {
+                            "explain_rule": ["get_saneamiento_rate", "lookup_finance_rule", "lookup_finance_dictionary"]
+                        },
+                    },
+                    intent_entity_requirements={"explain_rule": {"required": ["estatus"]}},
+                )
+            ]
+        ),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["contabilidad_automatica"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert [call["name"] for call in ai_msg.tool_calls] == ["get_saneamiento_rate", "lookup_finance_rule"]
+    assert ai_msg.tool_calls[0]["args"]["estatus"] == "vigente / al corriente"
+    assert out["planner_calls_by_subquery"][0]["skipped_reason"] == ""
+    assert out["planner_trajs"][0]["planner_block_reason"] == ""
 
 
 def test_execute_planner_node_contabilidad_batch_plain_text_entities_yields_one_call_per_subquery():
