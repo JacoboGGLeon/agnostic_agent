@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GobiernoCuentasContablesInput",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "credito_id": { "type": "string" },
+    "estatus": { "type": "string" },
+    "cuenta_contable": { "type": "string" },
+    "cliente_id": { "type": "string" },
+    "user_request": { "type": "string" }
+  }
+}

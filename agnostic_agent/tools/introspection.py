@@ -79,7 +79,7 @@ def _hkb_table_names(db_path: str) -> List[str]:
 @tool(mode="public")
 def list_skills(name_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Lista skills disponibles (name/description/tools/knowledge) desde `agnostic_agent/skills/*.md`.
+    Lista skills disponibles desde el registry activo, incluyendo paquetes con manifest y aliases canonicos.
     """
     reg = SkillRegistry(_default_skills_dir())
     flt = (name_filter or "").strip().lower()
@@ -104,7 +104,7 @@ def list_skills(name_filter: Optional[str] = None) -> List[Dict[str, Any]]:
 @tool(mode="public")
 def read_skill(skill_name: str) -> Dict[str, Any]:
     """
-    Lee una skill por nombre y devuelve metadata + instrucciones completas.
+    Lee una skill por nombre y devuelve metadata, herramientas declaradas, knowledge e instrucciones completas.
     """
     reg = SkillRegistry(_default_skills_dir())
     s = reg.get_skill(skill_name)
@@ -124,7 +124,7 @@ def read_skill(skill_name: str) -> Dict[str, Any]:
 @tool(mode="public")
 def list_tools(name_filter: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Lista tools disponibles (name/description/args).
+    Lista tools disponibles con descripcion, argumentos y modo de exposicion.
     """
     flt = (name_filter or "").strip().lower()
     rows: List[Dict[str, Any]] = []
@@ -149,7 +149,7 @@ def list_tools(name_filter: Optional[str] = None) -> List[Dict[str, Any]]:
 @tool(mode="public")
 def read_tool(tool_name: str) -> Dict[str, Any]:
     """
-    Devuelve detalle de una tool: description, args y metadata agnÃ³stica.
+    Devuelve detalle de una tool: descripcion, args, tags y metadata agnostica.
     """
     t = _find_tool(tool_name)
     if not t:

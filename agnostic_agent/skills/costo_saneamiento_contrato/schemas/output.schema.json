@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CostoSaneamientoContratoOutput",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["skill", "world"],
+  "properties": {
+    "skill": { "type": "string" },
+    "version": { "type": "string" },
+    "world": { "type": "string" },
+    "intent": { "type": "string" },
+    "result": { "type": "object" }
+  }
+}

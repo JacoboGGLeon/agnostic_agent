@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnalisisSaneamientoStageInput",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "credito_id": { "type": "string" },
+    "estatus": { "type": "string" },
+    "moneda": { "type": "string" },
+    "cuenta_contable": { "type": "string" },
+    "user_request": { "type": "string" }
+  }
+}

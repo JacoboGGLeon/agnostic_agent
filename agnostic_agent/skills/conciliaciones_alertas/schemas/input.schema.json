@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConciliacionesAlertasInput",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "credito_id": { "type": "string" },
+    "estatus": { "type": "string" },
+    "saldo_total": { "type": "number" },
+    "user_request": { "type": "string" }
+  }
+}

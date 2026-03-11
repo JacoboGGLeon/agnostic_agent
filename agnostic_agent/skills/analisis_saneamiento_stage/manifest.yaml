@@ -1,0 +1,122 @@
+api_version: skill/v1
+kind: skill
+name: analisis_saneamiento_stage
+version: 1.0.0
+world: analisis_saneamiento_stage
+description: Skill financiera para analisis de saneamiento y stage, despliegue multicapa, explicacion de deterioro o mejora, tendencias, proyecciones y soporte sobre incidencias.
+intents:
+  - portfolio_breakdown
+  - explain_deterioration
+  - generate_trends_and_projections
+  - support_and_fix_incidents
+entities:
+  - credito_id
+  - estatus
+  - moneda
+  - cuenta_contable
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - nl2sql
+    - get_saneamiento_rate
+    - lookup_finance_rule
+    - lookup_finance_dictionary
+    - reconcile_credit_accounting
+    - finance_sources_status
+intent_entity_requirements:
+  explain_deterioration:
+    required:
+      - credito_id
+knowledge_access:
+  semantic_lookups:
+    - lookup_finance_rule
+    - lookup_finance_dictionary
+instruction_expectations:
+  critical_tools:
+    - nl2sql
+    - get_saneamiento_rate
+    - lookup_finance_rule
+    - lookup_finance_dictionary
+    - reconcile_credit_accounting
+  required_topics:
+    - portfolio_breakdown
+    - explain_deterioration
+    - generate_trends_and_projections
+    - support_and_fix_incidents
+knowledge:
+  bindings:
+    - ../contabilidad_instantanea/knowledge/contabilidad.db
+    - ../contabilidad_instantanea/knowledge/transacciones.db
+    - ../contabilidad_instantanea/knowledge/rules.md
+    - ../contabilidad_instantanea/knowledge/dictionary.md
+    - ../chat_db/knowledge/catalog_contabilidad.json
+    - ../chat_db/knowledge/catalog_transacciones.json
+    - ../chat_db/knowledge/catalog_finance_world.json
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+planner:
+  allowed_dag_patterns:
+    - financial_query
+    - analytical_breakdown
+    - deterministic_reconcile
+  intent_to_tools:
+    portfolio_breakdown:
+      - nl2sql
+    explain_deterioration:
+      - reconcile_credit_accounting
+      - get_saneamiento_rate
+      - lookup_finance_rule
+    generate_trends_and_projections:
+      - nl2sql
+    support_and_fix_incidents:
+      - nl2sql
+      - lookup_finance_dictionary
+      - finance_sources_status
+  intent_to_knowledge:
+    portfolio_breakdown:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../chat_db/knowledge/catalog_finance_world.json
+    explain_deterioration:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+    generate_trends_and_projections:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../chat_db/knowledge/catalog_contabilidad.json
+    support_and_fix_incidents:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/dictionary.md
+      - ../contabilidad_instantanea/knowledge/rules.md
+  intent_to_workflows: {}
+  tool_priority:
+    - nl2sql
+    - reconcile_credit_accounting
+    - lookup_finance_rule
+  default_row_limits:
+    portfolio_breakdown: 50
+    generate_trends_and_projections: 50
+summarizer:
+  response_modes:
+    - user
+    - technical
+    - batch_summary
+  output_style: finance_analytics
+  required_sections:
+    - resumen
+    - explicacion
+validator:
+  coverage_rules:
+    - every_subquery_requires_artifact
+  required_artifacts:
+    - query_result
+ui:
+  world_label: Analisis Saneamiento y Stage
+  world_description: Skill para analitica, reporting y soporte multicapa sobre saneamiento.

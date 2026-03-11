@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CostoSaneamientoContratoInput",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "credito_id": { "type": "string" },
+    "estatus": { "type": "string" },
+    "saldo_total": { "type": "number" },
+    "periodo": { "type": "string" },
+    "user_request": { "type": "string" }
+  }
+}

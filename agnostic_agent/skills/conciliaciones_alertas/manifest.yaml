@@ -1,0 +1,119 @@
+api_version: skill/v1
+kind: skill
+name: conciliaciones_alertas
+version: 1.0.0
+world: conciliaciones_alertas
+description: Skill financiera para conciliaciones logicas, control inventario vs contable, alertas por variaciones atipicas, remediacion y analisis de incidencias recurrentes.
+intents:
+  - logical_reconciliation
+  - inventory_vs_accounting
+  - detect_significant_variations
+  - propose_remediation
+  - analyze_recurring_incidents
+entities:
+  - credito_id
+  - estatus
+  - saldo_total
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - reconcile_credit_accounting
+    - query_accounting_db
+    - query_transactions_db
+    - finance_sources_status
+    - nl2sql
+intent_entity_requirements:
+  logical_reconciliation:
+    required:
+      - credito_id
+  propose_remediation:
+    required:
+      - credito_id
+knowledge_access:
+  source_checks:
+    - finance_sources_status
+instruction_expectations:
+  critical_tools:
+    - reconcile_credit_accounting
+    - finance_sources_status
+    - nl2sql
+  required_topics:
+    - logical_reconciliation
+    - inventory_vs_accounting
+    - detect_significant_variations
+    - propose_remediation
+    - analyze_recurring_incidents
+knowledge:
+  bindings:
+    - ../contabilidad_instantanea/knowledge/contabilidad.db
+    - ../contabilidad_instantanea/knowledge/transacciones.db
+    - ../chat_db/knowledge/catalog_contabilidad.json
+    - ../chat_db/knowledge/catalog_transacciones.json
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+planner:
+  allowed_dag_patterns:
+    - deterministic_reconcile
+    - alert_detection
+    - financial_query
+  intent_to_tools:
+    logical_reconciliation:
+      - reconcile_credit_accounting
+    inventory_vs_accounting:
+      - nl2sql
+    detect_significant_variations:
+      - nl2sql
+    propose_remediation:
+      - reconcile_credit_accounting
+      - finance_sources_status
+    analyze_recurring_incidents:
+      - nl2sql
+      - finance_sources_status
+  intent_to_knowledge:
+    logical_reconciliation:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    inventory_vs_accounting:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../chat_db/knowledge/catalog_contabilidad.json
+    detect_significant_variations:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    propose_remediation:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    analyze_recurring_incidents:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+  intent_to_workflows: {}
+  tool_priority:
+    - reconcile_credit_accounting
+    - nl2sql
+    - finance_sources_status
+  default_row_limits:
+    detect_significant_variations: 50
+summarizer:
+  response_modes:
+    - user
+    - audit
+    - batch_summary
+  output_style: quality_control
+  required_sections:
+    - resumen
+    - alertas
+validator:
+  coverage_rules:
+    - every_subquery_requires_artifact
+  required_artifacts:
+    - query_result
+ui:
+  world_label: Conciliaciones y Alertas
+  world_description: Skill para control, calidad de datos, alertas y remediacion.

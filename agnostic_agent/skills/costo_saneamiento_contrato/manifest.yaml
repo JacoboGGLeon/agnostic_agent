@@ -1,0 +1,122 @@
+api_version: skill/v1
+kind: skill
+name: costo_saneamiento_contrato
+version: 1.0.0
+world: costo_saneamiento_contrato
+description: Skill financiera para determinar costo de saneamiento por contrato, identificar liberaciones y dotaciones, calcular costo mensual y explicar la trazabilidad por credito.
+intents:
+  - identify_liberaciones_dotaciones
+  - calculate_monthly_saneamiento_cost
+  - contract_traceability
+  - explain_saneamiento_cost
+entities:
+  - credito_id
+  - estatus
+  - saldo_total
+  - periodo
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - reconcile_credit_accounting
+    - query_transactions_db
+    - query_accounting_db
+    - get_saneamiento_rate
+    - lookup_finance_rule
+    - nl2sql
+intent_entity_requirements:
+  identify_liberaciones_dotaciones:
+    required:
+      - credito_id
+  contract_traceability:
+    required:
+      - credito_id
+  explain_saneamiento_cost:
+    required:
+      - credito_id
+knowledge_access:
+  semantic_lookups:
+    - lookup_finance_rule
+instruction_expectations:
+  critical_tools:
+    - reconcile_credit_accounting
+    - get_saneamiento_rate
+    - lookup_finance_rule
+    - nl2sql
+  required_topics:
+    - identify_liberaciones_dotaciones
+    - calculate_monthly_saneamiento_cost
+    - contract_traceability
+    - explain_saneamiento_cost
+knowledge:
+  bindings:
+    - ../contabilidad_instantanea/knowledge/contabilidad.db
+    - ../contabilidad_instantanea/knowledge/transacciones.db
+    - ../contabilidad_instantanea/knowledge/rules.md
+    - ../chat_db/knowledge/catalog_contabilidad.json
+    - ../chat_db/knowledge/catalog_transacciones.json
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+planner:
+  allowed_dag_patterns:
+    - deterministic_reconcile
+    - cost_traceability
+    - financial_query
+  intent_to_tools:
+    identify_liberaciones_dotaciones:
+      - reconcile_credit_accounting
+    calculate_monthly_saneamiento_cost:
+      - nl2sql
+    contract_traceability:
+      - reconcile_credit_accounting
+      - get_saneamiento_rate
+    explain_saneamiento_cost:
+      - reconcile_credit_accounting
+      - get_saneamiento_rate
+      - lookup_finance_rule
+  intent_to_knowledge:
+    identify_liberaciones_dotaciones:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+    calculate_monthly_saneamiento_cost:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../chat_db/knowledge/catalog_contabilidad.json
+    contract_traceability:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+    explain_saneamiento_cost:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/transacciones.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+  intent_to_workflows: {}
+  tool_priority:
+    - reconcile_credit_accounting
+    - get_saneamiento_rate
+    - nl2sql
+  default_row_limits:
+    calculate_monthly_saneamiento_cost: 50
+summarizer:
+  response_modes:
+    - user
+    - audit
+    - batch_summary
+  output_style: finance_costing
+  required_sections:
+    - resumen
+    - hallazgos
+validator:
+  coverage_rules:
+    - every_subquery_requires_artifact
+  required_artifacts:
+    - query_result
+ui:
+  world_label: Costo por Saneamiento
+  world_description: Skill para costo de saneamiento, dotaciones, liberaciones y trazabilidad por contrato.

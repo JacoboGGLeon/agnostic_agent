@@ -1,0 +1,128 @@
+api_version: skill/v1
+kind: skill
+name: gobierno_cuentas_contables
+version: 1.0.0
+world: gobierno_cuentas_contables
+description: Skill financiera para gobierno de cuentas contables, asignacion automatica por atributos del contrato, validacion normativa, generacion de asientos y entrega batch a aplicativos contables.
+intents:
+  - assign_accounting_account
+  - validate_accounting_compliance
+  - generate_accounting_entry
+  - export_accounting_batch
+entities:
+  - credito_id
+  - estatus
+  - cuenta_contable
+  - cliente_id
+entrypoint: skill:build
+instructions: instructions.md
+input_schema: schemas/input.schema.json
+output_schema: schemas/output.schema.json
+tools:
+  declared:
+    - nl2sql
+    - query_accounting_db
+    - query_transactions_db
+    - lookup_finance_dictionary
+    - lookup_finance_rule
+    - finance_sources_status
+    - get_saneamiento_rate
+intent_entity_requirements:
+  assign_accounting_account:
+    required:
+      - credito_id
+  validate_accounting_compliance:
+    required:
+      - credito_id
+  generate_accounting_entry:
+    required:
+      - credito_id
+knowledge_access:
+  semantic_lookups:
+    - lookup_finance_dictionary
+    - lookup_finance_rule
+instruction_expectations:
+  critical_tools:
+    - nl2sql
+    - finance_sources_status
+    - lookup_finance_dictionary
+    - lookup_finance_rule
+    - get_saneamiento_rate
+  required_topics:
+    - assign_accounting_account
+    - validate_accounting_compliance
+    - generate_accounting_entry
+    - export_accounting_batch
+knowledge:
+  bindings:
+    - ../contabilidad_instantanea/knowledge/contabilidad.db
+    - ../contabilidad_instantanea/knowledge/transacciones.db
+    - ../contabilidad_instantanea/knowledge/rules.md
+    - ../contabilidad_instantanea/knowledge/dictionary.md
+    - ../chat_db/knowledge/catalog_contabilidad.json
+composition:
+  callable_as_skill: true
+  can_call_skills: false
+testing:
+  mode: explicit_or_auto
+execution:
+  backend: native_python
+planner:
+  allowed_dag_patterns:
+    - governance_assignment
+    - governance_validation
+    - financial_query
+  intent_to_tools:
+    assign_accounting_account:
+      - nl2sql
+      - lookup_finance_dictionary
+    validate_accounting_compliance:
+      - nl2sql
+      - lookup_finance_rule
+      - finance_sources_status
+    generate_accounting_entry:
+      - nl2sql
+      - get_saneamiento_rate
+      - lookup_finance_rule
+    export_accounting_batch:
+      - nl2sql
+      - finance_sources_status
+  intent_to_knowledge:
+    assign_accounting_account:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/dictionary.md
+    validate_accounting_compliance:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+      - ../contabilidad_instantanea/knowledge/dictionary.md
+    generate_accounting_entry:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../contabilidad_instantanea/knowledge/rules.md
+    export_accounting_batch:
+      - ../contabilidad_instantanea/knowledge/contabilidad.db
+      - ../chat_db/knowledge/catalog_contabilidad.json
+  intent_to_workflows: {}
+  tool_priority:
+    - nl2sql
+    - lookup_finance_rule
+    - finance_sources_status
+  default_row_limits:
+    assign_accounting_account: 50
+    export_accounting_batch: 100
+summarizer:
+  response_modes:
+    - user
+    - technical
+    - batch_summary
+  output_style: accounting_governance
+  required_sections:
+    - resumen
+    - recomendaciones
+validator:
+  coverage_rules:
+    - every_subquery_requires_artifact
+  required_artifacts:
+    - query_result
+ui:
+  world_label: Gobierno de Cuentas Contables
+  world_description: Skill para asignacion, validacion, asientos y batch contable.
