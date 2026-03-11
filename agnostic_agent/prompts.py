@@ -69,6 +69,9 @@ REGLAS CRITICAS:
 4. No inventes skills; usa nombres exactos de available_skills.
 5. Si no se requiere tool, selected_skills puede ser [].
 6. required_items debe mapear 1:1 con subqueries (id=q1..qn).
+7. Si el usuario pide la misma operacion sobre multiples entidades homogeneas, genera una subquery por entidad.
+8. Cuando una consulta batch deba resolverse completamente, usa AND entre todas las proposiciones atomicas.
+9. Prefiere proposiciones atomicas autosuficientes, no subqueries ambiguas que mezclen varias entidades a la vez.
 
 HEURISTICAS UTILES:
 - Preguntas de documentos/KB -> semantic_researcher.

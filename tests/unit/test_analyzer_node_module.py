@@ -12,7 +12,7 @@ class _Skill:
         self.description = name
         self.tools = ["nl2sql"]
         self.knowledge = []
-        self.intents = ["query_financial_data"]
+        self.intents = ["query_financial_data", "reconcile_credit", "batch_reconcile"]
         self.entities = ["credito_id"]
         self.planner_policy = {}
         self.summarizer_policy = {}
@@ -140,3 +140,50 @@ def test_execute_analyzer_node_expands_finance_query_into_multi_source_propositi
     assert analyzer["required_sources_by_subquery"] == [["contabilidad.db"], ["transacciones.db"]]
     assert analyzer["entities_by_subquery"][0]["credito_id"] == "LOC-0004"
     assert analyzer["entities_by_subquery"][1]["credito_id"] == "LOC-0004"
+
+
+def test_execute_analyzer_node_expands_plain_text_batch_entities_into_atomic_subqueries():
+    llm_payload = json.dumps(
+        {
+            "subqueries": [
+                "Realiza la conciliación de los siguientes créditos: LOC-0004 LOC-0005 LOC-0006 LOC-0007 LOC-0008"
+            ],
+            "logic_form": "q1",
+            "selected_skills": ["contabilidad_automatica"],
+            "selected_skill_world": "contabilidad_automatica",
+        },
+        ensure_ascii=False,
+    )
+    state = {
+        "messages": [HumanMessage(content="Realiza la conciliación de los siguientes créditos: LOC-0004 LOC-0005 LOC-0006 LOC-0007 LOC-0008")],
+        "forced_skill": "contabilidad_automatica",
+        "skills_allowlist": ["contabilidad_automatica"],
+    }
+
+    out = execute_analyzer_node(
+        state,
+        tools=[],
+        cfg=None,
+        planner_llm=_StubLLM(llm_payload),
+        skill_registry=_Registry([_Skill("contabilidad_automatica")]),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        sanitize_subquery_text=lambda s: str(s).strip(),
+        extract_top_level_json_objects=lambda _t: [],
+        is_placeholder_subquery=lambda _s: False,
+    )
+
+    analyzer = out["analyzer"]
+    assert analyzer["propositional_logic"] == "q1 AND q2 AND q3 AND q4 AND q5"
+    assert analyzer["decomposition_strategy"] == "batch_entity_split"
+    assert analyzer["response_mode"] == "batch_summary"
+    assert len(analyzer["subqueries"]) == 5
+    assert analyzer["entities_by_subquery"] == [
+        {"credito_id": "LOC-0004"},
+        {"credito_id": "LOC-0005"},
+        {"credito_id": "LOC-0006"},
+        {"credito_id": "LOC-0007"},
+        {"credito_id": "LOC-0008"},
+    ]

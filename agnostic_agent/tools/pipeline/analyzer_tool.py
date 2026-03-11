@@ -7,6 +7,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+_GENERIC_ID_TOKEN_RE = re.compile(r"\b[A-Za-z]{2,}[A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+\b")
+_PLURAL_BATCH_HINTS = (
+    "siguientes",
+    "estos",
+    "estas",
+    "listados",
+    "listadas",
+    "todos",
+    "todas",
+    "varios",
+    "varias",
+    "multiple",
+    "múltiple",
+    "multiples",
+    "múltiples",
+)
+
 
 def _guess_response_mode(user_prompt: str, subqueries: List[str]) -> str:
     text = (user_prompt or "").lower()
@@ -22,6 +39,29 @@ def _guess_response_mode(user_prompt: str, subqueries: List[str]) -> str:
 def _contains_any(text: str, tokens: List[str]) -> bool:
     haystack = (text or "").lower()
     return any(token in haystack for token in tokens)
+
+
+def _build_world_contract(skill_registry: Any, skill_name: str) -> Dict[str, Any]:
+    if not skill_registry or not skill_name:
+        return {}
+    skill_obj = skill_registry.get_world(skill_name)
+    if skill_obj is None and hasattr(skill_registry, "get_skill"):
+        skill_obj = skill_registry.get_skill(skill_name)
+    if skill_obj is None:
+        return {}
+    return {
+        "name": skill_obj.name,
+        "world": skill_obj.world or skill_obj.name,
+        "description": skill_obj.description,
+        "tools": list(skill_obj.tools or []),
+        "knowledge": list(skill_obj.knowledge or []),
+        "intents": list(skill_obj.intents or []),
+        "entities": list(skill_obj.entities or []),
+        "planner": dict(skill_obj.planner_policy or {}),
+        "summarizer": dict(skill_obj.summarizer_policy or {}),
+        "validator": dict(skill_obj.validator_policy or {}),
+        "ui": dict(skill_obj.ui or {}),
+    }
 
 
 def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]:
@@ -48,6 +88,185 @@ def _infer_intents_for_subquery(subquery: str, selected_skill: str) -> List[str]
             return ["aggregate_data"]
         return ["query_data"]
     return ["general_query"]
+
+
+def _normalize_declared_entities(world_contract: Dict[str, Any]) -> List[str]:
+    entities = world_contract.get("entities") if isinstance(world_contract.get("entities"), list) else []
+    return [str(entity).strip() for entity in entities if str(entity).strip()]
+
+
+def _looks_like_batch_request(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in _PLURAL_BATCH_HINTS)
+
+
+def _extract_json_entity_batches(text: str, declared_entities: List[str]) -> Dict[str, List[str]]:
+    if not declared_entities:
+        return {}
+    batches: Dict[str, List[str]] = {}
+    for chunk in re.findall(r"\{[^{}]+\}", text or ""):
+        try:
+            parsed = json.loads(chunk)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        for entity_name in declared_entities:
+            if entity_name in parsed and parsed[entity_name] not in (None, ""):
+                batches.setdefault(entity_name, []).append(str(parsed[entity_name]).strip())
+    return {key: list(dict.fromkeys(values)) for key, values in batches.items() if values}
+
+
+def _extract_explicit_entity_mentions(text: str, declared_entities: List[str]) -> Dict[str, List[str]]:
+    batches: Dict[str, List[str]] = {}
+    for entity_name in declared_entities:
+        pattern = re.compile(rf"\b{re.escape(entity_name)}\b\s*[:=]\s*([A-Za-z0-9_.-]+)", flags=re.IGNORECASE)
+        matches = [match.group(1).strip() for match in pattern.finditer(text or "") if match.group(1).strip()]
+        if matches:
+            batches[entity_name] = list(dict.fromkeys(matches))
+    return batches
+
+
+def _extract_generic_id_batches(
+    text: str,
+    declared_entities: List[str],
+    existing_entities: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    id_entities = [entity for entity in declared_entities if entity.endswith("_id")]
+    if len(id_entities) != 1:
+        return {}
+    target_entity = id_entities[0]
+    if existing_entities.get(target_entity) not in (None, ""):
+        existing_value = str(existing_entities[target_entity]).strip()
+    else:
+        existing_value = ""
+    candidates = [
+        match.group(0).strip()
+        for match in _GENERIC_ID_TOKEN_RE.finditer(text or "")
+        if match.group(0).strip()
+    ]
+    if existing_value and existing_value not in candidates:
+        candidates.append(existing_value)
+    candidates = list(dict.fromkeys(candidates))
+    if len(candidates) <= 1:
+        return {}
+    return {target_entity: candidates}
+
+
+def _extract_batch_entity_groups(
+    *,
+    subquery_text: str,
+    world_contract: Dict[str, Any],
+    entities: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    declared_entities = _normalize_declared_entities(world_contract)
+    if not declared_entities:
+        return {}
+
+    for extractor in (
+        _extract_json_entity_batches,
+        _extract_explicit_entity_mentions,
+    ):
+        groups = extractor(subquery_text, declared_entities)
+        multi = {key: values for key, values in groups.items() if len(values) > 1}
+        if multi:
+            return multi
+
+    if _looks_like_batch_request(subquery_text):
+        groups = _extract_generic_id_batches(subquery_text, declared_entities, entities)
+        multi = {key: values for key, values in groups.items() if len(values) > 1}
+        if multi:
+            return multi
+    return {}
+
+
+def _infer_batch_intent(current_intents: List[str], world_contract: Dict[str, Any]) -> str:
+    world_intents = world_contract.get("intents") if isinstance(world_contract.get("intents"), list) else []
+    normalized_world_intents = [str(intent).strip() for intent in world_intents if str(intent).strip()]
+    if any(intent.startswith("batch_") for intent in current_intents):
+        return current_intents[0]
+    if len(normalized_world_intents) == 1 and normalized_world_intents[0].startswith("batch_"):
+        return normalized_world_intents[0]
+    if "reconcile_credit" in current_intents and "batch_reconcile" in normalized_world_intents:
+        return "batch_reconcile"
+    if any(intent in {"query_data", "query_financial_data"} for intent in current_intents):
+        if "batch_query" in normalized_world_intents:
+            return "batch_query"
+    batch_intents = [intent for intent in normalized_world_intents if intent.startswith("batch_")]
+    return batch_intents[0] if len(batch_intents) == 1 else ""
+
+
+def _strip_batch_values_from_text(base_text: str, entity_values: List[str]) -> str:
+    stripped = base_text or ""
+    for value in entity_values:
+        if not value:
+            continue
+        stripped = re.sub(rf"\b{re.escape(value)}\b", "", stripped)
+    stripped = re.sub(r"\s+", " ", stripped)
+    stripped = re.sub(r"\s+([,;:])", r"\1", stripped)
+    stripped = re.sub(r"([:;,]){2,}", r"\1", stripped)
+    return stripped.strip(" ,;")
+
+
+def _expand_batch_propositions(
+    *,
+    world_contract: Dict[str, Any],
+    subqueries: List[str],
+    subquery_intents: List[List[str]],
+    entities_by_subquery: List[Dict[str, Any]],
+    required_sources_by_subquery: List[List[str]],
+) -> Tuple[List[str], List[List[str]], List[Dict[str, Any]], List[List[str]], str]:
+    if len(subqueries) != 1:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+    base_subquery = subqueries[0]
+    current_intents = subquery_intents[0] if subquery_intents else []
+    current_entities = entities_by_subquery[0] if entities_by_subquery else {}
+    batch_entity_groups = _extract_batch_entity_groups(
+        subquery_text=base_subquery,
+        world_contract=world_contract,
+        entities=current_entities,
+    )
+    if not batch_entity_groups:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+
+    batch_intent = _infer_batch_intent(current_intents, world_contract)
+    if not batch_intent:
+        return subqueries, subquery_intents, entities_by_subquery, required_sources_by_subquery, "as_is"
+
+    entity_name, entity_values = next(iter(batch_entity_groups.items()))
+    cleaned_base = _strip_batch_values_from_text(base_subquery, entity_values)
+    if not cleaned_base:
+        cleaned_base = base_subquery
+
+    expanded_subqueries: List[str] = []
+    expanded_intents: List[List[str]] = []
+    expanded_entities: List[Dict[str, Any]] = []
+    expanded_required_sources: List[List[str]] = []
+    inherited_sources = required_sources_by_subquery[0] if required_sources_by_subquery else []
+    inherited_entities = {
+        key: value
+        for key, value in current_entities.items()
+        if key != entity_name and key != "db_files"
+    }
+    inherited_db_files = current_entities.get("db_files", []) if isinstance(current_entities.get("db_files"), list) else []
+
+    for entity_value in entity_values:
+        expanded_subqueries.append(f'{cleaned_base} {json.dumps({entity_name: entity_value}, ensure_ascii=False)}'.strip())
+        expanded_intents.append([current_intents[0]] if current_intents else [batch_intent])
+        entity_payload = dict(inherited_entities)
+        entity_payload[entity_name] = entity_value
+        if inherited_db_files:
+            entity_payload["db_files"] = list(inherited_db_files)
+        expanded_entities.append(entity_payload)
+        expanded_required_sources.append(list(inherited_sources))
+
+    return (
+        expanded_subqueries,
+        expanded_intents,
+        expanded_entities,
+        expanded_required_sources,
+        "batch_entity_split",
+    )
 
 
 def _infer_finance_required_sources(subquery: str, intents: List[str]) -> List[str]:
@@ -165,7 +384,7 @@ def _expand_finance_propositions(
     return expanded_subqueries, expanded_intents, expanded_entities, expanded_required_sources, "finance_cross_source_split"
 
 
-def _extract_entities(subquery: str) -> Dict[str, Any]:
+def _extract_entities(subquery: str, declared_entities: Optional[List[str]] = None) -> Dict[str, Any]:
     text = subquery or ""
     entities: Dict[str, Any] = {}
     raw_jsons = re.findall(r"\{[^{}]+\}", text)
@@ -178,9 +397,20 @@ def _extract_entities(subquery: str) -> Dict[str, Any]:
             for key, value in parsed.items():
                 if value not in (None, ""):
                     entities[str(key)] = value
-    loc_match = re.search(r"\bLOC-\d{3,}\b", text, flags=re.IGNORECASE)
-    if loc_match and "credito_id" not in entities:
-        entities["credito_id"] = loc_match.group(0).upper()
+    normalized_declared = [entity for entity in (declared_entities or []) if entity]
+    explicit_mentions = _extract_explicit_entity_mentions(text, normalized_declared)
+    for entity_name, values in explicit_mentions.items():
+        if values and entity_name not in entities:
+            entities[entity_name] = values[0]
+    id_entities = [entity for entity in normalized_declared if entity.endswith("_id")]
+    if len(id_entities) == 1 and id_entities[0] not in entities:
+        generic_tokens = [
+            match.group(0).strip()
+            for match in _GENERIC_ID_TOKEN_RE.finditer(text)
+            if match.group(0).strip()
+        ]
+        if generic_tokens:
+            entities[id_entities[0]] = generic_tokens[0]
     db_matches = re.findall(r"\b([A-Za-z0-9_.-]+\.db)\b", text, flags=re.IGNORECASE)
     if db_matches:
         entities["db_files"] = db_matches
@@ -408,6 +638,9 @@ def execute_analyzer_tool(
         skill_obj = skill_registry.get_world(selected_skill_world)
         if skill_obj:
             selected_skills = [skill_obj.name]
+    active_skill = selected_skills[0] if selected_skills else selected_skill_world
+    world_contract = _build_world_contract(skill_registry, active_skill)
+    declared_entities = _normalize_declared_entities(world_contract)
 
     subqueries = [sq for sq in (sanitize_subquery_text(s) for s in subqueries) if sq]
     if len(subqueries) == 1:
@@ -426,9 +659,8 @@ def execute_analyzer_tool(
     logic_form = " AND ".join(f"q{i+1}" for i in range(len(subqueries)))
 
     subqueries_logic = [f"q{i+1}" for i in range(len(subqueries))]
-    active_skill = selected_skills[0] if selected_skills else selected_skill_world
     subquery_intents = [_infer_intents_for_subquery(sq, active_skill) for sq in subqueries]
-    entities_by_subquery = [_extract_entities(sq) for sq in subqueries]
+    entities_by_subquery = [_extract_entities(sq, declared_entities) for sq in subqueries]
     required_sources_by_subquery: List[List[str]] = []
     for sq, intents, entities in zip(subqueries, subquery_intents, entities_by_subquery):
         if active_skill == "contabilidad_automatica":
@@ -446,6 +678,19 @@ def execute_analyzer_tool(
     ) = _expand_finance_propositions(
         user_prompt=user_prompt,
         selected_skill_world=selected_skill_world,
+        subqueries=subqueries,
+        subquery_intents=subquery_intents,
+        entities_by_subquery=entities_by_subquery,
+        required_sources_by_subquery=required_sources_by_subquery,
+    )
+    (
+        subqueries,
+        subquery_intents,
+        entities_by_subquery,
+        required_sources_by_subquery,
+        batch_decomposition_strategy,
+    ) = _expand_batch_propositions(
+        world_contract=world_contract,
         subqueries=subqueries,
         subquery_intents=subquery_intents,
         entities_by_subquery=entities_by_subquery,
@@ -476,23 +721,6 @@ def execute_analyzer_tool(
         subquery_count=len(subqueries),
     )
     selection_mode = "forced" if normalized_allowlist else "auto"
-    world_contract: Dict[str, Any] = {}
-    if skill_registry and active_skill:
-        skill_obj = skill_registry.get_world(active_skill)
-        if skill_obj:
-            world_contract = {
-                "name": skill_obj.name,
-                "world": skill_obj.world or skill_obj.name,
-                "description": skill_obj.description,
-                "tools": list(skill_obj.tools or []),
-                "knowledge": list(skill_obj.knowledge or []),
-                "intents": list(skill_obj.intents or []),
-                "entities": list(skill_obj.entities or []),
-                "planner": dict(skill_obj.planner_policy or {}),
-                "summarizer": dict(skill_obj.summarizer_policy or {}),
-                "validator": dict(skill_obj.validator_policy or {}),
-                "ui": dict(skill_obj.ui or {}),
-            }
     analyzer = {
         "input_payload": {"user_prompt": user_prompt},
         "selected_skill_world": selected_skill_world,
@@ -507,7 +735,7 @@ def execute_analyzer_tool(
         "source_scope": source_scope,
         "composition_mode": composition_mode,
         "coverage_expectation": coverage_expectation,
-        "decomposition_strategy": decomposition_strategy,
+        "decomposition_strategy": batch_decomposition_strategy if batch_decomposition_strategy != "as_is" else decomposition_strategy,
         "response_mode": response_mode,
     }
 

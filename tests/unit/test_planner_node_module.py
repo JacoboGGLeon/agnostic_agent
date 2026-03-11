@@ -397,6 +397,58 @@ def test_execute_planner_node_contabilidad_multi_source_query_plans_one_call_per
     assert len(out["dags_by_subquery"][0]["dag"]) == 2
 
 
+def test_execute_planner_node_contabilidad_batch_plain_text_entities_yields_one_call_per_subquery():
+    llm = _PlannerLLM([])
+    state = {
+        "messages": [HumanMessage(content="haz plan")],
+        "analyzer": {
+            "subqueries": [
+                'Realiza la conciliación de los siguientes créditos: {"credito_id": "LOC-0004"}',
+                'Realiza la conciliación de los siguientes créditos: {"credito_id": "LOC-0005"}',
+                'Realiza la conciliación de los siguientes créditos: {"credito_id": "LOC-0006"}',
+            ],
+            "subquery_intents": [["reconcile_credit"], ["reconcile_credit"], ["reconcile_credit"]],
+        },
+    }
+    out = execute_planner_node(
+        state,
+        tools=[_Tool("reconcile_credit_accounting")],
+        cfg=type("Cfg", (), {"enable_thinking": True, "max_retries": 0})(),
+        planner_llm=llm,
+        skill_registry=_Registry(
+            [
+                _Skill(
+                    "contabilidad_automatica",
+                    tools=["reconcile_credit_accounting"],
+                    world="contabilidad_automatica",
+                    intents=["reconcile_credit", "batch_reconcile"],
+                    planner_policy={
+                        "allowed_dag_patterns": ["deterministic_reconcile"],
+                        "intent_to_tools": {"reconcile_credit": ["reconcile_credit_accounting"]},
+                    },
+                )
+            ]
+        ),
+        ai_message_type=AIMessage,
+        human_message_type=HumanMessage,
+        system_message_type=SystemMessage,
+        planner_trajectory_type=lambda **kw: kw,
+        resolve_effective_skills=lambda _s, _r: ["contabilidad_automatica"],
+        is_pipeline_internal_ai=lambda _m: False,
+        is_ai_with_tool_calls=lambda _m: False,
+        strip_think=lambda t: t,
+        normalize_toolcalls_list=lambda calls: calls,
+        extract_tool_calls_from_jsonish_text=lambda _t: [],
+        coerce_content_str=lambda x: x if isinstance(x, str) else str(x),
+        canonical_tool_name=lambda n: str(n),
+    )
+
+    ai_msg = out["messages"][0]
+    assert len(ai_msg.tool_calls) == 3
+    assert [call["args"]["credito_id"] for call in ai_msg.tool_calls] == ["LOC-0004", "LOC-0005", "LOC-0006"]
+    assert [row["planned_calls"] for row in out["planner_calls_by_subquery"]] == [1, 1, 1]
+
+
 def test_execute_planner_node_chat_db_is_deterministic_by_intent():
     llm = _PlannerLLM([])  # Should not be used in deterministic branch.
     state = {
