@@ -381,6 +381,37 @@ def _catalog_for_db(db_path: str) -> Dict[str, Any]:
     return {}
 
 
+def _run_catalog_nl2sql_runtime(
+    *,
+    user_request: str,
+    db_path: str,
+    row_limit: int,
+    execute: bool,
+    entity_id: str = "",
+) -> Dict[str, Any]:
+    catalog = _catalog_for_db(db_path)
+    catalog_path = str(catalog.get("catalog_path", "")) if isinstance(catalog, dict) else ""
+    if not catalog_path:
+        return {}
+    try:
+        from agnostic_agent.tools.nl2sql_runtime import NL2SQLRuntimeAgent, NL2SQLRuntimeConfig
+
+        agent = NL2SQLRuntimeAgent(
+            NL2SQLRuntimeConfig(
+                catalog_path=catalog_path,
+                db_path=db_path,
+                row_limit=row_limit,
+                k=5,
+            )
+        )
+        out = agent.query(user_query=user_request, execute=execute, entity_id=entity_id)
+        if isinstance(out, dict):
+            out.setdefault("catalog_path", catalog_path)
+        return out
+    except Exception:
+        return {}
+
+
 def _catalog_schema(catalog: Dict[str, Any]) -> List[Dict[str, Any]]:
     schemas = catalog.get("schemas") if isinstance(catalog.get("schemas"), dict) else {}
     out: List[Dict[str, Any]] = []
@@ -814,6 +845,19 @@ def nl2sql_sqlite(
             "error": f"SQLite DB not found: {target_db or db_path}",
             "db_path": target_db or db_path,
         }
+
+    runtime_out = _run_catalog_nl2sql_runtime(
+        user_request=user_request,
+        db_path=target_db,
+        row_limit=row_limit,
+        execute=execute,
+        entity_id=entity_id,
+    )
+    if runtime_out:
+        runtime_out.setdefault("db_path", target_db)
+        runtime_out.setdefault("user_request", user_request)
+        runtime_out.setdefault("entity_id", entity_id or None)
+        return runtime_out
 
     schema = selected.get("schema") if isinstance(selected.get("schema"), list) else []
     catalog = selected.get("catalog") if isinstance(selected.get("catalog"), dict) else {}
